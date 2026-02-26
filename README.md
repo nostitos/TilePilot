@@ -32,8 +32,20 @@ TilePilot is currently optimized for:
 ## Requirements
 
 - macOS 13+
-- `yabai` (required for tiling/window control features)
-- `skhd` (optional, for shortcut management)
+
+## Dependencies (TilePilot can install these for you)
+
+TilePilot includes a setup flow that can bootstrap the common dependency stack on a fresh Mac:
+- `Homebrew`
+- `yabai`
+- `skhd`
+
+So `yabai` and `skhd` are not strict prerequisites to launch TilePilot.
+
+What still requires manual user approval:
+- Accessibility permissions (macOS)
+- Some Mission Control settings
+- Optional advanced `yabai` features that depend on SIP / scripting-addition setup
 
 ## Run (Development)
 

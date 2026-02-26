@@ -1,9 +1,9 @@
-# TilePilot (GUI for yabai/skhd) - Product Requirements Document (v1.1)
+# TilePilot (GUI for yabai/skhd) - Product Requirements Document (v1.2)
 
 ## Document Control
-- Version: 1.1
-- Date: 2026-02-25
-- Status: Draft (implementation-ready, priorities-aware)
+- Version: 1.2
+- Date: 2026-02-26
+- Status: Active development (foundation shipped, major product cycle replanned)
 - Platform: macOS (direct distribution, non-App-Store)
 
 ---
@@ -18,9 +18,44 @@ It improves observability, reliability, and ease of use without replacing the un
 - Enable click-first operation and gradual shortcut learning.
 - Never fake state when `yabai` is degraded, incompatible, or uncertain.
 
-### Strategy Note (v1.1)
-- Prioritize support-load reduction and recovery clarity before deeper GUI controls.
-- Treat capability detection ("what can work on this machine right now") as a first-class feature.
+### Strategy Note (v1.2)
+- Foundation/recovery work is largely built and should be treated as a shipped baseline.
+- The next major cycle should prioritize finishing product workflows (especially Actions) and improving discoverability/usability for powerful features.
+- Continue reducing jargon/noise in user-facing surfaces; show internals only when useful.
+- Keep capability detection and recovery logic as infrastructure, not the product "headline."
+
+---
+
+## 1.1) Implementation Snapshot (As Built vs Planned)
+
+### Completed / Mostly Implemented
+- Native menu bar app shell + main window (`TilePilot`) with left-click/right-click split.
+- Capability/health checks, setup checks, diagnostics export, command log.
+- Fresh Mac dependency bootstrap flow (Homebrew / `yabai` / `skhd`) via Terminal installer helper.
+- Live `yabai` polling + degraded mode/fallback view.
+- Window behavior controls:
+  - global default (float-by-default vs auto-tile)
+  - hover focus (`focus_follows_mouse`)
+  - per-app `Never Tile` / `Always Tile`
+  - managed `yabairc` section + backups
+- Focused window runtime actions (tile/float/toggle).
+- Shortcut viewer (`skhdrc` parsing) and safe `skhdrc` managed-section editor.
+- Developer packaging flow:
+  - `/Applications/TilePilot.app`
+  - hi-res icon bundled
+  - Developer ID signing supported
+
+### Partially Implemented / Needs Product Finish
+- **Actions tab**: foundational actions and gating exist, but catalog/organization/copy/discoverability are incomplete.
+- **Quick access menu**: improved and simplified, but still needs long-term curation and context-aware entries.
+- **Main view (`TilePilot`)**: live map exists, but "find a window / act on it quickly" workflows are still weak.
+- **Health / Setup / Config surfaces**: powerful, but some wording/information architecture still reflects internal build history.
+
+### Not Yet Implemented (High-Value Next Cycle)
+- Visual explainers/onboarding for advanced features (one concept at a time).
+- Strong "feature discovery" UX tied to real user problems ("Why do my windows move?" / "How do I keep this app floating?").
+- Finished `Actions` product experience (grouping, labels, macros, learnability, quick access integration).
+- Better search/filter/focus workflows in the main `TilePilot` view.
 
 ---
 
@@ -51,6 +86,8 @@ TilePilot addresses this with:
 - Clearly communicate degraded mode and limit risky actions.
 - Make essential config edits safe and reversible.
 - Keep UI responsive even during command failures/recovery.
+- Make advanced `yabai` features teachable through progressive, visual explainers.
+- Prefer user language (desktops/windows/actions) over engine jargon in primary surfaces.
 
 ## Non-Goals (v1)
 - Full parser/editor for all `skhd` grammar.
@@ -113,17 +150,16 @@ The product should support different build order priorities without changing the
 
 ## 7) User Experience & Information Architecture
 
-## Menu Bar Status Menu (always available)
-- Current focused space/layout (or explicit "unknown/degraded" status).
-- WM health badge + capability badge.
-- Quick actions:
-  - Balance
-  - Stack
-  - BSP + Balance
-  - Toggle Float
-  - Browser Relief
-- Entry point: **Open TilePilot Window**.
-- Entry point: **Run Doctor / Recovery Check**.
+## Menu Bar Quick Menu (always available)
+- Minimal, high-frequency quick access only (top-level):
+  - Open TilePilot
+  - Open Window Behavior
+  - Show Shortcuts
+  - Focused window float/tile actions
+  - Manual tiling / hover-focus recovery toggles
+  - Align tiles (balance)
+- Setup/diagnostics/admin actions are moved into a secondary submenu (not top-level clutter).
+- The menu should be curated as a daily-use surface, not a dump of every feature.
 
 ## First-Run / Recovery Wizard (v1)
 - Checklist-based onboarding flow.
@@ -135,15 +171,17 @@ The product should support different build order priorities without changing the
 
 ## TilePilot Window Tabs
 1. **TilePilot** (main view)
-   - Live map (Displays -> Spaces -> Windows).
-   - Recommended next actions.
-   - Source quality and stale-state labels.
+   - Live map (Displays -> Desktops -> Windows).
+   - Focused window controls.
+   - Problem banners only when action is needed (not constant status chatter).
+   - Future priority: search/find window + quick actions from list rows.
 2. **Actions**
    - Large click-first action cards.
-   - Macro buttons (e.g., send+follow, float+center).
-   - Per-action capability requirements + disabled reasons.
+   - Capability-gated actions with explicit disabled reasons.
+   - Needs finish cycle: better grouping/copy, macro explainers, and stronger quick-menu integration.
 3. **Shortcuts**
    - Searchable, categorized shortcut reference from `skhdrc`.
+   - Should also be a "learn the stack" surface, not only a raw parser output.
 4. **Config**
    - Safe editor for essential bindings + helper script args.
    - Restore backup / restore last known good.
@@ -151,6 +189,8 @@ The product should support different build order priorities without changing the
    - Permissions, daemon state, Mission Control checks, scripting-addition status, degraded status.
    - Event/command log + recovery actions.
    - Diagnostics export.
+6. **Setup**
+   - First-run/fresh-machine install helper and setup checklist.
 
 ---
 
@@ -212,6 +252,11 @@ The product should support different build order priorities without changing the
 - `window --toggle float`
 - One-shot "readable current space".
 - One-shot browser relief (`max windows per lane` setting).
+- Action labels and descriptions must use user-facing language first; engine commands/jargon are secondary.
+- The `Actions` tab is a core product surface and must be treated as unfinished until:
+  - action grouping is curated for daily use
+  - action copy explains outcome (not command syntax)
+  - advanced actions include contextual explainers/examples
 
 ## 8.5 Action Availability Contract
 - Every action has:
@@ -220,6 +265,24 @@ The product should support different build order priorities without changing the
   - `requiredCapabilities` (machine-readable list).
 - In degraded mode, workspace-precise actions are disabled with explicit reason text.
 - If an action command exits successfully but observable state does not change, show "no visible effect" feedback and suggested checks.
+
+## 8.5.1 Quick Access Curation (New v1.2)
+- The menu bar right-click menu must remain intentionally minimal at top level.
+- Top-level items should be limited to high-frequency actions users can reasonably perform many times per day.
+- Setup, diagnostics, system settings, and daemon management actions should be grouped under a secondary submenu.
+- Quick access entries should be reviewed/re-prioritized as major features are added (avoid legacy clutter drift).
+
+## 8.5.2 Visual Feature Explainers (New v1.2)
+- Add lightweight visual explainer modules/cards for advanced features, one concept at a time (examples):
+  - Manual Tiling Mode
+  - Hover Focus
+  - App Rules (`Default` vs `Never Tile` vs `Always Tile`)
+  - Browser Relief / layout macros
+- Each explainer should include:
+  - what problem it solves
+  - before/after behavior (visual or diagrammatic)
+  - one clear action button (enable/open/settings)
+- Explain features in user language first; advanced jargon may appear in secondary detail text.
 
 ## 8.6 Shortcuts
 - Parse `~/.config/skhd/skhdrc` line-by-line.
@@ -334,37 +397,62 @@ Exit degraded mode after `M` consecutive healthy samples (recommended `M=5`).
 
 ---
 
-## 13) Milestones and Timeline (Estimate: 15-19 dev days)
+## 13) Milestones and Timeline (Replanned v1.2 - Next Major Cycle)
 
-### Default order below assumes Priority Profile A (Support-Load Reduction First).
+### Baseline (Already Built / In App)
+- Foundation shell, command runner, setup/health checks, diagnostics export.
+- Live state polling + degraded mode fallback.
+- Window Behavior (manual tiling / hover focus / app rules) + managed `yabairc` editing.
+- Shortcuts and Config MVPs.
+- Basic Actions UI and menu bar quick access.
 
-1. **Foundation + Doctor Shell (3d)**
-   - App shell, menu bar, command runner, async execution model.
-   - SystemProfile detection + capability model types.
-   - Health badge plumbing.
-2. **Setup/Recovery Wizard + Health Checks (2-3d)**
-   - First-run checklist (permissions, Mission Control, daemon state).
-   - Re-runnable Doctor flow.
-   - Recovery action hooks + deep links.
-3. **Live State + Degraded Detection (2d)**
-   - Typed models, polling tiers, degraded detection, source labels.
-4. **Diagnostics + Reliability Hardening (2d)**
-   - Command/error categorization.
-   - Diagnostics export + issue-ready summary.
-   - Timeouts, retries, stale-state handling.
-5. **Actions UI (2d)**
-   - Action cards, availability gating, result feedback/toasts.
-   - Post-action verification messaging.
-6. **Shortcuts (2d)**
-   - Parse/categorize/search `skhdrc`.
-7. **Config MVP (2-3d)**
-   - Safe-section editor + diff preview + backup/restore/rollback.
-8. **Polish + Onboarding Copy (1-2d)**
-   - In-app docs, wording polish, empty/error states.
+### Next Major Cycle Goal
+Finish TilePilot as a coherent daily-use product by improving:
+- `Actions` completeness and learnability
+- visual explainers for advanced features
+- main-view find/control workflows
+- quick access curation and contextual shortcuts
 
-### Alternate ordering notes
-- **Priority B (New-User Adoption):** move Shortcuts to milestone 4, keep Doctor/Health before Actions.
-- **Priority C (Power-User Productivity):** move Actions UI to milestone 4, but do not skip capability gating.
+### Proposed next-cycle sequence (Estimate: 12-18 dev days)
+
+1. **Actions Completion Pass (3-4d)**
+   - Curate action groups for real user tasks (not command buckets only).
+   - Rewrite action copy to describe outcomes in user language.
+   - Add/finish high-value macros (browser relief, readable layouts, common recovery actions).
+   - Improve per-action disabled reasons and "why nothing changed" feedback.
+
+2. **Visual Explainers v1 (2-3d)**
+   - Add explainer cards/modules for:
+     - Manual Tiling Mode
+     - Hover Focus
+     - App Rules
+     - 1-2 powerful layout macros
+   - Include clear before/after explanation and one-click entry action.
+
+3. **Main View (`TilePilot`) Workflow Upgrade (2-3d)**
+   - Add search/filter for finding a window by app/title.
+   - Add row actions (`Focus`, `Tile`, `Float`, `Toggle`) where appropriate.
+   - Add optional "current desktop only" mode for lower noise.
+   - Continue removing non-actionable status/debug clutter.
+
+4. **Quick Access Menu Curation Pass (1-2d)**
+   - Context-aware top-level quick items (focused window present vs not present).
+   - Promote only frequent actions.
+   - Keep setup/diagnostics hidden behind submenu and trim further if needed.
+
+5. **Teachability + Copy Sweep (1-2d)**
+   - Wording consistency across tabs (`desktops`, `float`, `auto-tile`, etc.).
+   - Clarify advanced terms only where needed.
+   - Ensure UI answers "Do I care?" and "What should I do next?"
+
+6. **Reliability / UX Hardening Pass (2-4d)**
+   - Event-driven refresh improvements (or quieter smarter polling).
+   - Edge-case fixes for app-name matching and window visibility quirks.
+   - Final regression pass on setup/bootstrap/window behavior persistence.
+
+### Alternate priority adjustments
+- **Adoption-first:** move Visual Explainers to milestone 1 (parallel with Actions completion).
+- **Power-user-first:** move Main View Workflow Upgrade ahead of Visual Explainers, but keep copy cleanup in same cycle.
 
 ---
 

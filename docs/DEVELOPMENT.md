@@ -22,7 +22,7 @@ scripts/package_dev_app.sh
 
 Default behavior:
 - installs to `/Applications/TilePilot.app`
-- removes legacy `/Applications/Yabai Coach.app` if present
+- removes legacy `/Applications/Yabai Coach.app` if present (migration cleanup)
 - relaunches the installed app
 
 ## Signing
@@ -42,4 +42,3 @@ TilePilot intentionally preserves legacy managed marker names:
 - `YABAI_COACH YABAI CONFIG ...` in `yabairc`
 
 This avoids breaking existing installations and previously saved rules.
-

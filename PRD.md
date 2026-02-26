@@ -1,4 +1,4 @@
-# Yabai Coach (GUI for yabai/skhd) - Product Requirements Document (v1.1)
+# TilePilot (GUI for yabai/skhd) - Product Requirements Document (v1.1)
 
 ## Document Control
 - Version: 1.1
@@ -10,7 +10,7 @@
 
 ## 1) Product Summary
 
-Yabai Coach is a native macOS menu bar app that adds a click-first "coach" layer on top of `yabai` and `skhd`.
+TilePilot is a native macOS menu bar app that adds a click-first control layer on top of `yabai` and `skhd`.
 It improves observability, reliability, and ease of use without replacing the underlying window manager engine.
 
 ### North Star
@@ -33,7 +33,7 @@ Current `yabai/skhd` users face:
 - Setup drift after macOS updates or version mismatches.
 - Fear of editing config files directly.
 
-Yabai Coach addresses this with:
+TilePilot addresses this with:
 - Live state visibility.
 - Clickable common actions.
 - Searchable shortcut reference.
@@ -87,12 +87,12 @@ The product should support different build order priorities without changing the
 ## 6) Scope
 
 ## In Scope (v1)
-- Menu bar app + coach window.
+- Menu bar app + TilePilot window.
 - First-run setup/recovery checklist ("Doctor").
 - Capability detection and compatibility summary (machine/OS/tooling).
 - Live WM state (displays/spaces/windows).
 - Action buttons for common operations.
-- Shortcut coach parsed from `~/.config/skhd/skhdrc`.
+- Shortcut reference parsed from `~/.config/skhd/skhdrc`.
 - Health checks:
   - Accessibility permission status.
   - `yabai`/`skhd` daemon running state.
@@ -122,7 +122,7 @@ The product should support different build order priorities without changing the
   - BSP + Balance
   - Toggle Float
   - Browser Relief
-- Entry point: **Open Coach Window**.
+- Entry point: **Open TilePilot Window**.
 - Entry point: **Run Doctor / Recovery Check**.
 
 ## First-Run / Recovery Wizard (v1)
@@ -133,8 +133,8 @@ The product should support different build order priorities without changing the
   - "Advanced features unavailable on this setup"
 - Re-runnable anytime from menu bar and Health tab.
 
-## Coach Window Tabs
-1. **Now**
+## TilePilot Window Tabs
+1. **TilePilot** (main view)
    - Live map (Displays -> Spaces -> Windows).
    - Recommended next actions.
    - Source quality and stale-state labels.
@@ -221,7 +221,7 @@ The product should support different build order priorities without changing the
 - In degraded mode, workspace-precise actions are disabled with explicit reason text.
 - If an action command exits successfully but observable state does not change, show "no visible effect" feedback and suggested checks.
 
-## 8.6 Shortcut Coach
+## 8.6 Shortcuts
 - Parse `~/.config/skhd/skhdrc` line-by-line.
 - Build `ShortcutEntry` list: combo, command, category, source line.
 - Must tolerate malformed lines without crashing.
@@ -312,7 +312,7 @@ Exit degraded mode after `M` consecutive healthy samples (recommended `M=5`).
 ## 11) Non-Functional Requirements
 
 - Menu opens quickly under load (target <150 ms).
-- First useful state appears in coach window within 1 second.
+- First useful state appears in the TilePilot window within 1 second.
 - First Doctor result appears within 2 seconds on a healthy machine.
 - All command execution off main thread.
 - Robust timeout and cancellation handling.
@@ -355,7 +355,7 @@ Exit degraded mode after `M` consecutive healthy samples (recommended `M=5`).
 5. **Actions UI (2d)**
    - Action cards, availability gating, result feedback/toasts.
    - Post-action verification messaging.
-6. **Shortcut Coach (2d)**
+6. **Shortcuts (2d)**
    - Parse/categorize/search `skhdrc`.
 7. **Config MVP (2-3d)**
    - Safe-section editor + diff preview + backup/restore/rollback.
@@ -363,7 +363,7 @@ Exit degraded mode after `M` consecutive healthy samples (recommended `M=5`).
    - In-app docs, wording polish, empty/error states.
 
 ### Alternate ordering notes
-- **Priority B (New-User Adoption):** move Shortcut Coach to milestone 4, keep Doctor/Health before Actions.
+- **Priority B (New-User Adoption):** move Shortcuts to milestone 4, keep Doctor/Health before Actions.
 - **Priority C (Power-User Productivity):** move Actions UI to milestone 4, but do not skip capability gating.
 
 ---

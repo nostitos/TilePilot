@@ -1,5 +1,11 @@
 # TilePilot Development Notes
 
+## Breaking Shortcut Change (Directional Cluster)
+
+As of 2026-02-26, TilePilot's recommended directional shortcut layout is `IJKL` (instead of `HJKL`) for focus/move/resize patterns.
+
+If you are testing against an older local setup that still uses `HJKL`, expect mismatches in screenshots, docs, and shortcut-learning UI until `skhdrc` is updated.
+
 ## Build
 
 ```bash
@@ -22,8 +28,30 @@ scripts/package_dev_app.sh
 
 Default behavior:
 - installs to `/Applications/TilePilot.app`
-- removes legacy `/Applications/Yabai Coach.app` if present (migration cleanup)
 - relaunches the installed app
+
+## Release DMG
+
+Build a release app bundle and package a drag-and-drop DMG:
+
+```bash
+scripts/build_release_dmg.sh --version v0.1.0
+```
+
+Output artifact:
+
+- `dist/TilePilot-v0.1.0.dmg`
+
+The DMG uses:
+
+- custom background image: `assets/dmg/dmg-background.png`
+- icon layout generated via Finder scripting in `scripts/build_release_dmg.sh`
+
+Regenerate DMG background art:
+
+```bash
+scripts/generate_dmg_background.sh
+```
 
 ## Signing
 
@@ -35,10 +63,39 @@ Verify identities:
 security find-identity -v -p codesigning
 ```
 
-## Config Compatibility
+## Config Markers
 
-TilePilot intentionally preserves legacy managed marker names:
-- `YABAI_COACH MANAGED ...` in `skhdrc`
-- `YABAI_COACH YABAI CONFIG ...` in `yabairc`
+TilePilot-managed blocks use:
+- `TILEPILOT MANAGED ...` in `skhdrc`
+- `TILEPILOT YABAI CONFIG ...` in `yabairc`
 
-This avoids breaking existing installations and previously saved rules.
+## Scripting Addition / SIP Support Notes (for TilePilot UX)
+
+Desktop shortcuts that feel "basic" to users often depend on `yabai`'s scripting addition, including:
+- desktop switching (e.g. `Option + 1`)
+- moving a window to another desktop (e.g. `Shift + Option + 1`)
+
+If those shortcuts fail but `skhd` is clearly firing, check for errors like:
+- `cannot focus space due to an error with the scripting-addition.`
+
+### Why TilePilot treats this as core UX now
+
+Even though scripting-addition setup is technically an advanced `yabai` capability, the user-visible features it unlocks (switching desktops / moving windows between desktops) are common workflows. TilePilot Health/Setup should surface this as a core capability, not hide it behind "advanced features" wording.
+
+### Version-specific command reality
+
+Do not assume a single scripting-addition install command exists across all `yabai` versions.
+
+Examples:
+- `yabai v7.1.17` exposes `--load-sa` and `--uninstall-sa`
+- some guides/versions reference separate `--install-sa` and `--load-sa`
+
+TilePilot's repair script should inspect `yabai --help` and choose the supported command automatically.
+
+### SIP guidance in docs/UI
+
+When documenting or surfacing fixes:
+- explain that SIP changes are a security tradeoff
+- explain that TilePilot cannot modify SIP itself
+- point users to Recovery Mode + official yabai documentation
+- explain that macOS updates may break scripting-addition support

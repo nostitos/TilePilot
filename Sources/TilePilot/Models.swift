@@ -203,6 +203,138 @@ struct ShortcutEntry: Identifiable, Codable, Sendable {
     let sourceLine: Int
     let sourceFile: String
     let warning: String?
+
+    var stableKey: String {
+        "\(combo)\n\(command)"
+    }
+}
+
+enum DirectionalShortcutGroup: String, CaseIterable, Codable, Sendable {
+    case focusWindow
+    case moveWindow
+    case resizeWindow
+    case swapWindow
+
+    var title: String {
+        switch self {
+        case .focusWindow: return "Focus Window (Direction Keys)"
+        case .moveWindow: return "Move Window in Layout (Direction Keys)"
+        case .resizeWindow: return "Resize Window (Direction Keys)"
+        case .swapWindow: return "Swap Window (Direction Keys)"
+        }
+    }
+
+    var menuTitle: String {
+        switch self {
+        case .focusWindow: return "Focus (IJKL)"
+        case .moveWindow: return "Move Window (IJKL)"
+        case .resizeWindow: return "Resize Window (IJKL)"
+        case .swapWindow: return "Swap Window (IJKL)"
+        }
+    }
+}
+
+enum DirectionalShortcutDirection: String, CaseIterable, Codable, Sendable {
+    case up
+    case left
+    case down
+    case right
+
+    var sortRank: Int {
+        switch self {
+        case .up: return 0
+        case .left: return 1
+        case .down: return 2
+        case .right: return 3
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .up: return "Up"
+        case .left: return "Left"
+        case .down: return "Down"
+        case .right: return "Right"
+        }
+    }
+
+    var arrow: String {
+        switch self {
+        case .up: return "↑"
+        case .left: return "←"
+        case .down: return "↓"
+        case .right: return "→"
+        }
+    }
+}
+
+struct DirectionalShortcutBinding: Identifiable, Sendable {
+    let group: DirectionalShortcutGroup
+    let direction: DirectionalShortcutDirection
+    let entry: ShortcutEntry
+
+    var id: String {
+        "\(group.rawValue)-\(direction.rawValue)-\(entry.stableKey)"
+    }
+}
+
+enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
+    case desktops
+    case windowPlacement
+    case tilingLayout
+    case windowSize
+    case helpersScripts
+    case apps
+    case focus
+    case displays
+    case automation
+    case other
+    case experimental
+
+    var title: String {
+        switch self {
+        case .desktops: return "Desktops"
+        case .windowPlacement: return "Window Placement"
+        case .tilingLayout: return "Tiling & Layout"
+        case .windowSize: return "Window Size"
+        case .helpersScripts: return "Helpers & Scripts"
+        case .apps: return "Apps"
+        case .focus: return "Focus"
+        case .displays: return "Displays"
+        case .automation: return "Automation"
+        case .other: return "Other"
+        case .experimental: return "Desktop Move (Experimental)"
+        }
+    }
+
+    var sortRank: Int {
+        switch self {
+        case .desktops: return 0
+        case .windowPlacement: return 1
+        case .tilingLayout: return 2
+        case .windowSize: return 3
+        case .helpersScripts: return 4
+        case .apps: return 5
+        case .focus: return 6
+        case .displays: return 7
+        case .automation: return 8
+        case .other: return 98
+        case .experimental: return 99
+        }
+    }
+}
+
+struct UnifiedControlRow: Identifiable, Sendable {
+    let id: String
+    let group: UnifiedControlGroup
+    let title: String
+    let description: String
+    let shortcutEntry: ShortcutEntry?
+    let actionID: TilePilotActionID?
+    let secondaryActionIDs: [TilePilotActionID]
+    let isExperimental: Bool
+    let disabledReason: String?
+    let intentKey: String
 }
 
 struct ConfigBackupInfo: Identifiable, Codable, Sendable {
@@ -232,6 +364,78 @@ struct SetupBootstrapSnapshot: Codable, Sendable {
     let brewPrefix: String?
 }
 
+enum SystemCheckStatus: String, Sendable {
+    case good
+    case notice
+    case warning
+    case error
+
+    var severityRank: Int {
+        switch self {
+        case .good: return 0
+        case .notice: return 1
+        case .warning: return 2
+        case .error: return 3
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .good: return "checkmark.circle.fill"
+        case .notice: return "questionmark.circle.fill"
+        case .warning: return "exclamationmark.circle.fill"
+        case .error: return "xmark.circle.fill"
+        }
+    }
+}
+
+enum SystemCheckAction: String, Sendable, Hashable {
+    case installDependencies
+    case installCLT
+    case startYabai
+    case startSkhd
+    case openAccessibilitySettings
+    case requestAccessibilityAccess
+    case fixScriptingAddition
+    case openMissionControlSettings
+    case openMissionControlKeyboardShortcuts
+    case restartYabai
+    case restartSkhd
+    case recheck
+
+    var label: String {
+        switch self {
+        case .installDependencies: return "Install"
+        case .installCLT: return "Install CLT"
+        case .startYabai: return "Start yabai"
+        case .startSkhd: return "Start skhd"
+        case .openAccessibilitySettings: return "Open Settings"
+        case .requestAccessibilityAccess: return "Request Access"
+        case .fixScriptingAddition: return "Fix"
+        case .openMissionControlSettings: return "Mission Control"
+        case .openMissionControlKeyboardShortcuts: return "Keyboard Shortcuts"
+        case .restartYabai: return "Restart yabai"
+        case .restartSkhd: return "Restart skhd"
+        case .recheck: return "Recheck"
+        }
+    }
+}
+
+struct SystemCheckRow: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let detail: String
+    let status: SystemCheckStatus
+    let actions: [SystemCheckAction]
+}
+
+enum SystemPanelSection: String, Sendable {
+    case essentials
+    case files
+    case managedConfig
+    case diagnostics
+}
+
 enum HoverFocusMode: String, Codable, CaseIterable, Sendable {
     case off
     case autofocus
@@ -249,12 +453,14 @@ enum HoverFocusMode: String, Codable, CaseIterable, Sendable {
 struct ManagedWindowBehaviorPolicy: Codable, Sendable, Equatable {
     var manualTilingModeEnabled: Bool
     var hoverFocusMode: HoverFocusMode
+    var mouseFollowsFocusEnabled: Bool
     var neverTileApps: [String]
     var alwaysTileApps: [String]
 
     static let `default` = ManagedWindowBehaviorPolicy(
         manualTilingModeEnabled: false,
         hoverFocusMode: .off,
+        mouseFollowsFocusEnabled: false,
         neverTileApps: [],
         alwaysTileApps: []
     )
@@ -296,4 +502,54 @@ enum AppTilingBehavior: String, Codable, CaseIterable, Sendable {
         case .alwaysTile: return "Always Tile"
         }
     }
+}
+
+struct EditorTarget: Equatable, Sendable {
+    let path: String
+    let line: Int?
+}
+
+enum EditableFileKind: String, Codable, CaseIterable, Sendable {
+    case yabairc
+    case skhdrc
+    case script
+    case other
+
+    var displayName: String {
+        switch self {
+        case .yabairc: return "yabairc"
+        case .skhdrc: return "skhdrc"
+        case .script: return "script"
+        case .other: return "file"
+        }
+    }
+}
+
+struct EditableConfigFile: Identifiable, Codable, Sendable, Hashable {
+    let path: String
+    let displayName: String
+    let kind: EditableFileKind
+    let exists: Bool
+    let isDiscovered: Bool
+
+    var id: String { path }
+}
+
+struct EditableFileDocumentState: Sendable {
+    let file: EditableConfigFile
+    let content: String
+    let backups: [ConfigBackupInfo]
+}
+
+struct EditableFileSaveResult: Sendable {
+    let file: EditableConfigFile
+    let backups: [ConfigBackupInfo]
+    let previousBackup: ConfigBackupInfo?
+}
+
+struct EditableFileRestoreResult: Sendable {
+    let file: EditableConfigFile
+    let backups: [ConfigBackupInfo]
+    let restoredBackup: ConfigBackupInfo
+    let preRestoreBackup: ConfigBackupInfo?
 }

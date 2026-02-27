@@ -251,7 +251,7 @@ final class DoctorService: @unchecked Sendable {
             CapabilityState(
                 key: "accessibility",
                 status: accessibilityTrusted ? .available : .unknown,
-                reasonCode: accessibilityTrusted ? nil : "coach-accessibility-optional",
+                reasonCode: accessibilityTrusted ? nil : "tilepilot-accessibility-optional",
                 message: accessibilityTrusted ? "TilePilot Accessibility permission is granted." : "TilePilot Accessibility permission is optional and not granted.",
                 remediationSteps: accessibilityTrusted ? [] : ["Optional: Open System Settings > Privacy & Security > Accessibility and enable \(accessibilityClientName) if you want TilePilot-triggered prompts/helpers."]
             )
@@ -303,11 +303,6 @@ final class DoctorService: @unchecked Sendable {
         if trimmed.isEmpty {
             return "TilePilot"
         }
-
-        let normalized = trimmed.replacingOccurrences(of: " ", with: "").lowercased()
-        if normalized == "yabaiui" || normalized == "yabaicoachapp" {
-            return "TilePilot"
-        }
         return trimmed
     }
 
@@ -337,7 +332,7 @@ final class DoctorService: @unchecked Sendable {
             status: .unknown,
             reasonCode: "version-check-failed",
             message: "Unable to determine \(title) version.",
-            remediationSteps: ["Run Setup Check again after confirming the binary is installed and executable."]
+            remediationSteps: ["Run System Recheck again after confirming the binary is installed and executable."]
         )
     }
 
@@ -418,7 +413,7 @@ final class DoctorService: @unchecked Sendable {
                 status: .unknown,
                 reasonCode: "check-sa-unsupported-by-version",
                 message: "This yabai version does not support `--check-sa`.",
-                remediationSteps: ["Use Health/Logs to inspect behavior of scripting-addition-dependent actions in later phases."]
+                remediationSteps: ["If Desktop shortcuts (switch desktop / move window to desktop) fail, use TilePilot’s “Fix Scripting Addition” action and re-run Setup Check."]
             )
         }
 
@@ -431,7 +426,7 @@ final class DoctorService: @unchecked Sendable {
                 message: "Scripting addition appears unavailable or not loaded.",
                 remediationSteps: [
                     "Check macOS version compatibility and recent OS updates.",
-                    "Re-run yabai scripting addition installation steps if you rely on SA-only features."
+                    "Re-run yabai scripting addition installation steps (TilePilot: Fix Scripting Addition) to restore desktop switching and move-window shortcuts."
                 ]
             )
         }
@@ -515,7 +510,7 @@ final class DoctorService: @unchecked Sendable {
             warnings.append("Mission Control settings may reduce predictable space behavior.")
         }
         if capabilities.contains(where: { $0.key == "scripting-addition" && ($0.status == .degraded || $0.status == .blocked) }) {
-            warnings.append("Scripting-addition-dependent features may be unavailable on this macOS/yabai setup.")
+            warnings.append("Desktop switching and move-window shortcuts may be unavailable until the yabai scripting addition is working.")
         }
         if capabilities.contains(where: { $0.key == "yabai-query" && $0.status != .available }) {
             warnings.append("Live yabai state queries are not currently reliable.")

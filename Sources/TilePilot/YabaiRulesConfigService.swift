@@ -18,8 +18,8 @@ enum YabaiRulesConfigServiceError: LocalizedError {
 }
 
 final class YabaiRulesConfigService: @unchecked Sendable {
-    let beginMarker = "# >>> YABAI_COACH YABAI CONFIG BEGIN"
-    let endMarker = "# <<< YABAI_COACH YABAI CONFIG END"
+    let beginMarker = "# >>> TILEPILOT YABAI CONFIG BEGIN"
+    let endMarker = "# <<< TILEPILOT YABAI CONFIG END"
 
     func loadConfigDocument() async throws -> YabaiConfigDocumentState {
         try await withCheckedThrowingContinuation { continuation in
@@ -77,17 +77,18 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         var lines: [String] = []
         lines.append("# Managed by TilePilot. Unknown lines outside this block are preserved.")
         lines.append("yabai -m config focus_follows_mouse \(policy.hoverFocusMode.rawValue)")
+        lines.append("yabai -m config mouse_follows_focus \(policy.mouseFollowsFocusEnabled ? "on" : "off")")
 
         for app in policy.alwaysTileApps.map(normalizeAppName).filter({ !$0.isEmpty }).sorted() {
-            let label = ruleLabel(prefix: "yc_always", appName: app)
+            let label = ruleLabel(prefix: "tp_always", appName: app)
             lines.append("yabai -m rule --add label=\(label) app=\"\(escapeRegex(app))\" manage=on")
         }
         for app in policy.neverTileApps.map(normalizeAppName).filter({ !$0.isEmpty }).sorted() {
-            let label = ruleLabel(prefix: "yc_never", appName: app)
+            let label = ruleLabel(prefix: "tp_never", appName: app)
             lines.append("yabai -m rule --add label=\(label) app=\"\(escapeRegex(app))\" manage=off")
         }
         if policy.manualTilingModeEnabled {
-            lines.append("yabai -m rule --add label=yc_manual_tiling_default app=\".*\" manage=off")
+            lines.append("yabai -m rule --add label=tp_manual_tiling_default app=\".*\" manage=off")
         }
         return lines.joined(separator: "\n")
     }
@@ -105,7 +106,7 @@ final class YabaiRulesConfigService: @unchecked Sendable {
             commands.append(
                 ShellCommand("/usr/bin/env", [
                     "yabai", "-m", "rule", "--add",
-                    "label=\(ruleLabel(prefix: "yc_always", appName: app))",
+                    "label=\(ruleLabel(prefix: "tp_always", appName: app))",
                     "app=\(escapeRegex(app))",
                     "manage=on",
                 ], timeout: 1.5)
@@ -115,7 +116,7 @@ final class YabaiRulesConfigService: @unchecked Sendable {
             commands.append(
                 ShellCommand("/usr/bin/env", [
                     "yabai", "-m", "rule", "--add",
-                    "label=\(ruleLabel(prefix: "yc_never", appName: app))",
+                    "label=\(ruleLabel(prefix: "tp_never", appName: app))",
                     "app=\(escapeRegex(app))",
                     "manage=off",
                 ], timeout: 1.5)
@@ -125,7 +126,7 @@ final class YabaiRulesConfigService: @unchecked Sendable {
             commands.append(
                 ShellCommand("/usr/bin/env", [
                     "yabai", "-m", "rule", "--add",
-                    "label=yc_manual_tiling_default",
+                    "label=tp_manual_tiling_default",
                     "app=.*",
                     "manage=off",
                 ], timeout: 1.5)
@@ -151,8 +152,16 @@ final class YabaiRulesConfigService: @unchecked Sendable {
                 }
                 continue
             }
+            if trimmed.contains("config mouse_follows_focus ") {
+                if trimmed.contains(" on") || trimmed.contains(" true") || trimmed.contains(" 1") {
+                    policy.mouseFollowsFocusEnabled = true
+                } else if trimmed.contains(" off") || trimmed.contains(" false") || trimmed.contains(" 0") {
+                    policy.mouseFollowsFocusEnabled = false
+                }
+                continue
+            }
 
-            if trimmed.contains(#"rule --add label=yc_manual_tiling_default app=".*" manage=off"#) ||
+            if trimmed.contains(#"rule --add label=tp_manual_tiling_default app=".*" manage=off"#) ||
                trimmed.contains(#"rule --add app=".*" manage=off"#) {
                 policy.manualTilingModeEnabled = true
                 continue
@@ -303,14 +312,14 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         var labels = Set<String>()
         for app in policy.alwaysTileApps {
             let trimmed = normalizeAppName(app)
-            if !trimmed.isEmpty { labels.insert(ruleLabel(prefix: "yc_always", appName: trimmed)) }
+            if !trimmed.isEmpty { labels.insert(ruleLabel(prefix: "tp_always", appName: trimmed)) }
         }
         for app in policy.neverTileApps {
             let trimmed = normalizeAppName(app)
-            if !trimmed.isEmpty { labels.insert(ruleLabel(prefix: "yc_never", appName: trimmed)) }
+            if !trimmed.isEmpty { labels.insert(ruleLabel(prefix: "tp_never", appName: trimmed)) }
         }
         if policy.manualTilingModeEnabled {
-            labels.insert("yc_manual_tiling_default")
+            labels.insert("tp_manual_tiling_default")
         }
         return labels
     }

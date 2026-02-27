@@ -108,7 +108,6 @@ fi
 
 DIST_DIR="$ROOT_DIR/dist"
 DEST="/Applications/${APP_NAME}.app"
-LEGACY_DEST="/Applications/Yabai Coach.app"
 STAGE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/tilepilot-build.XXXXXX")"
 trap 'rm -rf "$STAGE_ROOT"' EXIT
 APP_DIR="$STAGE_ROOT/${APP_NAME}.app"
@@ -230,9 +229,6 @@ if [[ $INSTALL_TO_APPLICATIONS -eq 1 ]]; then
     sleep 0.4
   fi
   echo "Installing to $DEST ..."
-  if [[ "$DEST" != "$LEGACY_DEST" && -e "$LEGACY_DEST" ]]; then
-    rm -rf "$LEGACY_DEST"
-  fi
   rm -rf "$DEST"
   cp -R "$APP_DIR" "$DEST"
   sign_app_bundle "$DEST"

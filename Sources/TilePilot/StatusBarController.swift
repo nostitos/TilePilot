@@ -3,9 +3,9 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class CoachWindowController: NSWindowController {
+final class TilePilotWindowController: NSWindowController {
     init(model: AppModel) {
-        let rootView = CoachRootView()
+        let rootView = TilePilotRootView()
             .environmentObject(model)
         let hosting = NSHostingController(rootView: rootView)
 
@@ -37,13 +37,13 @@ final class CoachWindowController: NSWindowController {
 @MainActor
 final class StatusBarController: NSObject {
     private let model: AppModel
-    private let onOpenCoach: () -> Void
+    private let onOpenTilePilot: () -> Void
     private let statusItem: NSStatusItem
     private var cancellables: Set<AnyCancellable> = []
 
-    init(model: AppModel, onOpenCoach: @escaping () -> Void) {
+    init(model: AppModel, onOpenTilePilot: @escaping () -> Void) {
         self.model = model
-        self.onOpenCoach = onOpenCoach
+        self.onOpenTilePilot = onOpenTilePilot
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusButton()
@@ -125,40 +125,52 @@ final class StatusBarController: NSObject {
         if isRightClick {
             presentQuickMenu()
         } else {
-            onOpenCoach()
+            onOpenTilePilot()
         }
     }
 
     private func presentQuickMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(item("Open TilePilot", action: #selector(openCoach)))
+        menu.addItem(item("Open TilePilot", action: #selector(openTilePilot)))
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
-        menu.addItem(item("Show Shortcuts", action: #selector(openShortcuts)))
-
+        menu.addItem(item("Open Controls", action: #selector(openShortcuts)))
+        menu.addItem(item("Open System", action: #selector(openSystemPanel)))
         menu.addItem(.separator())
+        addScreenWideShortcutItems(to: menu)
+        menu.addItem(.separator())
+        let directionalLegend = NSMenuItem(title: "IJKL: I↑  J←  K↓  L→", action: nil, keyEquivalent: "")
+        directionalLegend.isEnabled = false
+        menu.addItem(directionalLegend)
+        _ = addPinnedShortcutItems(to: menu)
+        menu.addItem(.separator())
+
         let runtimeEnabled = model.canRunYabaiRuntimeCommands
         let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
         let focusedAvailable = runtimeEnabled && model.focusedWindowState != nil
         let focusedReason = focusedAvailable ? "" : (model.focusedWindowState == nil ? "No focused window" : runtimeReason)
-        menu.addItem(item(focusedAvailable ? "Toggle Focused Window Float/Tile" : "Toggle Focused Window Float/Tile (\(focusedReason))", action: #selector(toggleFocusedWindowTiling), enabled: focusedAvailable))
-        menu.addItem(item(focusedAvailable ? "Float Focused Window" : "Float Focused Window (\(focusedReason))", action: #selector(floatFocusedWindow), enabled: focusedAvailable))
-        menu.addItem(item(focusedAvailable ? "Tile Focused Window" : "Tile Focused Window (\(focusedReason))", action: #selector(tileFocusedWindow), enabled: focusedAvailable))
+        let focusedApp = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusedName = (focusedApp?.isEmpty == false) ? focusedApp! : "Focused Window"
+        menu.addItem(item(focusedAvailable ? "Toggle Float/Tile (\(focusedName))" : "Toggle Float/Tile (\(focusedReason))", action: #selector(toggleFocusedWindowTiling), enabled: focusedAvailable))
+        menu.addItem(item(focusedAvailable ? "Float Window (\(focusedName))" : "Float Window (\(focusedReason))", action: #selector(floatFocusedWindow), enabled: focusedAvailable))
+        menu.addItem(item(focusedAvailable ? "Tile Window (\(focusedName))" : "Tile Window (\(focusedReason))", action: #selector(tileFocusedWindow), enabled: focusedAvailable))
 
         menu.addItem(.separator())
         let disableHoverTitle = runtimeEnabled ? "Disable Hover Focus" : "Disable Hover Focus (\(runtimeReason))"
+        let disableCursorFollowTitle = runtimeEnabled ? "Disable Cursor Follows Focus" : "Disable Cursor Follows Focus (\(runtimeReason))"
         let manualOnTitle = runtimeEnabled ? "Enable Manual Tiling Mode" : "Enable Manual Tiling Mode (\(runtimeReason))"
         let manualOffTitle = runtimeEnabled ? "Disable Manual Tiling Mode" : "Disable Manual Tiling Mode (\(runtimeReason))"
         menu.addItem(item(disableHoverTitle, action: #selector(disableHoverFocus), enabled: runtimeEnabled))
+        menu.addItem(item(disableCursorFollowTitle, action: #selector(disableMouseFollowsFocus), enabled: runtimeEnabled))
         menu.addItem(item(manualOnTitle, action: #selector(enableManualTilingMode), enabled: runtimeEnabled))
         menu.addItem(item(manualOffTitle, action: #selector(disableManualTilingMode), enabled: runtimeEnabled))
 
         let balanceItem = item("Align Tiles (Balance)", action: #selector(runQuickAction(_:)), enabled: balanceTilesQuickActionEnabled())
-        balanceItem.representedObject = CoachActionID.balanceSpace.rawValue
+        balanceItem.representedObject = TilePilotActionID.balanceSpace.rawValue
         menu.addItem(balanceItem)
 
         menu.addItem(.separator())
-        menu.addItem(setupDiagnosticsSubmenuItem())
+        menu.addItem(systemToolsSubmenuItem())
 
         menu.addItem(.separator())
         menu.addItem(item("Quit", action: #selector(quitApp)))
@@ -175,12 +187,13 @@ final class StatusBarController: NSObject {
         return item
     }
 
-    private func setupDiagnosticsSubmenuItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Setup & Diagnostics…", action: nil, keyEquivalent: "")
+    private func systemToolsSubmenuItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "System Tools…", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
 
         submenu.addItem(item(model.isLaunchingSetupInstaller ? "Opening Installer..." : "Install Dependencies", action: #selector(runSetupInstaller), enabled: !model.isLaunchingSetupInstaller))
-        submenu.addItem(item("Check Setup", action: #selector(runDoctor), enabled: !model.isRefreshing))
+        submenu.addItem(item("Check System", action: #selector(runDoctor), enabled: !model.isRefreshing))
+        submenu.addItem(item("Open System", action: #selector(openSystemPanel)))
         submenu.addItem(.separator())
         submenu.addItem(item("Copy Issue Summary", action: #selector(copyIssueSummary), enabled: model.doctorSnapshot != nil))
         submenu.addItem(item("Export Diagnostics", action: #selector(exportDiagnostics), enabled: model.doctorSnapshot != nil))
@@ -197,11 +210,159 @@ final class StatusBarController: NSObject {
         return parent
     }
 
+    private func addPinnedShortcutItems(to menu: NSMenu) -> Bool {
+        let pinnedGroups = model.pinnedDirectionalGroupBindings
+        let pinned = model.pinnedShortcutEntries
+        if pinnedGroups.isEmpty && pinned.isEmpty && model.pinnedShortcutKeys.isEmpty {
+            return false
+        }
+
+        if !pinnedGroups.isEmpty {
+            for group in pinnedGroups {
+                addPinnedDirectionalGroupItems(to: menu, group: group.group, bindings: group.bindings)
+            }
+            if !pinned.isEmpty || !model.pinnedShortcutKeys.isEmpty {
+                menu.addItem(.separator())
+            }
+        }
+
+        if pinned.isEmpty && !model.pinnedShortcutKeys.isEmpty {
+            let missing = NSMenuItem(title: "Pinned shortcuts unavailable (open Shortcuts to reload)", action: nil, keyEquivalent: "")
+            missing.isEnabled = false
+            menu.addItem(missing)
+        } else {
+            for entry in pinned {
+                let title = pinnedShortcutMenuTitle(for: entry)
+                let item = self.item(title, action: #selector(runPinnedShortcut(_:)))
+                item.representedObject = entry.stableKey
+                menu.addItem(item)
+            }
+        }
+        return true
+    }
+
+    private func addPinnedDirectionalGroupItems(
+        to menu: NSMenu,
+        group: DirectionalShortcutGroup,
+        bindings: [DirectionalShortcutBinding]
+    ) {
+        guard !bindings.isEmpty else { return }
+        let header = NSMenuItem(title: "Pinned \(group.menuTitle)", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        for binding in bindings {
+            let combo = model.displayShortcutComboSymbolsSpaced(binding.entry)
+            let title = "\(combo)  \(binding.direction.arrow)  \(directionActionLabel(for: group, direction: binding.direction))"
+            let item = self.item(title, action: #selector(runPinnedShortcut(_:)))
+            item.representedObject = binding.entry.stableKey
+            menu.addItem(item)
+        }
+    }
+
+    private func directionActionLabel(
+        for group: DirectionalShortcutGroup,
+        direction: DirectionalShortcutDirection
+    ) -> String {
+        switch group {
+        case .focusWindow:
+            return "Focus \(direction.label)"
+        case .moveWindow:
+            return "Move \(direction.label)"
+        case .resizeWindow:
+            return "Resize \(direction.label)"
+        case .swapWindow:
+            return "Swap \(direction.label)"
+        }
+    }
+
+    private func pinnedShortcutMenuTitle(for entry: ShortcutEntry) -> String {
+        let symbols = model.displayShortcutComboSymbols(entry)
+        let explanation = model.shortcutExplanation(entry)
+        let combo = symbols.isEmpty ? model.displayShortcutComboWords(entry) : symbols
+        let raw = "\(combo)  \(explanation)"
+        if raw.count <= 72 { return raw }
+        return String(raw.prefix(69)) + "..."
+    }
+
     private func balanceTilesQuickActionEnabled() -> Bool {
         model.quickActionCards.first(where: { $0.id == .balanceSpace })?.enabled ?? false
     }
 
-    @objc private func openCoach() { onOpenCoach() }
+    private func addScreenWideShortcutItems(to menu: NSMenu) {
+        let header = NSMenuItem(title: "Screen-wide Controls", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        let runtimeEnabled = model.canRunYabaiRuntimeCommands
+        let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
+
+        struct EntrySpec {
+            let title: String
+            let matcher: (ShortcutEntry) -> Bool
+        }
+
+        let specs: [EntrySpec] = [
+            EntrySpec(
+                title: "Disable Tiling For All Visible Windows",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/disable-tiling-all-visible.sh") }
+            ),
+            EntrySpec(
+                title: "Enable Tiling For All Visible Windows",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/enable-tiling-all-visible.sh") }
+            ),
+            EntrySpec(
+                title: "Grid Pack (Temporary Toggle)",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/grid-pack-toggle.sh") }
+            ),
+            EntrySpec(
+                title: "Temporarily Tile All Visible Windows",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/tile-all-visible-once.sh") }
+            ),
+            EntrySpec(
+                title: "Restore Previously Tiled Windows",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/restore-tile-all-visible-once.sh") }
+            ),
+            EntrySpec(
+                title: "Single-Window Mode (Stack)",
+                matcher: { $0.command.lowercased().contains("yabai -m space --layout stack") }
+            ),
+            EntrySpec(
+                title: "Split Tree Layout (BSP + Balance)",
+                matcher: { command in
+                    let c = command.command.lowercased()
+                    return c.contains("yabai -m space --layout bsp") && c.contains("yabai -m space --balance")
+                }
+            ),
+            EntrySpec(
+                title: "Balance Current Desktop",
+                matcher: { command in
+                    let c = command.command.lowercased()
+                    return c.contains("yabai -m space --balance") && !c.contains("yabai -m space --layout bsp")
+                }
+            ),
+        ]
+
+        var shown = 0
+        for spec in specs {
+            guard let entry = model.shortcutEntries.first(where: spec.matcher) else { continue }
+            let combo = model.displayShortcutComboSymbolsSpaced(entry)
+            let label = combo.isEmpty ? spec.title : "\(combo)  \(spec.title)"
+            let title = runtimeEnabled ? label : "\(label) (\(runtimeReason))"
+            let item = self.item(title, action: #selector(runPinnedShortcut(_:)), enabled: runtimeEnabled)
+            item.representedObject = entry.stableKey
+            menu.addItem(item)
+            shown += 1
+        }
+
+        if shown == 0 {
+            let missing = NSMenuItem(title: "No screen-wide shortcuts found in skhdrc", action: nil, keyEquivalent: "")
+            missing.isEnabled = false
+            menu.addItem(missing)
+        }
+    }
+
+    @objc private func openTilePilot() { onOpenTilePilot() }
 
     @objc private func runDoctor() {
         model.acknowledgeInitialStatusIfNeeded()
@@ -211,6 +372,11 @@ final class StatusBarController: NSObject {
     @objc private func disableHoverFocus() {
         model.acknowledgeInitialStatusIfNeeded()
         model.disableHoverFocus()
+    }
+
+    @objc private func disableMouseFollowsFocus() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.disableMouseFollowsFocus()
     }
 
     @objc private func enableManualTilingMode() {
@@ -241,13 +407,19 @@ final class StatusBarController: NSObject {
     @objc private func openWindowBehaviorSettings() {
         model.acknowledgeInitialStatusIfNeeded()
         model.openWindowBehaviorSettings()
-        onOpenCoach()
+        onOpenTilePilot()
     }
 
     @objc private func openShortcuts() {
         model.acknowledgeInitialStatusIfNeeded()
-        model.requestOpenCoachTab(.shortcuts)
-        onOpenCoach()
+        model.requestOpenTilePilotTab(.shortcuts)
+        onOpenTilePilot()
+    }
+
+    @objc private func openSystemPanel() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.requestOpenTilePilotTab(.system)
+        onOpenTilePilot()
     }
 
     @objc private func runSetupInstaller() {
@@ -256,9 +428,15 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func runQuickAction(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let id = CoachActionID(rawValue: raw) else { return }
+        guard let raw = sender.representedObject as? String, let id = TilePilotActionID(rawValue: raw) else { return }
         model.acknowledgeInitialStatusIfNeeded()
-        model.performCoachAction(id)
+        model.performTilePilotAction(id)
+    }
+
+    @objc private func runPinnedShortcut(_ sender: NSMenuItem) {
+        guard let stableKey = sender.representedObject as? String else { return }
+        model.acknowledgeInitialStatusIfNeeded()
+        model.runPinnedShortcut(stableKey: stableKey)
     }
 
     @objc private func copyIssueSummary() {
@@ -313,23 +491,23 @@ final class StatusBarController: NSObject {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel.shared
-    private var coachWindowController: CoachWindowController?
+    private var tilePilotWindowController: TilePilotWindowController?
     private var statusBarController: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        coachWindowController = CoachWindowController(model: model)
+        tilePilotWindowController = TilePilotWindowController(model: model)
         statusBarController = StatusBarController(model: model) { [weak self] in
             self?.model.acknowledgeInitialStatusIfNeeded()
-            self?.coachWindowController?.showAndFocus()
+            self?.tilePilotWindowController?.showAndFocus()
         }
 
         model.startIfNeeded()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        coachWindowController?.showAndFocus()
+        tilePilotWindowController?.showAndFocus()
         return true
     }
 

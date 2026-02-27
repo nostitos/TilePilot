@@ -6,6 +6,11 @@
 - Status: Active development (foundation shipped, major product cycle replanned)
 - Platform: macOS (direct distribution, non-App-Store)
 
+### Breaking UX / Shortcut Convention Change (2026-02-26)
+- Recommended directional shortcut cluster moved from `HJKL` to `IJKL` for focus/move/resize workflows.
+- This is a user-facing breaking change for users who adopted prior `HJKL` defaults/examples.
+- Product copy, shortcut explainers, and docs should treat `IJKL` as the primary convention going forward.
+
 ---
 
 ## 1) Product Summary
@@ -49,7 +54,7 @@ It improves observability, reliability, and ease of use without replacing the un
 - **Actions tab**: foundational actions and gating exist, but catalog/organization/copy/discoverability are incomplete.
 - **Quick access menu**: improved and simplified, but still needs long-term curation and context-aware entries.
 - **Main view (`TilePilot`)**: live map exists, but "find a window / act on it quickly" workflows are still weak.
-- **Health / Setup / Config surfaces**: powerful, but some wording/information architecture still reflects internal build history.
+- **System tab polish**: unified checks are in place, but copy and progressive disclosure still need refinement over the next cycle.
 
 ### Not Yet Implemented (High-Value Next Cycle)
 - Visual explainers/onboarding for advanced features (one concept at a time).
@@ -167,7 +172,7 @@ The product should support different build order priorities without changing the
 - Separates:
   - "Core features available now"
   - "Advanced features unavailable on this setup"
-- Re-runnable anytime from menu bar and Health tab.
+- Re-runnable anytime from menu bar and the System tab.
 
 ## TilePilot Window Tabs
 1. **TilePilot** (main view)
@@ -182,15 +187,18 @@ The product should support different build order priorities without changing the
 3. **Shortcuts**
    - Searchable, categorized shortcut reference from `skhdrc`.
    - Should also be a "learn the stack" surface, not only a raw parser output.
-4. **Config**
-   - Safe editor for essential bindings + helper script args.
-   - Restore backup / restore last known good.
-5. **Health**
-   - Permissions, daemon state, Mission Control checks, scripting-addition status, degraded status.
-   - Event/command log + recovery actions.
-   - Diagnostics export.
-6. **Setup**
-   - First-run/fresh-machine install helper and setup checklist.
+   - Script shortcuts must use user-facing action copy:
+     - title from cleaned filename (no shell extension / dash-noise)
+     - description from first script header comment line (`# ...`) when available
+     - no `Runs script ...` phrasing in primary UI
+   - Future priority: visual shortcut explainers and pinning selected shortcuts to quick access.
+4. **System**
+   - Unified essentials checklist: install/runtime/permissions/Mission Control/scripting-addition.
+   - Inline fix actions (`Install`, `Start`, `Open Settings`, `Fix`, `Recheck`).
+   - Advanced sections (collapsed by default):
+     - raw file editing (`yabairc`, `skhdrc`, scripts)
+     - managed `skhdrc` section editor
+     - diagnostics command log/export
 
 ---
 
@@ -252,6 +260,18 @@ The product should support different build order priorities without changing the
 - `window --toggle float`
 - One-shot "readable current space".
 - One-shot browser relief (`max windows per lane` setting).
+
+## 8.5 Shortcut Copy + Script Metadata (v1.2)
+- For script-based shortcut commands, parse only the first command token as script path.
+- Supported script path forms:
+  - absolute (`/Users/...`)
+  - home-relative (`~/...`)
+  - relative (`./...`, resolved from `~/.config/skhd`)
+- Row copy policy:
+  - title = cleaned filename (`disable-tiling-all-visible.sh` -> `Disable Tiling All Visible`)
+  - description = first comment header line in the first 20 lines
+  - fallback description = cleaned filename-derived sentence when file/comment is unavailable
+- If normalized title and description are equivalent, hide the second line to avoid duplicate copy.
 - Action labels and descriptions must use user-facing language first; engine commands/jargon are secondary.
 - The `Actions` tab is a core product surface and must be treated as unfinished until:
   - action grouping is curated for daily use
@@ -271,6 +291,10 @@ The product should support different build order priorities without changing the
 - Top-level items should be limited to high-frequency actions users can reasonably perform many times per day.
 - Setup, diagnostics, system settings, and daemon management actions should be grouped under a secondary submenu.
 - Quick access entries should be reviewed/re-prioritized as major features are added (avoid legacy clutter drift).
+- The right-click menu should show concise context when useful:
+  - current focused window app/title near focused-window actions
+  - explicit "no focused window" state when those actions are unavailable
+- Context lines must support nearby actions and avoid generic status chatter.
 
 ## 8.5.2 Visual Feature Explainers (New v1.2)
 - Add lightweight visual explainer modules/cards for advanced features, one concept at a time (examples):
@@ -291,6 +315,37 @@ The product should support different build order priorities without changing the
 - Search + copy affordances.
 - Flag entries that reference helper scripts/paths that no longer exist (best effort).
 
+## 8.6.1 Shortcut Explainability (New v1.2 Priority)
+- Each shortcut should have a simple, plain-language explanation where possible.
+- Explain outcomes in user terms first, for example:
+  - "Focus the window to the left"
+  - "Send the current window to Desktop 2 and switch to it"
+  - "Toggle the current window between tiled and floating"
+- If a shortcut runs a custom script/command that cannot be confidently translated, show:
+  - a safe fallback explanation (e.g. "Runs custom helper script")
+  - the raw command in secondary detail text.
+
+## 8.6.2 Shortcut Visual Explainers (New v1.2 Priority)
+- Provide minimalist visual explainers for common shortcut categories (focus, move, resize, layout, desktop send/focus).
+- Prefer reusable visual components/templates over hand-designing every shortcut image.
+- Visual explainers should be:
+  - simple
+  - consistent
+  - fast to understand at a glance
+- These visuals should support learning, not replace the shortcut text.
+
+## 8.6.3 Pinned Shortcuts / Quick Menu Integration (New v1.2 Priority)
+- Users should be able to pin shortcuts from the `Shortcuts` view to the menu bar right-click quick menu.
+- Pinned shortcuts serve two use cases:
+  - click-to-run frequent actions
+  - memory support while learning shortcut combos
+- Pinned list should be bounded (recommended 6-10) to prevent menu clutter.
+- Pinned shortcut entries should show:
+  - shortcut combo
+  - short plain-language action label
+  - disabled reason when unavailable
+- Distinguish runnable shortcuts vs reference-only shortcuts when safety/compatibility is uncertain.
+
 ## 8.7 Config Editing (Safe Sections Only)
 - Editable scope:
   - Known hotkeys block.
@@ -301,13 +356,13 @@ The product should support different build order priorities without changing the
   2. Atomic write.
   3. Basic syntax sanity check.
   4. Restart affected service.
-  5. Health verify.
+  5. System verify.
   6. Auto-rollback on failure.
 - One-click restore options available.
 - Show diff preview before save (within editable scope only).
 
-## 8.8 Health + Recovery
-- Health state includes:
+## 8.8 System Health + Recovery
+- System health state includes:
   - Accessibility status.
   - `yabai` running.
   - `skhd` running.
@@ -318,7 +373,7 @@ The product should support different build order priorities without changing the
 - Recovery actions:
   - Restart daemons.
   - Open relevant System Settings panes.
-  - Refresh health checks.
+  - Refresh system checks.
   - Re-run Doctor checklist.
 - Event/Command log shows last N:
   - command, duration, stdout/stderr snippets, status/error type.
@@ -421,31 +476,40 @@ Finish TilePilot as a coherent daily-use product by improving:
    - Add/finish high-value macros (browser relief, readable layouts, common recovery actions).
    - Improve per-action disabled reasons and "why nothing changed" feedback.
 
-2. **Visual Explainers v1 (2-3d)**
+2. **Shortcuts Learning Upgrade (2-4d)**
+   - Add plain-language explanations for shortcut entries.
+   - Add pin/unpin shortcut controls.
+   - Add pinned shortcuts section to the quick menu (bounded and curated).
+   - Add click-to-run support for safe shortcut actions.
+
+3. **Visual Explainers v1 (2-3d)**
    - Add explainer cards/modules for:
      - Manual Tiling Mode
      - Hover Focus
      - App Rules
+     - shortcut categories (focus/move/layout)
      - 1-2 powerful layout macros
    - Include clear before/after explanation and one-click entry action.
 
-3. **Main View (`TilePilot`) Workflow Upgrade (2-3d)**
+4. **Main View (`TilePilot`) Workflow Upgrade (2-3d)**
    - Add search/filter for finding a window by app/title.
    - Add row actions (`Focus`, `Tile`, `Float`, `Toggle`) where appropriate.
    - Add optional "current desktop only" mode for lower noise.
    - Continue removing non-actionable status/debug clutter.
 
-4. **Quick Access Menu Curation Pass (1-2d)**
+5. **Quick Access Menu Curation Pass (1-2d)**
    - Context-aware top-level quick items (focused window present vs not present).
+   - Add focused-window context line near focused-window actions.
+   - Integrate user-pinned shortcuts (bounded list).
    - Promote only frequent actions.
    - Keep setup/diagnostics hidden behind submenu and trim further if needed.
 
-5. **Teachability + Copy Sweep (1-2d)**
+6. **Teachability + Copy Sweep (1-2d)**
    - Wording consistency across tabs (`desktops`, `float`, `auto-tile`, etc.).
    - Clarify advanced terms only where needed.
    - Ensure UI answers "Do I care?" and "What should I do next?"
 
-6. **Reliability / UX Hardening Pass (2-4d)**
+7. **Reliability / UX Hardening Pass (2-4d)**
    - Event-driven refresh improvements (or quieter smarter polling).
    - Edge-case fixes for app-name matching and window visibility quirks.
    - Final regression pass on setup/bootstrap/window behavior persistence.

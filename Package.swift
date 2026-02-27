@@ -14,7 +14,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TilePilot",
-            path: "Sources/YabaiUI"
+            path: "Sources/TilePilot"
         ),
     ]
 )

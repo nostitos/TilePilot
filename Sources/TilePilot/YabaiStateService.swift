@@ -16,6 +16,13 @@ struct LiveStatePollResult: Sendable {
 final class YabaiStateService: @unchecked Sendable {
     private let runner = CommandRunner()
 
+    private struct ScreenDescriptor: Sendable {
+        let displayID: CGDirectDisplayID
+        let uuid: String?
+        let localizedName: String
+        let frame: CGRect
+    }
+
     func pollLiveState() async -> LiveStatePollResult {
         async let displaysTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--displays"], timeout: 1.5))
         async let spacesTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--spaces"], timeout: 1.5))
@@ -27,6 +34,7 @@ final class YabaiStateService: @unchecked Sendable {
         let spacesResult = await spacesTask
         let windowsResult = await windowsTask
         let fallbackDisplays = await fallbackTask
+        let screenDescriptors = await currentScreenDescriptors()
 
         let fallbackTotal = fallbackDisplays.reduce(0) { $0 + $1.windowCount }
 
@@ -58,7 +66,8 @@ final class YabaiStateService: @unchecked Sendable {
                 displaysJSON: displaysResult.stdout,
                 spacesJSON: spacesResult.stdout,
                 windowsJSON: windowsResult.stdout,
-                timestamp: timestamp
+                timestamp: timestamp,
+                screenDescriptors: screenDescriptors
             )
 
             return LiveStatePollResult(
@@ -89,7 +98,8 @@ final class YabaiStateService: @unchecked Sendable {
         displaysJSON: String,
         spacesJSON: String,
         windowsJSON: String,
-        timestamp: Date
+        timestamp: Date,
+        screenDescriptors: [ScreenDescriptor]
     ) throws -> (displays: [DisplayState], spaces: [SpaceState], windows: [WindowState]) {
         let displayRows = try jsonArray(from: displaysJSON)
         let spaceRows = try jsonArray(from: spacesJSON)
@@ -152,7 +162,7 @@ final class YabaiStateService: @unchecked Sendable {
             guard let id = int(from: row["index"]) ?? int(from: row["id"]) else {
                 return nil
             }
-            let name = "Display \(id)"
+            let name = resolvedDisplayName(from: row, fallbackID: id, screenDescriptors: screenDescriptors)
             return DisplayState(
                 id: id,
                 name: name,
@@ -165,6 +175,53 @@ final class YabaiStateService: @unchecked Sendable {
         .sorted { $0.id < $1.id }
 
         return (displays, spaces, windows)
+    }
+
+    private func resolvedDisplayName(
+        from row: [String: Any],
+        fallbackID: Int,
+        screenDescriptors: [ScreenDescriptor]
+    ) -> String {
+        if let label = string(from: row["label"])?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            return label
+        }
+
+        let yabaiUUID = string(from: row["uuid"])?.uppercased()
+        if let yabaiUUID, let match = screenDescriptors.first(where: { $0.uuid?.uppercased() == yabaiUUID }) {
+            return match.localizedName
+        }
+
+        if let frame = yabaiFrame(from: row["frame"]),
+           let match = bestScreenDescriptor(for: frame, descriptors: screenDescriptors) {
+            return match.localizedName
+        }
+
+        return "Display \(fallbackID)"
+    }
+
+    private func yabaiFrame(from value: Any?) -> CGRect? {
+        guard let dict = value as? [String: Any] else { return nil }
+        let x = double(from: dict["x"])
+        let y = double(from: dict["y"])
+        let w = double(from: dict["w"])
+        let h = double(from: dict["h"])
+        guard let x, let y, let w, let h else { return nil }
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    private func bestScreenDescriptor(for rect: CGRect, descriptors: [ScreenDescriptor]) -> ScreenDescriptor? {
+        var best: ScreenDescriptor?
+        var bestArea: CGFloat = 0
+        for descriptor in descriptors {
+            let intersection = rect.intersection(descriptor.frame)
+            if intersection.isNull || intersection.isEmpty { continue }
+            let area = intersection.width * intersection.height
+            if area > bestArea {
+                bestArea = area
+                best = descriptor
+            }
+        }
+        return best
     }
 
     private func jsonArray(from string: String) throws -> [[String: Any]] {
@@ -184,6 +241,23 @@ final class YabaiStateService: @unchecked Sendable {
             return number.intValue
         case let string as String:
             return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    private func double(from value: Any?) -> Double? {
+        switch value {
+        case let d as Double:
+            return d
+        case let f as Float:
+            return Double(f)
+        case let i as Int:
+            return Double(i)
+        case let number as NSNumber:
+            return number.doubleValue
+        case let string as String:
+            return Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
         default:
             return nil
         }
@@ -232,7 +306,7 @@ final class YabaiStateService: @unchecked Sendable {
     private func userFacingLiveStateError(from raw: String) -> String {
         let normalized = raw.lowercased()
         if normalized.contains("env: yabai: no such file or directory") || normalized.contains("not found") {
-            return "yabai is not installed yet. Use Setup -> Install Dependencies, then return to Now."
+            return "yabai is not installed yet. Use System -> Install Dependencies, then return to Overview."
         }
         if normalized.contains("could not connect") || normalized.contains("message socket") {
             return "yabai is installed but not running. Start the yabai service in Setup or use Restart yabai."
@@ -241,6 +315,35 @@ final class YabaiStateService: @unchecked Sendable {
             return "yabai query failed due to permissions. Check setup/health guidance and retry."
         }
         return raw
+    }
+
+    private func currentScreenDescriptors() async -> [ScreenDescriptor] {
+        await MainActor.run {
+            NSScreen.screens.compactMap { screen in
+                guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                    return nil
+                }
+                let displayID = CGDirectDisplayID(number.uint32Value)
+                let uuidString: String?
+                if let cfUUID = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() {
+                    uuidString = (CFUUIDCreateString(nil, cfUUID) as String).uppercased()
+                } else {
+                    uuidString = nil
+                }
+                let name: String
+                if #available(macOS 10.15, *) {
+                    name = screen.localizedName
+                } else {
+                    name = "Display"
+                }
+                return ScreenDescriptor(
+                    displayID: displayID,
+                    uuid: uuidString,
+                    localizedName: name,
+                    frame: screen.frame
+                )
+            }
+        }
     }
 
     private func fallbackDisplayCounts() async -> [FallbackDisplayCount] {

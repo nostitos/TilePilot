@@ -17,6 +17,8 @@ final class BootstrapService: @unchecked Sendable {
         async let brewServicesTask = runner.run(.init("/usr/bin/env", ["brew", "services", "list"], timeout: 2.0))
         async let yabaiVersionTask = runner.run(.init("/usr/bin/env", ["yabai", "--version"], timeout: 1.5))
         async let skhdVersionTask = runner.run(.init("/usr/bin/env", ["skhd", "--version"], timeout: 1.5))
+        async let yabaiProcessTask = runner.run(.init("/usr/bin/env", ["pgrep", "-x", "yabai"], timeout: 1.0))
+        async let skhdProcessTask = runner.run(.init("/usr/bin/env", ["pgrep", "-x", "skhd"], timeout: 1.0))
 
         let xcodeSelect = await xcodeSelectTask
         let brewVersion = await brewVersionTask
@@ -25,6 +27,8 @@ final class BootstrapService: @unchecked Sendable {
         let brewServices = await brewServicesTask
         let yabaiVersion = await yabaiVersionTask
         let skhdVersion = await skhdVersionTask
+        let yabaiProcess = await yabaiProcessTask
+        let skhdProcess = await skhdProcessTask
 
         let brewInstalled = brewVersion.isSuccess
         let brewPrefixText = cleanedLine(from: brewPrefix.stdout)
@@ -35,12 +39,12 @@ final class BootstrapService: @unchecked Sendable {
             brewTapItem(from: brewTap, brewInstalled: brewInstalled),
             binaryItem(id: "yabai-binary", title: "yabai", versionResult: yabaiVersion),
             binaryItem(id: "skhd-binary", title: "skhd", versionResult: skhdVersion),
-            brewServiceItem(name: "yabai", servicesResult: brewServices, brewInstalled: brewInstalled),
-            brewServiceItem(name: "skhd", servicesResult: brewServices, brewInstalled: brewInstalled),
+            brewServiceItem(name: "yabai", servicesResult: brewServices, brewInstalled: brewInstalled, processResult: yabaiProcess),
+            brewServiceItem(name: "skhd", servicesResult: brewServices, brewInstalled: brewInstalled, processResult: skhdProcess),
             accessibilityItem(),
         ]
 
-        let logs = [xcodeSelect, brewVersion, brewPrefix, brewTap, brewServices, yabaiVersion, skhdVersion].map(makeLog)
+        let logs = [xcodeSelect, brewVersion, brewPrefix, brewTap, brewServices, yabaiVersion, skhdVersion, yabaiProcess, skhdProcess].map(makeLog)
 
         return BootstrapRunResult(
             snapshot: SetupBootstrapSnapshot(
@@ -60,6 +64,24 @@ final class BootstrapService: @unchecked Sendable {
 
         let scriptURL = supportDirectory.appendingPathComponent("install_yabai_stack.command")
         let script = installerScriptContents()
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = scriptURL
+        try? mutableURL.setResourceValues(values)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        return scriptURL
+    }
+
+    func prepareScriptingAdditionRepairScript() throws -> URL {
+        let fm = FileManager.default
+        let supportDirectory = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/TilePilot/Setup", isDirectory: true)
+        try fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+
+        let scriptURL = supportDirectory.appendingPathComponent("repair_yabai_scripting_addition.command")
+        let script = scriptingAdditionRepairScriptContents()
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
 
         var values = URLResourceValues()
@@ -128,18 +150,34 @@ final class BootstrapService: @unchecked Sendable {
         return SetupCheckItem(id: id, title: title, state: .missing, detail: "\(title) not detected in PATH.")
     }
 
-    private func brewServiceItem(name: String, servicesResult: CommandResult, brewInstalled: Bool) -> SetupCheckItem {
-        let title = "brew service \(name)"
+    private func brewServiceItem(name: String, servicesResult: CommandResult, brewInstalled: Bool, processResult: CommandResult) -> SetupCheckItem {
+        let title = "\(name) service"
         guard brewInstalled else {
             return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .unknown, detail: "Homebrew is not installed yet.")
         }
+        let processRunning = processResult.isSuccess
+        let processDetail = processRunning ? "Running." : "Not running."
+
         guard servicesResult.isSuccess else {
-            return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .unknown, detail: "Unable to read `brew services list`.")
+            return SetupCheckItem(id: "brew-service-\(name)", title: title, state: processRunning ? .installed : .unknown, detail: processRunning ? processDetail : "Unable to read service status.")
         }
 
         let rows = parseBrewServicesList(servicesResult.stdout)
         guard let status = rows[name] else {
-            return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .missing, detail: "Service not registered yet.")
+            if processRunning {
+                return SetupCheckItem(
+                    id: "brew-service-\(name)",
+                    title: title,
+                    state: .installed,
+                    detail: "Running (not listed in brew services; managed by \(name) --start-service)."
+                )
+            }
+            return SetupCheckItem(
+                id: "brew-service-\(name)",
+                title: title,
+                state: .missing,
+                detail: "Not running yet. Use Start Service."
+            )
         }
 
         let normalized = status.lowercased()
@@ -147,7 +185,13 @@ final class BootstrapService: @unchecked Sendable {
             return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .installed, detail: "Started")
         }
         if normalized == "none" || normalized == "stopped" {
+            if processRunning {
+                return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .installed, detail: "Running (\(status) in brew services).")
+            }
             return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .warning, detail: "Installed but not running (\(status)).")
+        }
+        if processRunning {
+            return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .installed, detail: "Running (service status: \(status)).")
         }
         return SetupCheckItem(id: "brew-service-\(name)", title: title, state: .warning, detail: "Status: \(status)")
     }
@@ -264,13 +308,113 @@ final class BootstrapService: @unchecked Sendable {
         echo "  - Open TilePilot and use 'Request Accessibility Access'"
         echo "  - Enable TilePilot in Accessibility settings"
         echo "  - Verify Mission Control settings in TilePilot > Health"
-        echo "  - Optional advanced features may require yabai scripting addition + SIP configuration"
+        echo "  - Desktop switching/move-window shortcuts may require yabai scripting addition + SIP configuration"
         echo
         echo "Installed versions:"
         /usr/bin/env yabai --version || true
         /usr/bin/env skhd --version || true
         echo
-        echo "Finished. Return to TilePilot and run 'Check Setup'."
+        echo "Finished. Return to TilePilot and run 'Check System'."
+        read -k 1 '?Press any key to close...'
+        echo
+        """
+    }
+
+    private func scriptingAdditionRepairScriptContents() -> String {
+        """
+        #!/bin/zsh
+        set -u
+
+        clear
+        echo "=============================================="
+        echo " TilePilot: Fix yabai Scripting Addition"
+        echo "=============================================="
+        echo
+        echo "This repairs the yabai scripting addition used by core desktop actions"
+        echo "(switch desktop, move window to desktop, etc.)."
+        echo
+        echo "You will be prompted for your admin password (sudo)."
+        echo "If this fails, macOS version compatibility or SIP configuration may be the reason."
+        echo
+
+        ensure_path() {
+          export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/sbin:/usr/local/sbin:$PATH"
+        }
+
+        ensure_path
+
+        if ! /usr/bin/env yabai --version >/dev/null 2>&1; then
+          echo "ERROR: yabai is not installed or not in PATH."
+          echo "Use TilePilot -> System -> Install Dependencies first."
+          echo
+          read -k 1 '?Press any key to close...'
+          echo
+          exit 1
+        fi
+
+        echo "Detected: $(/usr/bin/env yabai --version)"
+        echo
+        echo "Step 1: Uninstall existing scripting addition (best effort)"
+        /usr/bin/sudo /usr/bin/env yabai --uninstall-sa || true
+        echo
+        YABAI_HELP="$(/usr/bin/env yabai --help 2>&1 || true)"
+        SA_LOAD_CMD=""
+        if [[ "$YABAI_HELP" == *"--load-sa"* ]]; then
+          SA_LOAD_CMD="--load-sa"
+        elif [[ "$YABAI_HELP" == *"--install-sa"* ]]; then
+          SA_LOAD_CMD="--install-sa"
+        fi
+
+        if [ -z "$SA_LOAD_CMD" ]; then
+          echo "ERROR: This yabai version does not expose a known scripting-addition install/load command."
+          echo "Expected one of: --load-sa or --install-sa"
+          echo
+          echo "Detected help output:"
+          echo "$YABAI_HELP" | head -n 20
+          echo
+          read -k 1 '?Press any key to close...'
+          echo
+          exit 1
+        fi
+
+        echo "Step 2: Install/load scripting addition ($SA_LOAD_CMD)"
+        SA_OUTPUT="$({ /usr/bin/sudo /usr/bin/env yabai "$SA_LOAD_CMD"; } 2>&1)"
+        SA_EXIT=$?
+        echo "$SA_OUTPUT"
+        if [ $SA_EXIT -ne 0 ]; then
+          echo
+          echo "Install failed."
+          echo "Common reasons:"
+          echo "  - SIP configuration does not allow scripting addition injection"
+          echo "  - macOS update changed compatibility"
+          echo "  - yabai version / install mismatch"
+          if [[ "$SA_OUTPUT" == *"System Integrity Protection"* ]]; then
+            echo
+            echo "Your output indicates SIP is still blocking scripting-addition support."
+            echo "Desktop switching / move-window shortcuts that target desktops will keep failing until SIP is configured for yabai's scripting addition requirements."
+          fi
+          echo
+          read -k 1 '?Press any key to close...'
+          echo
+          exit 1
+        fi
+        echo
+        echo "Step 3: Scripting addition command completed"
+        if [[ "$SA_LOAD_CMD" != "--load-sa" ]]; then
+          echo "Running --load-sa (if available) to load the installed scripting addition..."
+          /usr/bin/sudo /usr/bin/env yabai --load-sa || true
+        else
+          echo "Already loaded via --load-sa."
+        fi
+        echo
+        echo "Step 4: Restart yabai service (best effort)"
+        /usr/bin/env yabai --restart-service || true
+        echo
+        echo "Back in TilePilot:"
+        echo "  1) Run Check System"
+        echo "  2) Try Option+1 (or a Desktop shortcut) again"
+        echo "  3) If it still fails, review the Health section and command logs"
+        echo
         read -k 1 '?Press any key to close...'
         echo
         """

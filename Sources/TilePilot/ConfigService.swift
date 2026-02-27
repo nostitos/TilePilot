@@ -48,8 +48,8 @@ enum ConfigServiceError: LocalizedError {
 }
 
 final class ConfigService: @unchecked Sendable {
-    let beginMarker = "# >>> YABAI_COACH MANAGED BEGIN"
-    let endMarker = "# <<< YABAI_COACH MANAGED END"
+    let beginMarker = "# >>> TILEPILOT MANAGED BEGIN"
+    let endMarker = "# <<< TILEPILOT MANAGED END"
 
     func loadConfigDocument() async throws -> ConfigDocumentState {
         try await withCheckedThrowingContinuation { continuation in
@@ -119,7 +119,7 @@ final class ConfigService: @unchecked Sendable {
         # alt - s : yabai -m space --layout stack
         #
         # Browser Relief setting for future helper workflows:
-        # YABAI_COACH_MAX_WINDOWS_PER_LANE=6
+        # TILEPILOT_MAX_WINDOWS_PER_LANE=6
         """
     }
 

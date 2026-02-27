@@ -1,11 +1,14 @@
 import AppKit
 import SwiftUI
 
-enum CoachTab: Hashable {
+enum TilePilotTab: Hashable {
     case now
     case windowBehavior
     case actions
     case shortcuts
+    case system
+    // legacy route-only cases (mapped to .system)
+    case files
     case config
     case health
     case setup
@@ -25,54 +28,51 @@ struct TilePilotApp: App {
     }
 }
 
-struct CoachRootView: View {
+struct TilePilotRootView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selectedTab: CoachTab = .now
+    @State private var selectedTab: TilePilotTab = .now
     @State private var hasAppliedInitialTabSelection = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NowDashboardView()
-                .tabItem { Label("TilePilot", systemImage: "rectangle.3.group") }
-                .tag(CoachTab.now)
+                .tabItem { Label("Overview", systemImage: "rectangle.3.group") }
+                .tag(TilePilotTab.now)
 
             WindowBehaviorDashboardView()
                 .tabItem { Label("Window Behavior", systemImage: "hand.raised.square") }
-                .tag(CoachTab.windowBehavior)
+                .tag(TilePilotTab.windowBehavior)
 
-            ActionsDashboardView()
-                .tabItem { Label("Actions", systemImage: "square.grid.2x2") }
-                .tag(CoachTab.actions)
+            UnifiedControlsDashboardView()
+                .tabItem { Label("Actions & Shortcuts", systemImage: "square.grid.2x2") }
+                .tag(TilePilotTab.actions)
 
-            ShortcutsDashboardView()
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-                .tag(CoachTab.shortcuts)
+            FilesDashboardView()
+                .tabItem { Label("Config Files", systemImage: "doc.text") }
+                .tag(TilePilotTab.files)
 
-            ConfigDashboardView()
-                .tabItem { Label("Config", systemImage: "slider.horizontal.3") }
-                .tag(CoachTab.config)
-
-            HealthDashboardView()
-                .tabItem { Label("Health", systemImage: "stethoscope") }
-                .tag(CoachTab.health)
-
-            SetupDashboardView()
-                .tabItem { Label("Setup", systemImage: "shippingbox") }
-                .tag(CoachTab.setup)
-
-            CommandLogView()
-                .tabItem { Label("Logs", systemImage: "list.bullet.rectangle") }
-                .tag(CoachTab.logs)
+            SystemDashboardView()
+                .tabItem { Label("System", systemImage: "gearshape.2") }
+                .tag(TilePilotTab.system)
         }
-        .onChange(of: model.requestedCoachTab) { newValue in
+        .onChange(of: model.requestedTilePilotTab) { newValue in
             if let newValue {
-                selectedTab = newValue
-                _ = model.consumeRequestedCoachTab()
+                switch newValue {
+                case .actions, .shortcuts:
+                    selectedTab = .actions
+                case .files:
+                    selectedTab = .files
+                case .config, .health, .setup, .logs:
+                    selectedTab = .system
+                default:
+                    selectedTab = newValue
+                }
+                _ = model.consumeRequestedTilePilotTab()
             }
         }
         .task {
             if !hasAppliedInitialTabSelection {
-                selectedTab = model.consumeShouldStartOnSetupTab() ? .setup : .now
+                selectedTab = model.consumeShouldStartOnSetupTab() ? .system : .now
                 hasAppliedInitialTabSelection = true
             }
             model.startIfNeeded()
@@ -83,8 +83,180 @@ struct CoachRootView: View {
     }
 }
 
+struct UnifiedControlsDashboardView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ShortcutsDashboardView()
+    }
+}
+
+struct SystemDashboardView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var showAdvancedConfig = false
+    @State private var showAdvancedDiagnostics = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    summaryCard
+                    essentialsCard
+                    advancedPanelsCard
+                }
+                .padding()
+            }
+            .navigationTitle("TilePilot")
+            .task {
+                if model.bootstrapSnapshot == nil {
+                    await model.refreshBootstrapSetup()
+                }
+                if model.doctorSnapshot == nil {
+                    await model.refreshDoctor()
+                }
+                applyRequestedSectionIfNeeded()
+            }
+            .onChange(of: model.requestedSystemPanelSection) { _ in
+                applyRequestedSectionIfNeeded()
+            }
+        }
+    }
+
+    private var summaryCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("System Overview", systemImage: "gearshape.2")
+                    .font(.headline)
+
+                Text(model.systemSummaryLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach(model.systemPrimaryActions, id: \.self) { action in
+                        Button(action.label) {
+                            model.performSystemCheckAction(action)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    if model.systemPrimaryActions.isEmpty {
+                        Text("No immediate fixes needed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Recheck") {
+                        model.performSystemCheckAction(.recheck)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                if let error = model.lastErrorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                }
+                if let message = model.lastActionMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var essentialsCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(model.systemCheckRows) { row in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: row.status.symbolName)
+                            .foregroundStyle(color(for: row.status))
+                            .frame(width: 16)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(row.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text(row.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                ForEach(row.actions, id: \.self) { action in
+                                    Button(action.label) {
+                                        model.performSystemCheckAction(action)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .font(.caption)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Essentials", systemImage: "checklist")
+        }
+    }
+
+    private var advancedPanelsCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                DisclosureGroup("Advanced: Managed skhd Section (Safe Editor)", isExpanded: $showAdvancedConfig) {
+                    ConfigDashboardView(showNavigationContainer: false)
+                        .frame(minHeight: 380)
+                        .padding(.top, 6)
+                }
+
+                DisclosureGroup("Advanced: Diagnostics", isExpanded: $showAdvancedDiagnostics) {
+                    CommandLogView(showNavigationContainer: false)
+                        .frame(minHeight: 280)
+                        .padding(.top, 6)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Advanced", systemImage: "slider.horizontal.3")
+        }
+    }
+
+    private func color(for status: SystemCheckStatus) -> Color {
+        switch status {
+        case .good: return .green
+        case .notice: return .yellow
+        case .warning: return .orange
+        case .error: return .red
+        }
+    }
+
+    private func applyRequestedSectionIfNeeded() {
+        guard let section = model.consumeRequestedSystemPanelSection() else { return }
+        switch section {
+        case .essentials:
+            break
+        case .files:
+            model.requestOpenTilePilotTab(.files)
+        case .managedConfig:
+            showAdvancedConfig = true
+        case .diagnostics:
+            showAdvancedDiagnostics = true
+        }
+    }
+}
+
 struct NowDashboardView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var selectedWindowID: Int?
 
     var body: some View {
         NavigationStack {
@@ -117,8 +289,6 @@ struct NowDashboardView: View {
                             degradedBanner(reason: reason)
                         }
 
-                        focusedWindowControls(snapshot)
-
                         if snapshot.source == .yabai && !snapshot.degraded {
                             yabaiMapCard(snapshot)
                         } else {
@@ -137,32 +307,6 @@ struct NowDashboardView: View {
             .navigationTitle("TilePilot")
             .task {
                 await model.refreshLiveState()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func focusedWindowControls(_ snapshot: LiveStateSnapshot) -> some View {
-        if snapshot.source == .yabai, let focused = model.focusedWindowState {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        AppNameWithIconView(appName: focused.app)
-                            .font(.headline)
-                        Text(focused.title.isEmpty ? "Untitled" : focused.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    HStack(spacing: 8) {
-                        Button("Tile") { model.tileFocusedWindowNow() }
-                        Button("Float") { model.floatFocusedWindowNow() }
-                        Button("Toggle") { model.toggleFocusedWindowTiling() }
-                        Spacer(minLength: 0)
-                    }
-                }
-            } label: {
-                Label("Focused Window", systemImage: "macwindow")
             }
         }
     }
@@ -202,12 +346,17 @@ struct NowDashboardView: View {
 
     private func yabaiMapCard(_ snapshot: LiveStateSnapshot) -> some View {
         let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
+        let allWindows = snapshot.windows
         let visibleWindows = snapshot.windows.filter { window in
             window.isVisible && !window.isMinimized && !window.isHidden
         }
-        let windowsBySpace = Dictionary(grouping: visibleWindows, by: \.space)
+        let windowsBySpaceAll = Dictionary(grouping: allWindows, by: \.space)
         let visibleWindowCountByDisplay = Dictionary(grouping: visibleWindows, by: \.display).mapValues(\.count)
+        let totalWindowCountByDisplay = Dictionary(grouping: allWindows, by: \.display).mapValues(\.count)
         let visibleWindowCountBySpace = Dictionary(grouping: visibleWindows, by: \.space).mapValues(\.count)
+        let totalWindowCountBySpace = Dictionary(grouping: allWindows, by: \.space).mapValues(\.count)
+        let runtimeEnabled = model.canRunYabaiRuntimeCommands
+        let runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
 
         return GroupBox {
             VStack(alignment: .leading, spacing: 12) {
@@ -215,13 +364,18 @@ struct NowDashboardView: View {
                     Text("No displays returned by yabai.")
                         .foregroundStyle(.secondary)
                 } else {
+                    if !runtimeEnabled {
+                        Text("Window controls unavailable: \(runtimeDisabledReason)")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     ForEach(snapshot.displays) { display in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Label(display.name, systemImage: display.focused ? "display.and.arrow.down" : "display")
                                     .font(.headline)
                                 Spacer()
-                                Text("\(visibleWindowCountByDisplay[display.id] ?? 0) windows")
+                                Text("Visible: \(visibleWindowCountByDisplay[display.id] ?? 0) · Total: \(totalWindowCountByDisplay[display.id] ?? 0)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -238,35 +392,37 @@ struct NowDashboardView: View {
                                             Text(spaceTitle(space))
                                                 .font(.subheadline.weight(.semibold))
                                             Spacer()
-                                            Text("\(visibleWindowCountBySpace[space.index] ?? 0) windows")
+                                            Text("Visible: \(visibleWindowCountBySpace[space.index] ?? 0) · Total: \(totalWindowCountBySpace[space.index] ?? 0)")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
 
-                                        let spaceWindows = (windowsBySpace[space.index] ?? []).sorted { lhs, rhs in
+                                        let visibleCount = visibleWindowCountBySpace[space.index] ?? 0
+                                        let totalCount = totalWindowCountBySpace[space.index] ?? 0
+                                        let spaceWindows = (windowsBySpaceAll[space.index] ?? []).sorted { lhs, rhs in
                                             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                                            let lhsVisible = lhs.isVisible && !lhs.isMinimized && !lhs.isHidden
+                                            let rhsVisible = rhs.isVisible && !rhs.isMinimized && !rhs.isHidden
+                                            if lhsVisible != rhsVisible { return lhsVisible && !rhsVisible }
                                             return lhs.id < rhs.id
                                         }
 
-                                        if spaceWindows.isEmpty {
-                                            Text("No windows")
+                                        if totalCount == 0 {
+                                            Text("No windows on this desktop.")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         } else {
+                                            if visibleCount == 0 {
+                                                Text("No visible windows on this desktop (Total: \(totalCount)).")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                             ForEach(spaceWindows) { window in
-                                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                                    AppNameWithIconView(appName: window.app)
-                                                        .font(.caption.weight(.semibold))
-                                                    if window.focused {
-                                                        statusPill("Focused", color: .blue)
-                                                    } else if window.floating {
-                                                        statusPill("Floating", color: .orange)
-                                                    }
-                                                    Text(window.title.isEmpty ? "Untitled" : window.title)
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                        .lineLimit(1)
-                                                }
+                                                windowControlRow(
+                                                    window: window,
+                                                    runtimeEnabled: runtimeEnabled,
+                                                    runtimeDisabledReason: runtimeDisabledReason
+                                                )
                                             }
                                         }
                                     }
@@ -320,6 +476,93 @@ struct NowDashboardView: View {
         if space.focused { parts.append("• Focused") }
         else if space.visible { parts.append("• Visible") }
         return parts.joined(separator: " ")
+    }
+
+    private func windowControlRow(
+        window: WindowState,
+        runtimeEnabled: Bool,
+        runtimeDisabledReason: String
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            AppNameWithIconView(appName: window.app)
+                .font(.caption.weight(.semibold))
+
+            Text(window.title.isEmpty ? "Untitled" : window.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if window.focused {
+                statusPill("Focused", color: .blue)
+            }
+            if window.isMinimized {
+                statusPill("Minimized", color: .secondary)
+            } else if window.isHidden {
+                statusPill("Hidden", color: .secondary)
+            } else if !window.isVisible {
+                statusPill("Not Visible", color: .secondary)
+            }
+
+            Button {
+                model.toggleWindowFloating(windowID: window.id)
+            } label: {
+                statusPill(window.floating ? "Floating" : "Tiled", color: window.floating ? .orange : .green)
+            }
+            .buttonStyle(.plain)
+            .disabled(!runtimeEnabled)
+            .help(runtimeEnabled ? "Toggle floating/tiled state." : runtimeDisabledReason)
+
+            Button("Focus") {
+                model.focusWindow(windowID: window.id)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(!runtimeEnabled)
+
+            Menu {
+                Button("Focus Window") {
+                    model.focusWindow(windowID: window.id)
+                }
+                Button("Toggle Floating/Tiled") {
+                    model.toggleWindowFloating(windowID: window.id)
+                }
+                Divider()
+                Button("Set Floating") {
+                    model.setWindowFloating(windowID: window.id, shouldFloat: true)
+                }
+                .disabled(window.floating)
+                Button("Set Tiled") {
+                    model.setWindowFloating(windowID: window.id, shouldFloat: false)
+                }
+                .disabled(!window.floating)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(!runtimeEnabled)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedWindowID = window.id
+        }
+        .onTapGesture(count: 2) {
+            selectedWindowID = window.id
+            model.focusWindow(windowID: window.id)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(selectedWindowID == window.id ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(selectedWindowID == window.id ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        )
     }
 
     private func statusPill(_ text: String, color: Color) -> some View {
@@ -386,7 +629,7 @@ struct WindowBehaviorDashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Window Behavior")
+            .navigationTitle("TilePilot")
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     Divider()
@@ -441,11 +684,11 @@ struct WindowBehaviorDashboardView: View {
     private var pointerFocusCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Controls whether moving the mouse over a window changes focus.")
+                Text("These settings control how focus changes and whether the cursor moves automatically.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Picker("Hover Focus", selection: Binding(
+                Picker("Focus On Hover", selection: Binding(
                     get: { model.windowBehaviorPolicyDraft.hoverFocusMode },
                     set: { model.updateHoverFocusModeDraft($0) }
                 )) {
@@ -460,15 +703,24 @@ struct WindowBehaviorDashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                Text("If your cursor used to move by itself, that was a different yabai setting (`mouse_follows_focus`), not this one.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Button("Disable Hover Focus Now") { model.disableHoverFocus() }
-                    .buttonStyle(.borderedProminent)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Cursor Jumps to Focused Window", isOn: Binding(
+                        get: { model.windowBehaviorPolicyDraft.mouseFollowsFocusEnabled },
+                        set: { model.updateMouseFollowsFocusDraft($0) }
+                    ))
+                    .toggleStyle(.switch)
+
+                    Text("When enabled, the pointer moves to the focused window (`mouse_follows_focus`).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Hover Focus", systemImage: "cursorarrow.motionlines")
+            Label("Focus Behavior", systemImage: "cursorarrow.motionlines")
         }
     }
 
@@ -726,7 +978,7 @@ struct ActionsDashboardView: View {
 
                     if let snapshot = model.liveStateSnapshot, snapshot.degraded {
                         GroupBox {
-                            Text("Workspace-level actions are disabled in degraded mode. Focus/window actions may still be available when `yabai` query access remains healthy.")
+                            Text("Some layout actions are temporarily unavailable because TilePilot is using a reduced-precision window view. Window and focus actions may still work.")
                                 .font(.subheadline)
                                 .foregroundStyle(.orange)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -741,7 +993,7 @@ struct ActionsDashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Actions")
+            .navigationTitle("TilePilot")
         }
     }
 
@@ -749,7 +1001,7 @@ struct ActionsDashboardView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Click-first Actions", systemImage: "cursorarrow.click")
+                    Label("Quick Actions", systemImage: "cursorarrow.click")
                         .font(.headline)
                     Spacer()
                     if let action = model.activeActionID {
@@ -759,17 +1011,17 @@ struct ActionsDashboardView: View {
                     }
                 }
 
-                Text("Every action is capability-gated and shows an explicit disabled reason when unavailable.")
+                Text("Click an action to change the current desktop layout or the focused window.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                if let error = model.lastErrorMessage {
+                if let error = model.actionsLastErrorMessage {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
                         .lineLimit(3)
                 }
-                if let message = model.lastActionMessage {
+                if let message = model.actionsLastActionMessage {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.green)
@@ -801,7 +1053,7 @@ struct ActionsDashboardView: View {
         }
     }
 
-    private func actionCard(_ card: CoachActionCard) -> some View {
+    private func actionCard(_ card: TilePilotActionCard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -813,15 +1065,9 @@ struct ActionsDashboardView: View {
                 }
                 Spacer()
                 Button(buttonTitle(for: card)) {
-                    model.performCoachAction(card.id)
+                    model.performTilePilotAction(card.id)
                 }
                 .disabled(!card.enabled || model.activeActionID != nil)
-            }
-
-            if !card.requiredCapabilities.isEmpty {
-                Text("Requires: " + card.requiredCapabilities.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             if let reason = card.disabledReason {
@@ -834,12 +1080,12 @@ struct ActionsDashboardView: View {
         .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func buttonTitle(for card: CoachActionCard) -> String {
+    private func buttonTitle(for card: TilePilotActionCard) -> String {
         if model.activeActionID == card.id { return "Running..." }
-        return "Run"
+        return model.actionButtonLabel(for: card.id)
     }
 
-    private func actionLabel(_ action: CoachActionID) -> String {
+    private func actionLabel(_ action: TilePilotActionID) -> String {
         model.actionCards.first(where: { $0.id == action })?.title ?? action.rawValue
     }
 
@@ -860,21 +1106,30 @@ struct ShortcutsDashboardView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        headerCard
-                        searchCard
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            shortcutsToolbar
+                            searchCard
 
-                        if !model.shortcutParseIssues.isEmpty {
-                            issuesCard
+                            if !model.shortcutParseIssues.isEmpty {
+                                issuesCard
+                            }
+
+                            shortcutsListCard
                         }
-
-                        shortcutsListCard
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                     }
-                    .padding()
+                    .onChange(of: model.selectedShortcutStableKey) { stableKey in
+                        guard let stableKey else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(stableKey, anchor: .center)
+                        }
+                    }
                 }
             }
-            .navigationTitle("Shortcuts")
+            .navigationTitle("TilePilot")
             .task {
                 if model.shortcutEntries.isEmpty && !model.isRefreshingShortcuts {
                     await model.refreshShortcuts()
@@ -883,179 +1138,771 @@ struct ShortcutsDashboardView: View {
         }
     }
 
-    private var filteredEntries: [ShortcutEntry] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return model.shortcutEntries }
-        return model.shortcutEntries.filter { entry in
-            entry.combo.lowercased().contains(query) ||
-            entry.command.lowercased().contains(query) ||
-            entry.category.lowercased().contains(query)
+    private var filteredRows: [UnifiedControlRow] {
+        model.filteredUnifiedControlRows(query: searchText)
+    }
+
+    private var showGroupHeaders: Bool {
+        groupedRows.count > 1
+    }
+
+    private var groupedRows: [(UnifiedControlGroup, [UnifiedControlRow])] {
+        let grouped = Dictionary(grouping: filteredRows, by: \.group)
+        let orderedGroups = grouped.keys.sorted { lhs, rhs in
+            if lhs.sortRank != rhs.sortRank { return lhs.sortRank < rhs.sortRank }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+        return orderedGroups.map { group in
+            let rows = grouped[group]?.sorted { lhs, rhs in
+                if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
+                return lhs.id < rhs.id
+            } ?? []
+            return (group, rows)
         }
     }
 
-    private var groupedEntries: [(String, [ShortcutEntry])] {
-        let grouped = Dictionary(grouping: filteredEntries, by: \.category)
-        return grouped.keys.sorted().map { key in
-            (key, grouped[key]?.sorted { lhs, rhs in
-                if lhs.combo != rhs.combo { return lhs.combo < rhs.combo }
-                return lhs.sourceLine < rhs.sourceLine
-            } ?? [])
-        }
-    }
+    private var shortcutsToolbar: some View {
+        HStack(spacing: 8) {
+            Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
+                Task { await model.refreshShortcuts() }
+            }
+            .disabled(model.isRefreshingShortcuts)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
 
-    private var headerCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Shortcuts", systemImage: "keyboard")
-                        .font(.headline)
-                    Spacer()
-                    if model.isRefreshingShortcuts {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-                Text("Parses `~/.config/skhd/skhdrc` line-by-line and tolerates malformed lines.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let path = model.shortcutFilePath {
-                    Text(path)
-                        .font(.caption)
+            if model.isRefreshingShortcuts {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text("\(filteredRows.count) shown")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if !model.pinnedShortcutKeys.isEmpty || !model.pinnedDirectionalGroupIDs.isEmpty {
+                HStack(spacing: 8) {
+                    Label("\(model.pinnedShortcutEntries.count) pinned", systemImage: "pin.fill")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: 10) {
-                    Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
-                        Task { await model.refreshShortcuts() }
+                    if !model.pinnedDirectionalGroupIDs.isEmpty {
+                        Label("\(model.pinnedDirectionalGroups.count) groups", systemImage: "square.grid.2x2")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(model.isRefreshingShortcuts)
-
-                    Text("\(filteredEntries.count) shown")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Source", systemImage: "doc.text")
+
+            Spacer()
         }
     }
 
     private var searchCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Search combo, command, or category", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                Text("Examples: `cmd - h`, `space --focus`, `window --toggle float`")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Search", systemImage: "magnifyingglass")
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search controls, shortcuts, or categories", text: $searchText)
         }
+        .textFieldStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var issuesCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(model.shortcutParseIssues.prefix(10)), id: \.self) { issue in
-                    Label(issue, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                if model.shortcutParseIssues.count > 10 {
-                    Text("\(model.shortcutParseIssues.count - 10) more issues hidden")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("\(model.shortcutParseIssues.count) lines were skipped while loading shortcuts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("Logs") {
+                model.requestOpenSystemSection(.diagnostics)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Parse Issues", systemImage: "exclamationmark.triangle.fill")
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var shortcutsListCard: some View {
-        GroupBox {
-            if filteredEntries.isEmpty {
+        Group {
+            if filteredRows.isEmpty {
                 EmptyStateView(
-                    title: model.shortcutEntries.isEmpty ? "No shortcuts loaded" : "No matching shortcuts",
+                    title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
                     systemImage: "keyboard",
                     message: model.shortcutEntries.isEmpty
-                        ? "Reload after creating `skhdrc`, or check the parse issues above."
+                        ? "Reload after creating `skhdrc`, or check shortcut parse issues."
                         : "Try a broader search query."
                 )
-                .frame(minHeight: 180)
+                .frame(minHeight: 160)
             } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(groupedEntries, id: \.0) { category, entries in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(category)
-                                .font(.headline)
-                            ForEach(entries) { entry in
-                                shortcutRow(entry)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(groupedRows, id: \.0) { group, rows in
+                        VStack(alignment: .leading, spacing: 6) {
+                            if showGroupHeaders {
+                                Text(group.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                            }
+
+                            let shortcutEntries = rows.compactMap(\.shortcutEntry)
+                            let actionOnlyRows = rows.filter { $0.shortcutEntry == nil }
+
+                            if group == .desktops || group == .experimental {
+                                desktopShortcutsSection(shortcutEntries)
+                                ForEach(actionOnlyRows, id: \.id) { row in
+                                    unifiedActionOnlyRow(row)
+                                }
+                            } else {
+                                directionalShortcutsSection(shortcutEntries)
+                                ForEach(actionOnlyRows, id: \.id) { row in
+                                    unifiedActionOnlyRow(row)
+                                }
                             }
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } label: {
-            Label("Parsed Shortcuts", systemImage: "list.bullet")
         }
     }
 
     private func shortcutRow(_ entry: ShortcutEntry) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(entry.combo)
-                    .font(.system(.body, design: .monospaced))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        let linkedAction = model.actionCard(forShortcut: entry)
+        let title = model.shortcutTitle(entry)
+        let secondaryText = model.shortcutSecondaryText(entry)
+        return HStack(alignment: .center, spacing: 8) {
+            comboSummaryView(for: entry)
+                .frame(minWidth: 190, idealWidth: 240, maxWidth: 300, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.command)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                    HStack(spacing: 8) {
-                        Text("Line \(entry.sourceLine)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if let warning = entry.warning {
-                            Text(warning)
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                if let secondaryText {
+                    Text(secondaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let warning = entry.warning {
+                    Text(warning)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 4) {
+                Button {
+                    model.toggleShortcutPinned(entry)
+                } label: {
+                    Image(systemName: model.isShortcutPinned(entry) ? "pin.fill" : "pin")
+                }
+                .help(model.isShortcutPinned(entry) ? "Unpin from quick menu" : "Pin to quick menu")
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                Button("Run") {
+                    model.runShortcut(entry)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                if let linkedAction {
+                    Button(model.actionButtonLabel(for: linkedAction.id)) {
+                        model.performTilePilotAction(linkedAction.id)
+                    }
+                    .disabled(!linkedAction.enabled || model.activeActionID != nil)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+
+                Button("Edit") {
+                    model.openShortcutSource(entry)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectShortcut(entry)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(model.isShortcutSelected(entry) ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(model.isShortcutSelected(entry) ? Color.accentColor.opacity(0.30) : Color.clear, lineWidth: 1)
+        )
+        .id(entry.stableKey)
+    }
+
+    private func unifiedActionOnlyRow(_ row: UnifiedControlRow) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "cursorarrow.click.2")
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(row.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let actionID = row.actionID {
+                let card = model.actionCard(for: actionID)
+                Button(model.actionButtonLabel(for: actionID)) {
+                    model.performTilePilotAction(actionID)
+                }
+                .disabled((card?.enabled == false) || model.activeActionID != nil)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.04))
+        )
+    }
+
+    @ViewBuilder
+    private func comboSummaryView(for entry: ShortcutEntry) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(model.displayShortcutComboWords(entry))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+
+            shortcutSymbolCaps(for: entry, glyphSize: 14, highlighted: true)
+        }
+    }
+
+    private struct DesktopShortcutFamilySummary: Identifiable {
+        enum Kind: String {
+            case goToDesktop
+            case moveWindowToDesktopAndFollow
+        }
+
+        let kind: Kind
+        let entries: [(entry: ShortcutEntry, desktop: Int)]
+        var id: String { kind.rawValue }
+    }
+
+    private struct DirectionalShortcutFamilySummary: Identifiable {
+        enum Kind: String, CaseIterable {
+            case focusWindow
+            case moveWindow
+            case resizeWindow
+            case swapWindow
+        }
+
+        enum Direction: String, CaseIterable {
+            case up
+            case left
+            case down
+            case right
+
+            var sortRank: Int {
+                switch self {
+                case .up: return 0
+                case .left: return 1
+                case .down: return 2
+                case .right: return 3
+                }
+            }
+        }
+
+        let kind: Kind
+        let entries: [(entry: ShortcutEntry, direction: Direction)]
+        var id: String { kind.rawValue }
+    }
+
+    @ViewBuilder
+    private func desktopShortcutsSection(_ entries: [ShortcutEntry]) -> some View {
+        let summaries = desktopShortcutFamilies(from: entries)
+        let covered = Set(summaries.flatMap { $0.entries.map { $0.entry.id } })
+        let leftovers = entries.filter { !covered.contains($0.id) }
+
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(summaries) { summary in
+                desktopShortcutFamilyCard(summary)
+            }
+            if !leftovers.isEmpty {
+                ForEach(leftovers) { entry in
+                    shortcutRow(entry)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func directionalShortcutsSection(_ entries: [ShortcutEntry]) -> some View {
+        let summaries = directionalShortcutFamilies(from: entries)
+        let covered = Set(summaries.flatMap { $0.entries.map { $0.entry.id } })
+        let leftovers = entries.filter { !covered.contains($0.id) }
+
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(summaries) { summary in
+                directionalShortcutFamilyCard(summary)
+            }
+            if !leftovers.isEmpty {
+                ForEach(leftovers) { entry in
+                    shortcutRow(entry)
+                }
+            }
+        }
+    }
+
+    private func directionalShortcutFamilyCard(_ summary: DirectionalShortcutFamilySummary) -> some View {
+        let orderedEntries = summary.entries.sorted { lhs, rhs in
+            if lhs.direction.sortRank != rhs.direction.sortRank { return lhs.direction.sortRank < rhs.direction.sortRank }
+            return lhs.entry.sourceLine < rhs.entry.sourceLine
+        }
+        let byDirection = Dictionary(uniqueKeysWithValues: orderedEntries.map { ($0.direction, $0.entry) })
+
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(directionalFamilyTitle(summary.kind))
+                        .font(.subheadline.weight(.semibold))
+                    if let group = directionalGroup(from: summary.kind) {
+                        Button {
+                            model.toggleDirectionalGroupPinned(group)
+                        } label: {
+                            Image(systemName: model.isDirectionalGroupPinned(group) ? "pin.fill" : "pin")
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .help(model.isDirectionalGroupPinned(group) ? "Unpin this directional group from right-click menu" : "Pin this directional group to right-click menu")
                     }
                 }
 
-                Spacer()
+                Text(directionalFamilyDescription(summary.kind))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: 6) {
-                    Button("Copy Combo") {
-                        model.copyShortcutCombo(entry)
-                    }
-                    .buttonStyle(.borderless)
-
-                    Button("Copy Cmd") {
-                        model.copyShortcutCommand(entry)
-                    }
-                    .buttonStyle(.borderless)
+            VStack(spacing: 5) {
+                HStack {
+                    Spacer(minLength: 0)
+                    directionalDirectionBox(direction: .up, entry: byDirection[.up])
+                    Spacer(minLength: 0)
                 }
-                .font(.caption)
+
+                HStack(spacing: 6) {
+                    directionalDirectionBox(direction: .left, entry: byDirection[.left])
+                    directionalDirectionBox(direction: .down, entry: byDirection[.down])
+                    directionalDirectionBox(direction: .right, entry: byDirection[.right])
+                }
             }
         }
         .padding(8)
-        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func directionalDirectionBox(
+        direction: DirectionalShortcutFamilySummary.Direction,
+        entry: ShortcutEntry?
+    ) -> some View {
+        if let entry {
+            Button {
+                model.runShortcut(entry)
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: directionArrowSymbolName(direction))
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.primary)
+
+                    shortcutSymbolCaps(for: entry, glyphSize: 14, highlighted: false)
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .frame(minWidth: 74, maxWidth: 80, minHeight: 48)
+                .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.blue.opacity(0.28), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .help(model.shortcutExplanation(entry))
+        } else {
+            VStack(spacing: 3) {
+                Image(systemName: directionArrowSymbolName(direction))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Text("—")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .frame(minWidth: 74, maxWidth: 80, minHeight: 48)
+            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.secondary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            )
+        }
+    }
+
+    private func desktopShortcutFamilyCard(_ summary: DesktopShortcutFamilySummary) -> some View {
+        let exampleLimit = summary.entries.count <= 4 ? 4 : 3
+        let examples = Array(summary.entries.prefix(exampleLimit))
+        let moreCount = max(0, summary.entries.count - examples.count)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(desktopFamilyTitle(summary.kind))
+                        .font(.subheadline.weight(.semibold))
+                    Text(desktopFamilyDescription(summary.kind))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                if summary.kind == .goToDesktop {
+                    Button("Use macOS Shortcut") {
+                        model.openMissionControlKeyboardShortcuts()
+                    }
+                    .font(.caption)
+                } else {
+                    Text("Requires SA")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.1), in: Capsule())
+                }
+            }
+
+            HStack(spacing: 6) {
+                ForEach(examples, id: \.entry.id) { sample in
+                    Button {
+                        model.selectShortcut(sample.entry)
+                    } label: {
+                        HStack(alignment: .center, spacing: 6) {
+                            Text(model.displayShortcutComboWords(sample.entry))
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(model.displayShortcutComboSymbolsSpaced(sample.entry))
+                                .font(.system(size: 14, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .help(desktopExampleHelp(sample.entry, desktop: sample.desktop, kind: summary.kind))
+                }
+                if moreCount > 0 {
+                    Text("+\(moreCount) more")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func desktopShortcutFamilies(from entries: [ShortcutEntry]) -> [DesktopShortcutFamilySummary] {
+        var goTo: [(ShortcutEntry, Int)] = []
+        var moveAndFollow: [(ShortcutEntry, Int)] = []
+
+        for entry in entries {
+            if let desktop = desktopGoToTarget(from: entry.command), !entry.command.lowercased().contains("window --space") {
+                goTo.append((entry, desktop))
+                continue
+            }
+            if let desktop = desktopMoveAndFollowTarget(from: entry.command) {
+                moveAndFollow.append((entry, desktop))
+                continue
+            }
+        }
+
+        let sortedGoTo = goTo.sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.0.sourceLine < rhs.0.sourceLine : lhs.1 < rhs.1 }
+        let sortedMove = moveAndFollow.sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.0.sourceLine < rhs.0.sourceLine : lhs.1 < rhs.1 }
+
+        var output: [DesktopShortcutFamilySummary] = []
+        if !sortedGoTo.isEmpty {
+            output.append(.init(kind: .goToDesktop, entries: sortedGoTo.map { ($0.0, $0.1) }))
+        }
+        if !sortedMove.isEmpty {
+            output.append(.init(kind: .moveWindowToDesktopAndFollow, entries: sortedMove.map { ($0.0, $0.1) }))
+        }
+        return output
+    }
+
+    private func directionalShortcutFamilies(from entries: [ShortcutEntry]) -> [DirectionalShortcutFamilySummary] {
+        var buckets: [DirectionalShortcutFamilySummary.Kind: [(ShortcutEntry, DirectionalShortcutFamilySummary.Direction)]] = [:]
+
+        for entry in entries {
+            guard let (kind, direction) = directionalShortcutKindAndDirection(from: entry.command) else { continue }
+            buckets[kind, default: []].append((entry, direction))
+        }
+
+        var output: [DirectionalShortcutFamilySummary] = []
+        for kind in DirectionalShortcutFamilySummary.Kind.allCases {
+            guard let rawEntries = buckets[kind], !rawEntries.isEmpty else { continue }
+            let sorted = rawEntries.sorted { lhs, rhs in
+                if lhs.1.sortRank != rhs.1.sortRank { return lhs.1.sortRank < rhs.1.sortRank }
+                return lhs.0.sourceLine < rhs.0.sourceLine
+            }
+            output.append(.init(kind: kind, entries: sorted.map { ($0.0, $0.1) }))
+        }
+        return output
+    }
+
+    private func directionalShortcutKindAndDirection(from command: String) -> (DirectionalShortcutFamilySummary.Kind, DirectionalShortcutFamilySummary.Direction)? {
+        let c = command.lowercased()
+
+        if let direction = cardinalDirection(from: c, west: "yabai -m window --focus west", east: "yabai -m window --focus east", north: "yabai -m window --focus north", south: "yabai -m window --focus south") {
+            return (.focusWindow, direction)
+        }
+        if let direction = cardinalDirection(from: c, west: "yabai -m window --warp west", east: "yabai -m window --warp east", north: "yabai -m window --warp north", south: "yabai -m window --warp south") {
+            return (.moveWindow, direction)
+        }
+        if let direction = cardinalDirection(from: c, west: "yabai -m window --swap west", east: "yabai -m window --swap east", north: "yabai -m window --swap north", south: "yabai -m window --swap south") {
+            return (.swapWindow, direction)
+        }
+
+        if c.contains("yabai -m window --resize left:") { return (.resizeWindow, .left) }
+        if c.contains("yabai -m window --resize right:") { return (.resizeWindow, .right) }
+        if c.contains("yabai -m window --resize top:") { return (.resizeWindow, .up) }
+        if c.contains("yabai -m window --resize bottom:") { return (.resizeWindow, .down) }
+
+        return nil
+    }
+
+    private func cardinalDirection(
+        from command: String,
+        west: String,
+        east: String,
+        north: String,
+        south: String
+    ) -> DirectionalShortcutFamilySummary.Direction? {
+        if command.contains(north) { return .up }
+        if command.contains(west) { return .left }
+        if command.contains(south) { return .down }
+        if command.contains(east) { return .right }
+        return nil
+    }
+
+    private func directionalFamilyTitle(_ kind: DirectionalShortcutFamilySummary.Kind) -> String {
+        switch kind {
+        case .focusWindow:
+            return "Focus Window (Direction Keys)"
+        case .moveWindow:
+            return "Move Window in Layout (Direction Keys)"
+        case .resizeWindow:
+            return "Resize Window (Direction Keys)"
+        case .swapWindow:
+            return "Swap Window (Direction Keys)"
+        }
+    }
+
+    private func directionalFamilyDescription(_ kind: DirectionalShortcutFamilySummary.Kind) -> String {
+        switch kind {
+        case .focusWindow:
+            return "Use the I / J / K / L direction keys to move focus up, left, down, and right."
+        case .moveWindow:
+            return "Use the I / J / K / L direction keys to move the focused window to another tile position."
+        case .resizeWindow:
+            return "Use the I / J / K / L direction keys to resize the focused window up, left, down, and right."
+        case .swapWindow:
+            return "Use the I / J / K / L direction keys to swap with a neighboring window in a direction."
+        }
+    }
+
+    private func directionalGroup(from kind: DirectionalShortcutFamilySummary.Kind) -> DirectionalShortcutGroup? {
+        DirectionalShortcutGroup(rawValue: kind.rawValue)
+    }
+
+    private func directionArrowSymbolName(_ direction: DirectionalShortcutFamilySummary.Direction) -> String {
+        switch direction {
+        case .up: return "arrow.up"
+        case .left: return "arrow.left"
+        case .down: return "arrow.down"
+        case .right: return "arrow.right"
+        }
+    }
+
+    @ViewBuilder
+    private func shortcutSymbolCaps(
+        for entry: ShortcutEntry,
+        glyphSize: CGFloat,
+        highlighted: Bool
+    ) -> some View {
+        let symbols = model.displayShortcutComboSymbols(entry)
+        let glyphs = symbols.isEmpty ? [] : Array(symbols).map(String.init)
+        HStack(spacing: 4) {
+            ForEach(Array(glyphs.enumerated()), id: \.offset) { _, glyph in
+                Text(glyph)
+                    .font(.system(size: glyphSize, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .frame(minWidth: glyphSize + 6, minHeight: glyphSize + 4)
+                    .background(
+                        (highlighted ? Color.blue.opacity(0.10) : Color.primary.opacity(0.08)),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func desktopFamilyTitle(_ kind: DesktopShortcutFamilySummary.Kind) -> String {
+        switch kind {
+        case .goToDesktop: return "Go to Desktop"
+        case .moveWindowToDesktopAndFollow: return "Move Window to Desktop"
+        }
+    }
+
+    private func desktopFamilyDescription(_ kind: DesktopShortcutFamilySummary.Kind) -> String {
+        switch kind {
+        case .goToDesktop:
+            return "Switch to desktop number N. macOS can do this natively in Keyboard Shortcuts → Mission Control (no SIP changes needed)."
+        case .moveWindowToDesktopAndFollow:
+            return "Move the focused window to desktop N, then switch there. This is an advanced yabai desktop-control feature (scripting addition) and may not be worth enabling for many users."
+        }
+    }
+
+    private func desktopExampleHelp(_ entry: ShortcutEntry, desktop: Int, kind: DesktopShortcutFamilySummary.Kind) -> String {
+        switch kind {
+        case .goToDesktop:
+            return "\(model.displayShortcutComboWords(entry)) switches to Desktop \(desktop)."
+        case .moveWindowToDesktopAndFollow:
+            return "\(model.displayShortcutComboWords(entry)) moves the focused window to Desktop \(desktop), then switches there."
+        }
+    }
+
+    private func desktopGoToTarget(from command: String) -> Int? {
+        let c = command.lowercased()
+        guard !c.contains("window --space") else { return nil }
+        guard let range = c.range(of: "yabai -m space --focus ") else { return nil }
+        let suffix = c[range.upperBound...]
+        let digits = suffix.prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    private func desktopMoveAndFollowTarget(from command: String) -> Int? {
+        let c = command.lowercased()
+        guard c.contains("yabai -m window --space ") else { return nil }
+        guard let range = c.range(of: "yabai -m window --space ") else { return nil }
+        let suffix = c[range.upperBound...]
+        let digits = suffix.prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    private func shortcutIntentGroup(_ entry: ShortcutEntry) -> String {
+        let c = entry.command.lowercased()
+
+        if c.contains("yabai -m window --space") {
+            return "Experimental Desktop Move"
+        }
+        if c.contains("yabai -m space --focus") {
+            return "Desktops"
+        }
+        if c.contains("yabai -m window --warp") {
+            return "Window Placement"
+        }
+        if c.contains("yabai -m window --resize") {
+            return "Window Size"
+        }
+        if c.contains("yabai -m window --toggle float") ||
+            c.contains("yabai -m space --balance") ||
+            c.contains("yabai -m space --layout") ||
+            c.contains("yabai -m space --rotate") {
+            return "Tiling & Layout"
+        }
+        if c.contains("yabai -m window --focus") {
+            return "Focus"
+        }
+        if c.contains("yabai -m display") {
+            return "Displays"
+        }
+        if c.contains("osascript") || c.contains("skhd -k") {
+            return "Automation"
+        }
+
+        if let first = c.split(whereSeparator: \.isWhitespace).first {
+            let token = String(first)
+            if token.hasPrefix("/") || token.hasPrefix("~/") || token.hasPrefix("./") {
+                return "Helpers & Scripts"
+            }
+        }
+        if c.hasPrefix("open ") || c.contains(" open ") {
+            return "Apps"
+        }
+
+        if entry.category == "Spaces" { return "Desktops" }
+        if entry.category == "Windows" { return "Tiling & Layout" }
+        return entry.category == "Other" ? "Other" : entry.category
+    }
+
+    private func shortcutGroupRank(_ group: String) -> Int {
+        switch group {
+        case "Desktops": return 0
+        case "Window Placement": return 1
+        case "Tiling & Layout": return 2
+        case "Window Size": return 3
+        case "Helpers & Scripts": return 4
+        case "Apps": return 5
+        case "Focus": return 6
+        case "Displays": return 7
+        case "Automation": return 8
+        case "Other": return 98
+        case "Experimental Desktop Move": return 99
+        default: return 50
+        }
+    }
+
+    private func shortcutGroupTitle(_ group: String) -> String {
+        switch group {
+        case "Experimental Desktop Move":
+            return "Desktop Move (Experimental)"
+        default:
+            return group
+        }
     }
 }
 
 struct ConfigDashboardView: View {
     @EnvironmentObject private var model: AppModel
+    let showNavigationContainer: Bool
+
+    init(showNavigationContainer: Bool = true) {
+        self.showNavigationContainer = showNavigationContainer
+    }
 
     private var draftBinding: Binding<String> {
         Binding(
@@ -1065,23 +1912,37 @@ struct ConfigDashboardView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    headerCard
-                    editorCard
-                    diffCard
-                    backupsCard
+        Group {
+            if showNavigationContainer {
+                NavigationStack {
+                    dashboardBody
+                        .navigationTitle("TilePilot")
                 }
-                .padding()
-            }
-            .navigationTitle("Config")
-            .task {
-                if model.configFilePath == nil && !model.isRefreshingConfig {
-                    await model.refreshConfig()
-                }
+            } else {
+                dashboardBody
             }
         }
+    }
+
+    private var dashboardBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                headerCard
+                editorCard
+                diffCard
+                backupsCard
+            }
+            .padding()
+        }
+        .task {
+            if model.configFilePath == nil && !model.isRefreshingConfig {
+                await model.refreshConfig()
+            }
+        }
+    }
+
+    private var cardHeaderLabel: some View {
+        Label("Config", systemImage: "slider.horizontal.3")
     }
 
     private var headerCard: some View {
@@ -1152,9 +2013,7 @@ struct ConfigDashboardView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Config MVP", systemImage: "slider.horizontal.3")
-        }
+        } label: { cardHeaderLabel }
     }
 
     private var editorCard: some View {
@@ -1270,7 +2129,7 @@ struct SetupDashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Setup")
+            .navigationTitle("TilePilot")
         }
     }
 
@@ -1285,6 +2144,22 @@ struct SetupDashboardView: View {
                 Text("This launches a Terminal installer that can install Homebrew, `yabai`, and `skhd`. Some steps require admin approval and user confirmation.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    Button(model.isLaunchingSetupInstaller ? "Opening Installer..." : "Install Dependencies") {
+                        model.runSetupInstallerInTerminal()
+                    }
+                    .disabled(model.isLaunchingSetupInstaller)
+
+                    Button(model.isRefreshingBootstrap ? "Checking..." : "Run Setup Check") {
+                        Task { await model.refreshBootstrapSetup() }
+                    }
+                    .disabled(model.isRefreshingBootstrap)
+
+                    Button("Open Accessibility Settings") {
+                        model.openAccessibilitySettings()
+                    }
+                }
 
                 if let installerURL = model.lastSetupInstallerURL {
                     Text("Installer script: \(installerURL.path)")
@@ -1361,6 +2236,15 @@ struct SetupDashboardView: View {
                     }
                     .disabled(model.isLaunchingSetupInstaller)
 
+                    Button("Keyboard Shortcuts (Mission Control)") {
+                        model.openMissionControlKeyboardShortcuts()
+                    }
+
+                    Button(model.isLaunchingScriptingAdditionFix ? "Opening SA Fix..." : "Fix Scripting Addition") {
+                        model.runScriptingAdditionRepairInTerminal()
+                    }
+                    .disabled(model.isLaunchingScriptingAdditionFix)
+
                     Button("Request Accessibility Access") {
                         model.requestAccessibilityAccessPrompt()
                     }
@@ -1386,10 +2270,16 @@ struct SetupDashboardView: View {
                     .foregroundStyle(.secondary)
                 Text("1. Grant Accessibility to TilePilot (and yabai/skhd if your setup requires it).")
                 Text("2. Confirm Mission Control settings in Health.")
-                Text("3. Optional advanced yabai features require scripting-addition setup and SIP configuration.")
+                Text("3. Desktop switching can use macOS Mission Control keyboard shortcuts (no SIP changes required).")
+                Text("4. Moving windows between desktops with yabai shortcuts requires the yabai scripting addition (and may require SIP configuration).")
 
                 HStack {
                     Button("Open Mission Control Settings") { model.openMissionControlSettings() }
+                    Button("Keyboard Shortcuts (Mission Control)") { model.openMissionControlKeyboardShortcuts() }
+                    Button(model.isLaunchingScriptingAdditionFix ? "Opening SA Fix..." : "Fix Scripting Addition") {
+                        model.runScriptingAdditionRepairInTerminal()
+                    }
+                    .disabled(model.isLaunchingScriptingAdditionFix)
                     Button("Run Setup Check") {
                         Task { await model.refreshDoctor() }
                     }
@@ -1496,7 +2386,7 @@ struct HealthDashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Health")
+            .navigationTitle("TilePilot")
         }
     }
 
@@ -1652,6 +2542,24 @@ struct HealthDashboardView: View {
                                     .buttonStyle(.link)
                                     .font(.caption)
                                 }
+                                if item.title.localizedCaseInsensitiveContains("scripting addition"), item.status != .available {
+                                    HStack(spacing: 8) {
+                                        Button("Keyboard Shortcuts (Mission Control)") {
+                                            model.openMissionControlKeyboardShortcuts()
+                                        }
+                                        Button(model.isLaunchingScriptingAdditionFix ? "Opening Fix..." : "Fix Scripting Addition") {
+                                            model.runScriptingAdditionRepairInTerminal()
+                                        }
+                                        .disabled(model.isLaunchingScriptingAdditionFix)
+                                        Button("Recheck") {
+                                            Task { await model.refreshDoctor() }
+                                        }
+                                        .disabled(model.isRefreshing)
+                                    }
+                                    .font(.caption)
+                                    .buttonStyle(.borderless)
+                                    .padding(.top, 2)
+                                }
                             }
                         }
                     }
@@ -1691,6 +2599,13 @@ struct HealthDashboardView: View {
                     Button("Request Accessibility Access") {
                         model.requestAccessibilityAccessPrompt()
                     }
+                    Button("Keyboard Shortcuts (Mission Control)") {
+                        model.openMissionControlKeyboardShortcuts()
+                    }
+                    Button(model.isLaunchingScriptingAdditionFix ? "Opening SA Fix..." : "Fix Scripting Addition") {
+                        model.runScriptingAdditionRepairInTerminal()
+                    }
+                    .disabled(model.isLaunchingScriptingAdditionFix)
                     Button("Open Accessibility Settings") {
                         model.openAccessibilitySettings()
                     }
@@ -1715,7 +2630,7 @@ struct HealthDashboardView: View {
                 }
 
                 if snapshot.healthBadge == .blocked {
-                    Text("Blocked commonly means missing Accessibility permission or a missing yabai/skhd binary.")
+                    Text("Blocked commonly means missing yabai/skhd, missing permissions, or a broken yabai scripting addition. Desktop switching can still use macOS Mission Control keyboard shortcuts.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -1765,54 +2680,69 @@ struct HealthDashboardView: View {
 
 struct CommandLogView: View {
     @EnvironmentObject private var model: AppModel
+    let showNavigationContainer: Bool
+
+    init(showNavigationContainer: Bool = true) {
+        self.showNavigationContainer = showNavigationContainer
+    }
 
     var body: some View {
-        NavigationStack {
-            List(model.commandLogs) { entry in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(entry.command)
-                            .font(.system(.body, design: .monospaced))
-                            .lineLimit(1)
-                        Spacer()
-                        Text(statusLabel(entry))
-                            .font(.caption)
-                            .foregroundStyle(statusColor(entry))
-                    }
+        Group {
+            if showNavigationContainer {
+                NavigationStack {
+                    listBody
+                        .navigationTitle("TilePilot")
+                }
+            } else {
+                listBody
+            }
+        }
+    }
 
-                    Text("\(entry.startedAt.formatted(date: .omitted, time: .standard)) · \(entry.durationMs) ms")
+    private var listBody: some View {
+        List(model.commandLogs) { entry in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(entry.command)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                    Spacer()
+                    Text(statusLabel(entry))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(statusColor(entry))
+                }
 
-                    if !entry.stderrSnippet.isEmpty {
-                        Text(entry.stderrSnippet)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .lineLimit(2)
-                        if let hint = hint(for: entry) {
-                            Text(hint)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                        }
-                    } else if !entry.stdoutSnippet.isEmpty {
-                        Text(entry.stdoutSnippet)
+                Text("\(entry.startedAt.formatted(date: .omitted, time: .standard)) · \(entry.durationMs) ms")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if !entry.stderrSnippet.isEmpty {
+                    Text(entry.stderrSnippet)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                    if let hint = hint(for: entry) {
+                        Text(hint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(3)
                     }
+                } else if !entry.stdoutSnippet.isEmpty {
+                    Text(entry.stdoutSnippet)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-                .padding(.vertical, 2)
             }
-            .navigationTitle("Command Log")
-            .overlay {
-                if model.commandLogs.isEmpty {
-                    EmptyStateView(
-                        title: "No Command Logs",
-                        systemImage: "list.bullet.rectangle",
-                        message: "Run Setup Check to populate command diagnostics."
-                    )
-                }
+            .padding(.vertical, 2)
+        }
+        .overlay {
+            if model.commandLogs.isEmpty {
+                EmptyStateView(
+                    title: "No Command Logs",
+                    systemImage: "list.bullet.rectangle",
+                    message: "Run System Recheck to populate diagnostics."
+                )
             }
         }
     }
@@ -1838,7 +2768,7 @@ struct CommandLogView: View {
         }
 
         if command.contains("yabai"), stderr.contains("no such file or directory") {
-            return "yabai is not installed yet. Use Setup -> Install Dependencies."
+            return "yabai is not installed yet. Use System -> Install Dependencies."
         }
 
         if command.contains("yabai"), stderr.contains("could not connect") {

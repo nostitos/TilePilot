@@ -61,4 +61,4 @@ Some advanced desktop actions (especially moving windows between desktops) depen
 
 Build, packaging, and signing details are in:
 
-- `docs/DEVELOPMENT.md`
+- [Development Notes](docs/DEVELOPMENT.md)

@@ -4,8 +4,6 @@
 
 # TilePilot
 
-> Breaking change (2026-02-26): default directional keyboard navigation examples and recommended bindings use an `IJKL` layout instead of `HJKL`. If you rely on older `HJKL` muscle memory, update your `skhdrc` or keep your existing bindings intentionally.
-
 TilePilot is a native macOS menu bar app that makes the `yabai` + `skhd` stack usable for normal people without giving up the power users rely on.
 
 `yabai` is a tiling window manager for macOS with a strong command-line interface for querying and controlling windows, desktops, and displays. `skhd` is a fast hotkey daemon for macOS with a simple config DSL and live config reloading. Together they are extremely powerful, but they can be opaque, fragile, and intimidating when something goes wrong.
@@ -49,63 +47,9 @@ What still requires manual user approval:
 - Some Mission Control settings
 - `yabai` scripting-addition setup (and SIP configuration) for desktop switching / move-window desktop shortcuts and other advanced window/desktop control features
 
-## Scripting Addition + SIP (Why It Is Needed)
+## Scripting Addition + SIP
 
-Some core-feeling desktop actions in TilePilot (such as:
-- switching to another desktop with shortcuts like `Option + 1`
-- moving the focused window to another desktop and following it
-) depend on `yabai`'s **scripting addition**.
-
-### Why this exists (technical reason)
-
-`yabai` can do a lot through normal APIs and its message socket, but macOS desktop/space control is not fully exposed through public APIs in a way that allows all of the window/desktop operations power users expect.
-
-For many desktop/space/window operations, `yabai` relies on a scripting addition loaded into `Dock.app` (the system process that owns the primary connection to the macOS WindowServer for these behaviors). That is why commands such as desktop focus/move can fail with errors mentioning the scripting addition.
-
-Because `Dock.app` is a protected Apple system process, macOS **System Integrity Protection (SIP)** blocks the file/runtime operations needed to install/load this scripting addition unless SIP is **partially** disabled in a way compatible with your Mac model and macOS version.
-
-### Why TilePilot can’t fully automate this
-
-TilePilot can help by generating the Terminal repair/install flow (`Fix Scripting Addition`), but it cannot:
-- change SIP settings for you from a normal GUI app
-- bypass Recovery Mode requirements
-- bypass macOS compatibility limitations after OS updates
-
-## SIP Tradeoffs / Risks (Read This Before Enabling SA)
-
-Disabling SIP protections (even partially) is a real security tradeoff.
-
-### What changes
-
-The exact required SIP changes vary by macOS version and Apple Silicon vs Intel, but the yabai documentation generally requires some combination of:
-- filesystem protections disabled (partial SIP change)
-- debugging restrictions disabled
-- sometimes additional protections depending on macOS version/architecture (for example NVRAM-related requirements on some Apple Silicon setups)
-
-### Side risks involved
-
-- Reduced protection for Apple system processes/files against modification or injection on your machine
-- Increased blast radius if malicious software runs with elevated privileges
-- Lower alignment with macOS default security posture (important for work-managed devices / compliance-sensitive machines)
-- Future macOS updates may break scripting-addition compatibility and require rework
-- Apple service/repair workflows may re-enable SIP settings, which can break these features until reconfigured
-
-### Practical recommendation
-
-- Only enable the scripting addition if you want the desktop/space features that require it
-- Keep `yabai`, `TilePilot`, and macOS updated
-- Prefer a conservative setup on machines with stricter security needs
-- Re-enable full SIP if you stop using scripting-addition-dependent features
-
-### Version note (important)
-
-Different `yabai` versions expose different scripting-addition commands.
-
-For example:
-- some versions use `--load-sa` (install + load)
-- others expose separate `--install-sa` / `--load-sa`
-
-TilePilot now detects this automatically in its repair script, but manual guides online may use command variants that do not match your installed version.
+Some desktop actions (especially moving windows between desktops and some desktop-focus workflows) depend on yabai’s scripting addition, which may require partial SIP changes depending on macOS version and hardware; TilePilot can launch repair/install helpers, but it cannot change SIP or bypass Recovery Mode and system security constraints. Treat this as an explicit security tradeoff, keep your stack updated, and use the official yabai SIP guide for current requirements: <https://github.com/koekeishiya/yabai/wiki/Disabling-System-Integrity-Protection>.
 
 ## Run (Development)
 

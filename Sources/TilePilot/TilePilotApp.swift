@@ -346,6 +346,10 @@ struct NowDashboardView: View {
 
     private func yabaiMapCard(_ snapshot: LiveStateSnapshot) -> some View {
         let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
+        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            return lhs.id < rhs.id
+        }
         let allWindows = snapshot.windows
         let visibleWindows = snapshot.windows.filter { window in
             window.isVisible && !window.isMinimized && !window.isHidden
@@ -369,7 +373,7 @@ struct NowDashboardView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
-                    ForEach(snapshot.displays) { display in
+                    ForEach(sortedDisplays) { display in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Label(display.name, systemImage: display.focused ? "display.and.arrow.down" : "display")
@@ -380,7 +384,11 @@ struct NowDashboardView: View {
                                     .foregroundStyle(.secondary)
                             }
 
-                            let displaySpaces = (spacesByDisplay[display.id] ?? []).sorted { $0.index < $1.index }
+                            let displaySpaces = (spacesByDisplay[display.id] ?? []).sorted { lhs, rhs in
+                                if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                                if lhs.visible != rhs.visible { return lhs.visible && !rhs.visible }
+                                return lhs.index < rhs.index
+                            }
                             if displaySpaces.isEmpty {
                                 Text("No desktops returned for this display.")
                                     .font(.caption)
@@ -483,7 +491,8 @@ struct NowDashboardView: View {
         runtimeEnabled: Bool,
         runtimeDisabledReason: String
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        let defaultBehavior = defaultBehaviorBadge(for: window.app)
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
             AppNameWithIconView(appName: window.app)
                 .font(.caption.weight(.semibold))
 
@@ -506,6 +515,14 @@ struct NowDashboardView: View {
             }
 
             Button {
+                model.toggleAppDefaultTilingBehavior(for: window.app)
+            } label: {
+                statusPill(defaultBehavior.text, color: defaultBehavior.color)
+            }
+            .buttonStyle(.plain)
+            .help(defaultBehavior.help + " Click to toggle default behavior for this app.")
+
+            Button {
                 model.toggleWindowFloating(windowID: window.id)
             } label: {
                 statusPill(window.floating ? "Floating" : "Tiled", color: window.floating ? .orange : .green)
@@ -514,21 +531,7 @@ struct NowDashboardView: View {
             .disabled(!runtimeEnabled)
             .help(runtimeEnabled ? "Toggle floating/tiled state." : runtimeDisabledReason)
 
-            Button("Focus") {
-                model.focusWindow(windowID: window.id)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .disabled(!runtimeEnabled)
-
             Menu {
-                Button("Focus Window") {
-                    model.focusWindow(windowID: window.id)
-                }
-                Button("Toggle Floating/Tiled") {
-                    model.toggleWindowFloating(windowID: window.id)
-                }
-                Divider()
                 Button("Set Floating") {
                     model.setWindowFloating(windowID: window.id, shouldFloat: true)
                 }
@@ -563,6 +566,25 @@ struct NowDashboardView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(selectedWindowID == window.id ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
         )
+    }
+
+    private func defaultBehaviorBadge(for appName: String) -> (text: String, color: Color, help: String) {
+        let behavior = model.appTilingBehavior(for: appName)
+        let sourceNote = model.appBehaviorSourceNote(for: appName)
+        switch behavior {
+        case .neverTile:
+            let note = sourceNote ?? "App rule says this app should stay floating by default."
+            return ("Default Float", .orange, note)
+        case .alwaysTile:
+            let note = sourceNote ?? "App rule says this app should be auto-tiled by default."
+            return ("Default Tiled", .green, note)
+        case .useDefault:
+            if model.windowBehaviorPolicyDraft.manualTilingModeEnabled {
+                return ("Default Float", .orange, "No app-specific rule. Global default is floating because Manual Tiling Mode is enabled.")
+            } else {
+                return ("Default Tiled", .green, "No app-specific rule. Global default is auto-tiled.")
+            }
+        }
     }
 
     private func statusPill(_ text: String, color: Color) -> some View {
@@ -1272,7 +1294,6 @@ struct ShortcutsDashboardView: View {
     }
 
     private func shortcutRow(_ entry: ShortcutEntry) -> some View {
-        let linkedAction = model.actionCard(forShortcut: entry)
         let title = model.shortcutTitle(entry)
         let secondaryText = model.shortcutSecondaryText(entry)
         return HStack(alignment: .center, spacing: 8) {
@@ -1305,31 +1326,28 @@ struct ShortcutsDashboardView: View {
                     model.toggleShortcutPinned(entry)
                 } label: {
                     Image(systemName: model.isShortcutPinned(entry) ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
                 }
                 .help(model.isShortcutPinned(entry) ? "Unpin from quick menu" : "Pin to quick menu")
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .frame(minWidth: 24)
 
-                Button("Run") {
+                Button("Test") {
                     model.runShortcut(entry)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-
-                if let linkedAction {
-                    Button(model.actionButtonLabel(for: linkedAction.id)) {
-                        model.performTilePilotAction(linkedAction.id)
-                    }
-                    .disabled(!linkedAction.enabled || model.activeActionID != nil)
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                }
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 46)
 
                 Button("Edit") {
                     model.openShortcutSource(entry)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 46)
             }
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -1369,12 +1387,14 @@ struct ShortcutsDashboardView: View {
 
             if let actionID = row.actionID {
                 let card = model.actionCard(for: actionID)
-                Button(model.actionButtonLabel(for: actionID)) {
+                Button("Test") {
                     model.performTilePilotAction(actionID)
                 }
                 .disabled((card?.enabled == false) || model.activeActionID != nil)
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 52)
             }
         }
         .padding(.horizontal, 8)
@@ -1458,7 +1478,7 @@ struct ShortcutsDashboardView: View {
 
     @ViewBuilder
     private func directionalShortcutsSection(_ entries: [ShortcutEntry]) -> some View {
-        let summaries = directionalShortcutFamilies(from: entries)
+        let summaries = directionalShortcutFamilies(from: entries).filter { $0.kind == .moveWindow }
         let covered = Set(summaries.flatMap { $0.entries.map { $0.entry.id } })
         let leftovers = entries.filter { !covered.contains($0.id) }
 
@@ -2320,6 +2340,15 @@ struct SetupDashboardView: View {
                 } else {
                     Button("Start Service") { model.startBrewServiceSkhd() }
                     Button("Install Dependencies") { model.runSetupInstallerInTerminal() }
+                }
+            case "start-at-logon":
+                if item.state == .installed {
+                    Button("Login Items") { model.openLoginItemsSettings() }
+                    Button("Recheck") { Task { await model.refreshBootstrapSetup() } }
+                } else {
+                    Button("Enable") { model.enableStartAtLogon() }
+                    Button("Login Items") { model.openLoginItemsSettings() }
+                    Button("Recheck") { Task { await model.refreshBootstrapSetup() } }
                 }
             case "accessibility-permission":
                 if item.state == .installed {

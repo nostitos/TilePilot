@@ -167,11 +167,18 @@ resolve_sign_identity() {
 
 sign_app_bundle() {
   local app_path="$1"
-  [[ $SIGN_APP -eq 1 ]] || return 0
+  if [[ $SIGN_APP -eq 0 ]]; then
+    echo "Applying ad-hoc signature (no identity requested)."
+    /usr/bin/codesign --force --deep --sign - "$app_path"
+    /usr/bin/codesign --verify --deep --strict "$app_path"
+    return 0
+  fi
   local identity
   identity="$(resolve_sign_identity)"
   if [[ -z "$identity" ]]; then
-    echo "No Developer ID Application identity found; leaving app unsigned."
+    echo "No Developer ID Application identity found; applying ad-hoc signature."
+    /usr/bin/codesign --force --deep --sign - "$app_path"
+    /usr/bin/codesign --verify --deep --strict "$app_path"
     return 0
   fi
   echo "Signing app with: $identity"

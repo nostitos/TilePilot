@@ -7,6 +7,9 @@ struct BootstrapRunResult: Sendable {
 }
 
 final class BootstrapService: @unchecked Sendable {
+    static let startAtLogonLaunchAgentLabel = "com.klode.tilepilot.launcher"
+    static let startAtLogonLaunchAgentFileName = "com.klode.tilepilot.launcher.plist"
+
     private let runner = CommandRunner()
 
     func runBootstrapChecks() async -> BootstrapRunResult {
@@ -41,6 +44,7 @@ final class BootstrapService: @unchecked Sendable {
             binaryItem(id: "skhd-binary", title: "skhd", versionResult: skhdVersion),
             brewServiceItem(name: "yabai", servicesResult: brewServices, brewInstalled: brewInstalled, processResult: yabaiProcess),
             brewServiceItem(name: "skhd", servicesResult: brewServices, brewInstalled: brewInstalled, processResult: skhdProcess),
+            startAtLogonItem(),
             accessibilityItem(),
         ]
 
@@ -206,6 +210,26 @@ final class BootstrapService: @unchecked Sendable {
         )
     }
 
+    private func startAtLogonItem() -> SetupCheckItem {
+        let launchAgentURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent(Self.startAtLogonLaunchAgentFileName)
+        if FileManager.default.fileExists(atPath: launchAgentURL.path) {
+            return SetupCheckItem(
+                id: "start-at-logon",
+                title: "Start TilePilot at logon",
+                state: .installed,
+                detail: "Configured via \(launchAgentURL.path)."
+            )
+        }
+        return SetupCheckItem(
+            id: "start-at-logon",
+            title: "Start TilePilot at logon",
+            state: .warning,
+            detail: "Not enabled. Recommended for menu bar availability after sign-in."
+        )
+    }
+
     private func parseBrewServicesList(_ output: String) -> [String: String] {
         var result: [String: String] = [:]
         for rawLine in output.split(separator: "\n") {
@@ -306,6 +330,7 @@ final class BootstrapService: @unchecked Sendable {
 
         echo "Step 5: Next steps (manual)"
         echo "  - Open TilePilot and use 'Request Accessibility Access'"
+        echo "  - In TilePilot > System, enable 'Start at logon'"
         echo "  - Enable TilePilot in Accessibility settings"
         echo "  - Verify Mission Control settings in TilePilot > Health"
         echo "  - Desktop switching/move-window shortcuts may require yabai scripting addition + SIP configuration"

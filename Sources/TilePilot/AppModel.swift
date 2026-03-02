@@ -41,10 +41,14 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
     private static let pinnedShortcutsDefaultsKey = "TilePilot.pinnedShortcutKeys"
     private static let pinnedDirectionalGroupsDefaultsKey = "TilePilot.pinnedDirectionalGroupIDs"
+    private static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
+    private static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
 
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
     @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
+    @Published private(set) var windowBadges: [WindowBadgeState] = []
+    @Published private(set) var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
     @Published private(set) var requestedSystemPanelSection: SystemPanelSection?
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
@@ -102,6 +106,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSavingYabaiConfig = false
     @Published private(set) var isRestoringYabaiConfig = false
     @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default
+    @Published var showWindowBadgeOverlay: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.showWindowBadgeOverlayDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
+    }()
+    @Published var showWindowOutlineOverlay: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.showWindowOutlineOverlayDefaultsKey) == nil {
+            return false
+        }
+        return defaults.bool(forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
+    }()
 
     private let doctorService = DoctorService()
     private let bootstrapService = BootstrapService()
@@ -258,6 +276,7 @@ final class AppModel: ObservableObject {
 
         let snapshot = makeLiveStateSnapshot(from: poll)
         liveStateSnapshot = snapshot
+        refreshWindowBadges()
     }
 
     func refreshShortcuts() async {
@@ -486,6 +505,22 @@ final class AppModel: ObservableObject {
         saveWindowBehaviorPolicy()
     }
 
+    func toggleWindowBadgeOverlay() {
+        showWindowBadgeOverlay.toggle()
+        UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
+        refreshWindowBadges()
+        lastActionMessage = showWindowBadgeOverlay ? "Window badges enabled." : "Window badges disabled."
+        lastErrorMessage = nil
+    }
+
+    func toggleWindowOutlineOverlay() {
+        showWindowOutlineOverlay.toggle()
+        UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
+        refreshWindowBadges()
+        lastActionMessage = showWindowOutlineOverlay ? "Window outline overlay enabled." : "Window outline overlay disabled."
+        lastErrorMessage = nil
+    }
+
     func tileFocusedWindowNow() {
         guard let focused = focusedWindowState else {
             lastErrorMessage = "No focused window detected."
@@ -578,6 +613,16 @@ final class AppModel: ObservableObject {
         guard let snapshot = doctorSnapshot else { return false }
         let map = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0.status) })
         return map["yabai-binary"] == .available && map["yabai-daemon"] == .available
+    }
+
+    var canRunScriptingAdditionDesktopActions: Bool {
+        guard let snapshot = doctorSnapshot else { return false }
+        let map = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0.status) })
+        return map["scripting-addition"] == .available
+    }
+
+    func isScriptingAdditionDesktopShortcut(_ entry: ShortcutEntry) -> Bool {
+        entry.command.lowercased().contains("yabai -m window --space")
     }
 
     var yabaiRuntimeControlDisabledReason: String? {
@@ -1177,6 +1222,16 @@ final class AppModel: ObservableObject {
     private func shortcutExplanation(combo: String, command: String, category: String) -> String {
         let c = command.lowercased()
 
+        if c.contains("grid-tiling-floating.sh") {
+            return "Applies grid tiling on the current desktop and keeps those windows floating."
+        }
+        if c.contains("grid-tiling-auto-tiled.sh") {
+            return "Applies grid tiling on the current desktop, then returns to real auto-tiling (BSP)."
+        }
+        if c.contains("grid-pack-toggle.sh") {
+            return "Legacy grid tiling toggle helper."
+        }
+
         if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus") {
             if let target = firstInteger(after: "--space", in: c) ?? firstInteger(after: "--focus", in: c) {
                 return "Moves the focused window to Desktop \(target), then switches to Desktop \(target)."
@@ -1477,6 +1532,38 @@ final class AppModel: ObservableObject {
         ])
     }
 
+    func openLoginItemsSettings() {
+        openURLCandidates([
+            "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+            "x-apple.systempreferences:com.apple.systempreferences.GeneralSettings",
+            "x-apple.systempreferences:",
+        ])
+    }
+
+    func enableStartAtLogon() {
+        acknowledgeInitialStatusIfNeeded()
+
+        let fm = FileManager.default
+        let launchAgentsDirectory = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDirectory
+            .appendingPathComponent(BootstrapService.startAtLogonLaunchAgentFileName)
+
+        do {
+            try fm.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
+            let plist = startAtLogonLaunchAgentPlist()
+            try plist.write(to: plistURL, atomically: true, encoding: .utf8)
+            lastActionMessage = "Enabled start at logon."
+            lastErrorMessage = nil
+            Task { [weak self] in
+                await self?.refreshBootstrapSetup()
+            }
+        } catch {
+            lastErrorMessage = "Failed to enable start at logon: \(error.localizedDescription)"
+            lastActionMessage = nil
+        }
+    }
+
     func restartYabaiBestEffort() {
         runSupportCommand(
             ShellCommand("/usr/bin/env", ["yabai", "--restart-service"], timeout: 2.0),
@@ -1559,6 +1646,38 @@ final class AppModel: ObservableObject {
         lastErrorMessage = "Unable to open System Settings."
     }
 
+    private func startAtLogonLaunchAgentPlist() -> String {
+        let appPath = Bundle.main.bundlePath
+        let escapedAppPath = xmlEscaped(appPath)
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>\(BootstrapService.startAtLogonLaunchAgentLabel)</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>/usr/bin/open</string>
+                <string>-a</string>
+                <string>\(escapedAppPath)</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+        </dict>
+        </plist>
+        """
+    }
+
+    private func xmlEscaped(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
     var healthBadgeSymbol: String {
         doctorSnapshot?.healthBadge.symbolName ?? "questionmark.circle"
     }
@@ -1619,7 +1738,15 @@ final class AppModel: ObservableObject {
     }
 
     var setupServiceItems: [SetupCheckItem] {
-        setupChecklistItems.filter { ["brew-tap-koekeishiya", "brew-service-yabai", "brew-service-skhd", "accessibility-permission"].contains($0.id) }
+        setupChecklistItems.filter {
+            [
+                "brew-tap-koekeishiya",
+                "brew-service-yabai",
+                "brew-service-skhd",
+                "start-at-logon",
+                "accessibility-permission",
+            ].contains($0.id)
+        }
     }
 
     var setupSummaryLine: String {
@@ -1643,6 +1770,7 @@ final class AppModel: ObservableObject {
         let skhdBinarySetup = setupByID["skhd-binary"]
         let yabaiServiceSetup = setupByID["brew-service-yabai"]
         let skhdServiceSetup = setupByID["brew-service-skhd"]
+        let startAtLogonSetup = setupByID["start-at-logon"]
         let accessibilitySetup = setupByID["accessibility-permission"]
 
         let yabaiBinaryCap = capabilityByKey["yabai-binary"]
@@ -1727,6 +1855,20 @@ final class AppModel: ObservableObject {
             actions: skhdRunningStatus == .good ? [.recheck] : [.startSkhd, .restartSkhd, .recheck]
         ))
 
+        let startAtLogonStatus = mappedSystemStatus(from: startAtLogonSetup?.state) ?? .notice
+        rows.append(SystemCheckRow(
+            id: "start-at-logon",
+            title: "Start TilePilot at Logon",
+            detail: firstDetail(
+                startAtLogonSetup?.detail,
+                fallback: "Recommended so TilePilot appears in the menu bar after sign-in."
+            ),
+            status: startAtLogonStatus,
+            actions: startAtLogonStatus == .good
+                ? [.openLoginItemsSettings, .recheck]
+                : [.enableStartAtLogon, .openLoginItemsSettings, .recheck]
+        ))
+
         let rawAccessibilityStatus = mergedSystemStatus([
             mappedSystemStatus(from: accessibilitySetup?.state),
             mappedSystemStatus(from: accessibilityCap?.status),
@@ -1791,6 +1933,12 @@ final class AppModel: ObservableObject {
         ))
 
         return rows.sorted { lhs, rhs in
+            // Keep the advanced scripting-addition item at the end of the essentials list.
+            let lhsIsAdvanced = lhs.id == "scripting-addition"
+            let rhsIsAdvanced = rhs.id == "scripting-addition"
+            if lhsIsAdvanced != rhsIsAdvanced {
+                return !lhsIsAdvanced
+            }
             if lhs.status.severityRank != rhs.status.severityRank {
                 return lhs.status.severityRank > rhs.status.severityRank
             }
@@ -1833,6 +1981,10 @@ final class AppModel: ObservableObject {
             startBrewServiceYabai()
         case .startSkhd:
             startBrewServiceSkhd()
+        case .enableStartAtLogon:
+            enableStartAtLogon()
+        case .openLoginItemsSettings:
+            openLoginItemsSettings()
         case .openAccessibilitySettings:
             openAccessibilitySettings()
         case .requestAccessibilityAccess:
@@ -1885,6 +2037,95 @@ final class AppModel: ObservableObject {
 
     var canControlFocusedWindow: Bool {
         focusedWindowState != nil && doctorSnapshot != nil
+    }
+
+    func refreshWindowBadges() {
+        guard let snapshot = liveStateSnapshot else {
+            windowBadges = []
+            hoveredWindowIDForBadges = nil
+            return
+        }
+        guard snapshot.source == .yabai, !snapshot.degraded else {
+            windowBadges = []
+            hoveredWindowIDForBadges = nil
+            return
+        }
+
+        let candidates = snapshot.windows.filter { window in
+            window.isVisible && !window.isMinimized && !window.isHidden && window.frameW > 40 && window.frameH > 24
+        }
+        guard !candidates.isEmpty else {
+            windowBadges = []
+            hoveredWindowIDForBadges = nil
+            return
+        }
+
+        let activeSpaceIndex: Int? =
+            candidates.first(where: \.focused)?.space
+            ?? snapshot.spaces.first(where: \.focused)?.index
+            ?? snapshot.spaces.first(where: \.visible)?.index
+        let activeCandidates: [WindowState]
+        if let activeSpaceIndex {
+            activeCandidates = candidates.filter { $0.space == activeSpaceIndex }
+        } else {
+            activeCandidates = candidates
+        }
+
+        guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
+            windowBadges = []
+            hoveredWindowIDForBadges = nil
+            return
+        }
+        hoveredWindowIDForBadges = nil
+        let selected = activeCandidates.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            if lhs.app != rhs.app { return lhs.app.localizedCaseInsensitiveCompare(rhs.app) == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+
+        windowBadges = selected.map { window in
+            WindowBadgeState(
+                windowID: window.id,
+                pid: window.pid,
+                app: window.app,
+                title: window.title,
+                isFloating: window.floating,
+                isFocused: window.focused,
+                frameX: window.frameX,
+                frameY: window.frameY,
+                frameW: window.frameW,
+                frameH: window.frameH
+            )
+        }
+    }
+
+    func updateHoveredWindowForBadges(candidates: [WindowState]? = nil) {
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
+            hoveredWindowIDForBadges = nil
+            return
+        }
+        let windows = candidates ?? snapshot.windows.filter { $0.isVisible && !$0.isMinimized && !$0.isHidden }
+        guard !windows.isEmpty else {
+            hoveredWindowIDForBadges = nil
+            return
+        }
+
+        let mouse = NSEvent.mouseLocation
+        let screens = NSScreen.screens
+
+        let hovered = windows
+            .filter { containsMouse(mouse, in: $0, screens: screens) }
+            .sorted { lhs, rhs in
+                if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                let lhsArea = lhs.frameW * lhs.frameH
+                let rhsArea = rhs.frameW * rhs.frameH
+                if lhsArea != rhsArea { return lhsArea < rhsArea }
+                return lhs.id < rhs.id
+            }
+            .first?
+            .id
+
+        hoveredWindowIDForBadges = hovered
     }
 
     var shouldShowWindowBehaviorRecommendation: Bool {
@@ -2112,6 +2353,25 @@ final class AppModel: ObservableObject {
         recomputeYabaiConfigDiffPreview()
     }
 
+    func toggleAppDefaultTilingBehavior(for appName: String) {
+        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let currentDefault = appTilingBehavior(for: trimmed)
+        let next: AppTilingBehavior
+        switch currentDefault {
+        case .neverTile:
+            next = .alwaysTile
+        case .alwaysTile:
+            next = .neverTile
+        case .useDefault:
+            // Toggle against current global default shown in Overview.
+            next = windowBehaviorPolicyDraft.manualTilingModeEnabled ? .alwaysTile : .neverTile
+        }
+        setAppTilingBehavior(next, for: trimmed)
+        saveWindowBehaviorPolicy()
+    }
+
     var isManagedConfigDraftDirty: Bool {
         managedConfigDraft != originalManagedConfigSection
     }
@@ -2264,7 +2524,10 @@ final class AppModel: ObservableObject {
         let anyVisibleNonSettingsWindow = NSApp.windows.contains { window in
             window.isVisible && window.title == "TilePilot"
         }
-        return anyVisibleNonSettingsWindow ? 0.9 : 2.5
+        if showWindowBadgeOverlay || showWindowOutlineOverlay {
+            return anyVisibleNonSettingsWindow ? 0.8 : 1.8
+        }
+        return anyVisibleNonSettingsWindow ? 1.8 : 6.0
     }
 
     private var shouldSoftenInitialBlockedStatus: Bool {
@@ -2636,6 +2899,27 @@ final class AppModel: ObservableObject {
         return window
     }
 
+    private func containsMouse(_ mouse: NSPoint, in window: WindowState, screens: [NSScreen]) -> Bool {
+        let rect = convertTopOriginRectToAppKit(CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH), screens: screens)
+        return rect.contains(mouse)
+    }
+
+    private func convertTopOriginRectToAppKit(_ rect: CGRect, screens: [NSScreen]) -> CGRect {
+        guard !screens.isEmpty else { return rect }
+        let referenceMaxY = screens.first(where: { screen in
+            abs(screen.frame.minX) < 0.5 && abs(screen.frame.minY) < 0.5
+        })?.frame.maxY
+            ?? NSScreen.main?.frame.maxY
+            ?? screens.map(\.frame.maxY).min()
+            ?? rect.maxY
+        return CGRect(
+            x: rect.origin.x,
+            y: referenceMaxY - rect.origin.y - rect.height,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
     private func runBestEffortSkhdRestart(afterConfigChange: Bool) async {
         let result = await doctorService.runSupportCommand(
             ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
@@ -2980,6 +3264,19 @@ final class AppModel: ObservableObject {
     private func shortcutTitle(for entry: ShortcutEntry) -> String {
         let c = entry.command.lowercased()
 
+        if c.contains("grid-tiling-floating.sh") {
+            return "Grid Tiling (Floating)"
+        }
+        if c.contains("grid-tiling-auto-tiled.sh") {
+            return "Grid -> Auto-Tile (BSP)"
+        }
+        if c.contains("grid-pack-toggle.sh") {
+            return "Grid Tiling (Legacy Toggle)"
+        }
+        if c.contains("auto-layout-current-desktop.sh") || c.contains("readable-current-space.sh") {
+            return "Auto Layout (Current Desktop)"
+        }
+
         if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus"),
            let target = firstInteger(after: "--space", in: c) ?? firstInteger(after: "--focus", in: c) {
             return "Move Window to Desktop \(target)"
@@ -3280,9 +3577,14 @@ final class AppModel: ObservableObject {
                 windows: previous.windows.map {
                     WindowState(
                         id: $0.id,
+                        pid: $0.pid,
                         app: $0.app,
                         space: $0.space,
                         display: $0.display,
+                        frameX: $0.frameX,
+                        frameY: $0.frameY,
+                        frameW: $0.frameW,
+                        frameH: $0.frameH,
                         floating: $0.floating,
                         title: $0.title,
                         focused: $0.focused,

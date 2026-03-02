@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum CapabilityStatus: String, Codable, CaseIterable, Sendable {
@@ -158,9 +159,14 @@ struct SpaceState: Identifiable, Codable, Sendable {
 
 struct WindowState: Identifiable, Codable, Sendable {
     let id: Int
+    let pid: Int
     let app: String
     let space: Int
     let display: Int
+    let frameX: Double
+    let frameY: Double
+    let frameW: Double
+    let frameH: Double
     let floating: Bool
     let title: String
     let focused: Bool
@@ -169,6 +175,31 @@ struct WindowState: Identifiable, Codable, Sendable {
     let isHidden: Bool
     let source: StateSourceQuality
     let lastUpdatedAt: Date
+}
+
+enum WindowBadgeVisibilityMode: String, Codable, CaseIterable, Sendable {
+    case focusedAndHovered
+    case alwaysOn
+    case focusedOnly
+}
+
+struct WindowBadgeState: Identifiable, Sendable, Equatable {
+    let windowID: Int
+    let pid: Int
+    let app: String
+    let title: String
+    let isFloating: Bool
+    let isFocused: Bool
+    let frameX: Double
+    let frameY: Double
+    let frameW: Double
+    let frameH: Double
+
+    var id: Int { windowID }
+
+    var frame: CGRect {
+        CGRect(x: frameX, y: frameY, width: frameW, height: frameH)
+    }
 }
 
 struct FallbackDisplayCount: Identifiable, Codable, Sendable {
@@ -394,6 +425,8 @@ enum SystemCheckAction: String, Sendable, Hashable {
     case installCLT
     case startYabai
     case startSkhd
+    case enableStartAtLogon
+    case openLoginItemsSettings
     case openAccessibilitySettings
     case requestAccessibilityAccess
     case fixScriptingAddition
@@ -409,6 +442,8 @@ enum SystemCheckAction: String, Sendable, Hashable {
         case .installCLT: return "Install CLT"
         case .startYabai: return "Start yabai"
         case .startSkhd: return "Start skhd"
+        case .enableStartAtLogon: return "Enable"
+        case .openLoginItemsSettings: return "Login Items"
         case .openAccessibilitySettings: return "Open Settings"
         case .requestAccessibilityAccess: return "Request Access"
         case .fixScriptingAddition: return "Fix"

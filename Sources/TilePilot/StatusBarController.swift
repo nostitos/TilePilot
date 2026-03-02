@@ -135,42 +135,56 @@ final class StatusBarController: NSObject {
         menu.addItem(item("Open TilePilot", action: #selector(openTilePilot)))
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
         menu.addItem(item("Open Controls", action: #selector(openShortcuts)))
-        menu.addItem(item("Open System", action: #selector(openSystemPanel)))
         menu.addItem(.separator())
         addScreenWideShortcutItems(to: menu)
         menu.addItem(.separator())
-        let directionalLegend = NSMenuItem(title: "IJKL: I↑  J←  K↓  L→", action: nil, keyEquivalent: "")
-        directionalLegend.isEnabled = false
-        menu.addItem(directionalLegend)
-        _ = addPinnedShortcutItems(to: menu)
-        menu.addItem(.separator())
+        let hasPinnedShortcuts = addPinnedShortcutItems(to: menu)
+        if hasPinnedShortcuts {
+            menu.addItem(.separator())
+        }
 
+        menu.addItem(.separator())
         let runtimeEnabled = model.canRunYabaiRuntimeCommands
         let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
-        let focusedAvailable = runtimeEnabled && model.focusedWindowState != nil
-        let focusedReason = focusedAvailable ? "" : (model.focusedWindowState == nil ? "No focused window" : runtimeReason)
-        let focusedApp = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
-        let focusedName = (focusedApp?.isEmpty == false) ? focusedApp! : "Focused Window"
-        menu.addItem(item(focusedAvailable ? "Toggle Float/Tile (\(focusedName))" : "Toggle Float/Tile (\(focusedReason))", action: #selector(toggleFocusedWindowTiling), enabled: focusedAvailable))
-        menu.addItem(item(focusedAvailable ? "Float Window (\(focusedName))" : "Float Window (\(focusedReason))", action: #selector(floatFocusedWindow), enabled: focusedAvailable))
-        menu.addItem(item(focusedAvailable ? "Tile Window (\(focusedName))" : "Tile Window (\(focusedReason))", action: #selector(tileFocusedWindow), enabled: focusedAvailable))
+        let hoverEnabled = model.windowBehaviorPolicyDraft.hoverFocusMode != .off
+        let cursorFollowsFocus = model.windowBehaviorPolicyDraft.mouseFollowsFocusEnabled
+        let autoTileNewWindows = !model.windowBehaviorPolicyDraft.manualTilingModeEnabled
 
-        menu.addItem(.separator())
-        let disableHoverTitle = runtimeEnabled ? "Disable Hover Focus" : "Disable Hover Focus (\(runtimeReason))"
-        let disableCursorFollowTitle = runtimeEnabled ? "Disable Cursor Follows Focus" : "Disable Cursor Follows Focus (\(runtimeReason))"
-        let manualOnTitle = runtimeEnabled ? "Enable Manual Tiling Mode" : "Enable Manual Tiling Mode (\(runtimeReason))"
-        let manualOffTitle = runtimeEnabled ? "Disable Manual Tiling Mode" : "Disable Manual Tiling Mode (\(runtimeReason))"
-        menu.addItem(item(disableHoverTitle, action: #selector(disableHoverFocus), enabled: runtimeEnabled))
-        menu.addItem(item(disableCursorFollowTitle, action: #selector(disableMouseFollowsFocus), enabled: runtimeEnabled))
-        menu.addItem(item(manualOnTitle, action: #selector(enableManualTilingMode), enabled: runtimeEnabled))
-        menu.addItem(item(manualOffTitle, action: #selector(disableManualTilingMode), enabled: runtimeEnabled))
+        let hoverFocusItem = item(
+            runtimeEnabled ? "Hover Focus" : "Hover Focus (\(runtimeReason))",
+            action: #selector(toggleHoverFocus),
+            enabled: runtimeEnabled
+        )
+        hoverFocusItem.state = hoverEnabled ? .on : .off
+        menu.addItem(hoverFocusItem)
+
+        let cursorFollowsFocusItem = item(
+            runtimeEnabled ? "Cursor Follows Focus" : "Cursor Follows Focus (\(runtimeReason))",
+            action: #selector(toggleMouseFollowsFocus),
+            enabled: runtimeEnabled
+        )
+        cursorFollowsFocusItem.state = cursorFollowsFocus ? .on : .off
+        menu.addItem(cursorFollowsFocusItem)
+
+        let autoTileItem = item(
+            runtimeEnabled ? "Auto-Tile New Windows" : "Auto-Tile New Windows (\(runtimeReason))",
+            action: #selector(toggleAutoTileNewWindows),
+            enabled: runtimeEnabled
+        )
+        autoTileItem.state = autoTileNewWindows ? .on : .off
+        menu.addItem(autoTileItem)
+
+        let badgeItem = item("Window Badges", action: #selector(toggleWindowBadgeOverlay))
+        badgeItem.state = model.showWindowBadgeOverlay ? .on : .off
+        menu.addItem(badgeItem)
+
+        let outlineItem = item("Window Outline Overlay", action: #selector(toggleWindowOutlineOverlay))
+        outlineItem.state = model.showWindowOutlineOverlay ? .on : .off
+        menu.addItem(outlineItem)
 
         let balanceItem = item("Align Tiles (Balance)", action: #selector(runQuickAction(_:)), enabled: balanceTilesQuickActionEnabled())
         balanceItem.representedObject = TilePilotActionID.balanceSpace.rawValue
         menu.addItem(balanceItem)
-
-        menu.addItem(.separator())
-        menu.addItem(systemToolsSubmenuItem())
 
         menu.addItem(.separator())
         menu.addItem(item("Quit", action: #selector(quitApp)))
@@ -187,33 +201,13 @@ final class StatusBarController: NSObject {
         return item
     }
 
-    private func systemToolsSubmenuItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "System Tools…", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-
-        submenu.addItem(item(model.isLaunchingSetupInstaller ? "Opening Installer..." : "Install Dependencies", action: #selector(runSetupInstaller), enabled: !model.isLaunchingSetupInstaller))
-        submenu.addItem(item("Check System", action: #selector(runDoctor), enabled: !model.isRefreshing))
-        submenu.addItem(item("Open System", action: #selector(openSystemPanel)))
-        submenu.addItem(.separator())
-        submenu.addItem(item("Copy Issue Summary", action: #selector(copyIssueSummary), enabled: model.doctorSnapshot != nil))
-        submenu.addItem(item("Export Diagnostics", action: #selector(exportDiagnostics), enabled: model.doctorSnapshot != nil))
-        submenu.addItem(.separator())
-        submenu.addItem(item("Open Accessibility Settings", action: #selector(openAccessibilitySettings)))
-        submenu.addItem(item("Request Accessibility Access", action: #selector(requestAccessibilityAccess)))
-        submenu.addItem(item("Open Mission Control Settings", action: #selector(openMissionControlSettings)))
-        submenu.addItem(item("Open System Settings", action: #selector(openSystemSettings)))
-        submenu.addItem(.separator())
-        submenu.addItem(item("Restart yabai (Best Effort)", action: #selector(restartYabai), enabled: !model.isRefreshing))
-        submenu.addItem(item("Restart skhd (Best Effort)", action: #selector(restartSkhd), enabled: !model.isRefreshing))
-
-        parent.submenu = submenu
-        return parent
-    }
-
     private func addPinnedShortcutItems(to menu: NSMenu) -> Bool {
         let pinnedGroups = model.pinnedDirectionalGroupBindings
-        let pinned = model.pinnedShortcutEntries
-        if pinnedGroups.isEmpty && pinned.isEmpty && model.pinnedShortcutKeys.isEmpty {
+        let pinnedRaw = model.pinnedShortcutEntries
+        let pinned = pinnedRaw.filter { entry in
+            !(model.isScriptingAdditionDesktopShortcut(entry) && !model.canRunScriptingAdditionDesktopActions)
+        }
+        if pinnedGroups.isEmpty && pinned.isEmpty {
             return false
         }
 
@@ -221,16 +215,12 @@ final class StatusBarController: NSObject {
             for group in pinnedGroups {
                 addPinnedDirectionalGroupItems(to: menu, group: group.group, bindings: group.bindings)
             }
-            if !pinned.isEmpty || !model.pinnedShortcutKeys.isEmpty {
+            if !pinned.isEmpty {
                 menu.addItem(.separator())
             }
         }
 
-        if pinned.isEmpty && !model.pinnedShortcutKeys.isEmpty {
-            let missing = NSMenuItem(title: "Pinned shortcuts unavailable (open Shortcuts to reload)", action: nil, keyEquivalent: "")
-            missing.isEnabled = false
-            menu.addItem(missing)
-        } else {
+        if !pinned.isEmpty {
             for entry in pinned {
                 let title = pinnedShortcutMenuTitle(for: entry)
                 let item = self.item(title, action: #selector(runPinnedShortcut(_:)))
@@ -304,28 +294,24 @@ final class StatusBarController: NSObject {
 
         let specs: [EntrySpec] = [
             EntrySpec(
-                title: "Disable Tiling For All Visible Windows",
+                title: "Set All Visible Windows: Floating",
                 matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/disable-tiling-all-visible.sh") }
             ),
             EntrySpec(
-                title: "Enable Tiling For All Visible Windows",
+                title: "Set All Visible Windows: Tiled",
                 matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/enable-tiling-all-visible.sh") }
             ),
             EntrySpec(
-                title: "Grid Pack (Temporary Toggle)",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/grid-pack-toggle.sh") }
+                title: "Grid Tiling (Floating)",
+                matcher: { command in
+                    let c = command.command.lowercased()
+                    return c.contains("/.config/yabai/scripts/grid-tiling-floating.sh")
+                        || c.contains("/.config/yabai/scripts/grid-pack-toggle.sh")
+                }
             ),
             EntrySpec(
-                title: "Temporarily Tile All Visible Windows",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/tile-all-visible-once.sh") }
-            ),
-            EntrySpec(
-                title: "Restore Previously Tiled Windows",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/restore-tile-all-visible-once.sh") }
-            ),
-            EntrySpec(
-                title: "Single-Window Mode (Stack)",
-                matcher: { $0.command.lowercased().contains("yabai -m space --layout stack") }
+                title: "Grid -> Auto-Tile (BSP)",
+                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/grid-tiling-auto-tiled.sh") }
             ),
             EntrySpec(
                 title: "Split Tree Layout (BSP + Balance)",
@@ -374,9 +360,23 @@ final class StatusBarController: NSObject {
         model.disableHoverFocus()
     }
 
+    @objc private func toggleHoverFocus() {
+        model.acknowledgeInitialStatusIfNeeded()
+        if model.windowBehaviorPolicyDraft.hoverFocusMode == .off {
+            model.setHoverFocusMode(.autofocus)
+        } else {
+            model.setHoverFocusMode(.off)
+        }
+    }
+
     @objc private func disableMouseFollowsFocus() {
         model.acknowledgeInitialStatusIfNeeded()
         model.disableMouseFollowsFocus()
+    }
+
+    @objc private func toggleMouseFollowsFocus() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.setMouseFollowsFocusEnabled(!model.windowBehaviorPolicyDraft.mouseFollowsFocusEnabled)
     }
 
     @objc private func enableManualTilingMode() {
@@ -387,6 +387,25 @@ final class StatusBarController: NSObject {
     @objc private func disableManualTilingMode() {
         model.acknowledgeInitialStatusIfNeeded()
         model.disableManualTilingMode()
+    }
+
+    @objc private func toggleAutoTileNewWindows() {
+        model.acknowledgeInitialStatusIfNeeded()
+        if model.windowBehaviorPolicyDraft.manualTilingModeEnabled {
+            model.disableManualTilingMode()
+        } else {
+            model.enableManualTilingMode()
+        }
+    }
+
+    @objc private func toggleWindowBadgeOverlay() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.toggleWindowBadgeOverlay()
+    }
+
+    @objc private func toggleWindowOutlineOverlay() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.toggleWindowOutlineOverlay()
     }
 
     @objc private func tileFocusedWindow() {
@@ -413,12 +432,6 @@ final class StatusBarController: NSObject {
     @objc private func openShortcuts() {
         model.acknowledgeInitialStatusIfNeeded()
         model.requestOpenTilePilotTab(.shortcuts)
-        onOpenTilePilot()
-    }
-
-    @objc private func openSystemPanel() {
-        model.acknowledgeInitialStatusIfNeeded()
-        model.requestOpenTilePilotTab(.system)
         onOpenTilePilot()
     }
 
@@ -493,6 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel.shared
     private var tilePilotWindowController: TilePilotWindowController?
     private var statusBarController: StatusBarController?
+    private var windowBadgeOverlayController: WindowBadgeOverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -502,6 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.model.acknowledgeInitialStatusIfNeeded()
             self?.tilePilotWindowController?.showAndFocus()
         }
+        windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
 
         model.startIfNeeded()
     }
@@ -519,5 +534,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await self.model.refreshBootstrapSetup()
             await self.model.refreshDoctor()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        windowBadgeOverlayController = nil
     }
 }

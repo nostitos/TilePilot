@@ -15,6 +15,12 @@ struct LiveStatePollResult: Sendable {
 
 final class YabaiStateService: @unchecked Sendable {
     private let runner = CommandRunner()
+    private var cachedFallbackDisplays: [FallbackDisplayCount] = []
+    private var cachedFallbackUpdatedAt: Date?
+    private var cachedScreenDescriptors: [ScreenDescriptor] = []
+    private var cachedScreenDescriptorsUpdatedAt: Date?
+    private let fallbackRefreshInterval: TimeInterval = 12
+    private let screenDescriptorRefreshInterval: TimeInterval = 15
 
     private struct ScreenDescriptor: Sendable {
         let displayID: CGDirectDisplayID
@@ -27,18 +33,17 @@ final class YabaiStateService: @unchecked Sendable {
         async let displaysTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--displays"], timeout: 1.5))
         async let spacesTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--spaces"], timeout: 1.5))
         async let windowsTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--windows"], timeout: 1.5))
-        async let fallbackTask = fallbackDisplayCounts()
 
         let timestamp = Date()
         let displaysResult = await displaysTask
         let spacesResult = await spacesTask
         let windowsResult = await windowsTask
-        let fallbackDisplays = await fallbackTask
-        let screenDescriptors = await currentScreenDescriptors()
+        let queriesSucceeded = displaysResult.isSuccess && spacesResult.isSuccess && windowsResult.isSuccess
+        let fallbackDisplays = await cachedFallbackDisplayCounts(at: timestamp, forceRefresh: !queriesSucceeded)
 
         let fallbackTotal = fallbackDisplays.reduce(0) { $0 + $1.windowCount }
 
-        guard displaysResult.isSuccess, spacesResult.isSuccess, windowsResult.isSuccess else {
+        guard queriesSucceeded else {
             let rawMessage = firstNonEmpty([
                 windowsResult.stderr,
                 spacesResult.stderr,
@@ -62,6 +67,7 @@ final class YabaiStateService: @unchecked Sendable {
         }
 
         do {
+            let screenDescriptors = await cachedCurrentScreenDescriptors(at: timestamp)
             let parsed = try parseYabaiState(
                 displaysJSON: displaysResult.stdout,
                 spacesJSON: spacesResult.stdout,
@@ -94,6 +100,42 @@ final class YabaiStateService: @unchecked Sendable {
         }
     }
 
+    private func cachedCurrentScreenDescriptors(at timestamp: Date) async -> [ScreenDescriptor] {
+        if let updatedAt = cachedScreenDescriptorsUpdatedAt,
+           timestamp.timeIntervalSince(updatedAt) < screenDescriptorRefreshInterval,
+           !cachedScreenDescriptors.isEmpty {
+            return cachedScreenDescriptors
+        }
+
+        let fresh = await currentScreenDescriptors()
+        if !fresh.isEmpty {
+            cachedScreenDescriptors = fresh
+            cachedScreenDescriptorsUpdatedAt = timestamp
+            return fresh
+        }
+
+        return cachedScreenDescriptors
+    }
+
+    private func cachedFallbackDisplayCounts(at timestamp: Date, forceRefresh: Bool) async -> [FallbackDisplayCount] {
+        if !forceRefresh,
+           let updatedAt = cachedFallbackUpdatedAt,
+           timestamp.timeIntervalSince(updatedAt) < fallbackRefreshInterval,
+           !cachedFallbackDisplays.isEmpty {
+            return cachedFallbackDisplays
+        }
+
+        let fresh = await fallbackDisplayCounts()
+        cachedFallbackUpdatedAt = timestamp
+
+        if !fresh.isEmpty {
+            cachedFallbackDisplays = fresh
+            return fresh
+        }
+
+        return cachedFallbackDisplays
+    }
+
     private func parseYabaiState(
         displaysJSON: String,
         spacesJSON: String,
@@ -107,16 +149,26 @@ final class YabaiStateService: @unchecked Sendable {
 
         let windows: [WindowState] = windowRows.compactMap { row in
             guard let id = int(from: row["id"]),
+                  let pid = int(from: row["pid"]),
                   let space = int(from: row["space"]),
                   let display = int(from: row["display"]) else {
                 return nil
             }
+            if isInternalTilePilotOverlayWindow(row) {
+                return nil
+            }
+            let frame = yabaiFrame(from: row["frame"]) ?? .zero
 
             return WindowState(
                 id: id,
+                pid: pid,
                 app: string(from: row["app"]) ?? "Unknown",
                 space: space,
                 display: display,
+                frameX: frame.origin.x,
+                frameY: frame.origin.y,
+                frameW: frame.size.width,
+                frameH: frame.size.height,
                 floating: bool(from: row["is-floating"]) ?? false,
                 title: string(from: row["title"]) ?? "",
                 focused: bool(from: row["has-focus"]) ?? false,
@@ -175,6 +227,21 @@ final class YabaiStateService: @unchecked Sendable {
         .sorted { $0.id < $1.id }
 
         return (displays, spaces, windows)
+    }
+
+    private func isInternalTilePilotOverlayWindow(_ row: [String: Any]) -> Bool {
+        let appName = string(from: row["app"])?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard appName == "tilepilot" else { return false }
+
+        let hasAX = bool(from: row["has-ax-reference"]) ?? true
+        let canMove = bool(from: row["can-move"]) ?? true
+        let canResize = bool(from: row["can-resize"]) ?? true
+        let title = string(from: row["title"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let role = string(from: row["role"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let subrole = string(from: row["subrole"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        // Overlay helper panels are synthetic: no AX ref, immovable, non-resizable, untitled, no role/subrole.
+        return !hasAX && !canMove && !canResize && title.isEmpty && role.isEmpty && subrole.isEmpty
     }
 
     private func resolvedDisplayName(

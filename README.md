@@ -52,10 +52,26 @@ Manual approvals still required:
 
 Some advanced desktop actions (especially moving windows between desktops) depend on yabai’s scripting addition, which may require partial SIP changes depending on macOS version/hardware; TilePilot can launch repair/install helpers, but it cannot change SIP or bypass Recovery Mode/security constraints. Review official guidance before enabling it: <https://github.com/koekeishiya/yabai/wiki/Disabling-System-Integrity-Protection>.
 
+## Interactive Window Badges
+
+- TilePilot shows a small state badge on the focused window and optional state outlines.
+- Left-click a badge to toggle that window between `Floating` and `Auto-Tiled`.
+- Right-click a badge for explicit actions:
+  - `Set Floating`
+  - `Set Auto-Tiled`
+  - `Toggle Floating/Auto-Tiled`
+  - `Focus Window`
+- Overlay toggles are available from the menu bar quick menu:
+  - `Window Badges`
+  - `Window Outline Overlay`
+
 ## Notes
 
 - TilePilot preserves your existing `yabairc` and `skhdrc` content outside the app-managed blocks.
 - TilePilot-managed config blocks use `TILEPILOT ...` markers.
+- `Shift + Option + M` now targets `auto-layout-current-desktop.sh` (grid-based, keeps windows floating). `readable-current-space.sh` remains as a compatibility alias.
+- `Grid Tiling (Floating)` keeps windows floating in a packed grid.
+- `Grid -> Auto-Tile (BSP)` returns windows to real managed tiling (BSP).
 
 ## Developers
 

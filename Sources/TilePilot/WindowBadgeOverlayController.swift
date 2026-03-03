@@ -60,7 +60,7 @@ final class WindowBadgeOverlayController {
 
     private func applyOverlayUpdate(_ badges: [WindowBadgeState]) {
         let targetIDs = Set(badges.map(\.windowID))
-        let badgeTargetStates = badges.filter(\.isFocused)
+        let badgeTargetStates = badgeTargets(from: badges)
         let badgeTargetIDs = Set(badgeTargetStates.map(\.windowID))
 
         if model.showWindowBadgeOverlay {
@@ -84,6 +84,27 @@ final class WindowBadgeOverlayController {
         } else {
             removeAllPanels(from: &outlinePanels)
         }
+    }
+
+    private func badgeTargets(from badges: [WindowBadgeState]) -> [WindowBadgeState] {
+        guard let focused = badges.first(where: \.isFocused) else { return [] }
+
+        // Some apps (including Zoom) can transiently focus tiny helper/tool windows.
+        // Keep focused-window-only behavior, but anchor the badge on the main same-app window.
+        let focusedArea = focused.frameW * focused.frameH
+        let helperAreaThreshold = 7_500.0 // roughly <= 120x60
+        guard focusedArea < helperAreaThreshold else { return [focused] }
+
+        let sameProcessCandidates = badges
+            .filter { $0.pid == focused.pid && $0.windowID != focused.windowID }
+            .sorted { ($0.frameW * $0.frameH) > ($1.frameW * $1.frameH) }
+
+        guard let mainCandidate = sameProcessCandidates.first else { return [focused] }
+        let mainArea = mainCandidate.frameW * mainCandidate.frameH
+        if mainArea > focusedArea * 3.0 {
+            return [mainCandidate]
+        }
+        return [focused]
     }
 
     private func removeStalePanels(from panels: inout [Int: BadgePanel], keepIDs: Set<Int>) {
@@ -113,7 +134,14 @@ final class WindowBadgeOverlayController {
         panel.hasShadow = false
         panel.ignoresMouseEvents = ignoresMouseEvents
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace, .ignoresCycle]
+        panel.isExcludedFromWindowsMenu = true
+        panel.collectionBehavior = [
+            .fullScreenAuxiliary,
+            .moveToActiveSpace,
+            .ignoresCycle,
+            .transient,
+            .stationary,
+        ]
         panel.level = .normal
         panel.contentView = NSHostingView(rootView: AnyView(EmptyView()))
         return panel
@@ -173,7 +201,7 @@ final class WindowBadgeOverlayController {
         let outlineRect = targetWindowRect.insetBy(dx: lineWidth * 0.5, dy: lineWidth * 0.5)
 
         let outlineView = WindowFrameOutlineView(
-            strokeColor: badge.isFloating ? .orange : .blue,
+            strokeColor: !badge.isRuntimeManageable ? .gray : (badge.isFloating ? .orange : .blue),
             lineWidth: lineWidth
         )
         panel.ignoresMouseEvents = true
@@ -244,7 +272,8 @@ final class WindowBadgeOverlayController {
             }
             guard let cgRect = CGRect(dictionaryRepresentation: boundsDict) else { continue }
 
-            let rect = cgRect
+            // CGWindow bounds are top-origin; convert to AppKit coordinates before scoring.
+            let rect = convertTopOriginRectToAppKit(cgRect)
             if rect.isEmpty { continue }
             let dx = abs(rect.minX - targetWindowRect.minX)
             let dy = abs(rect.minY - targetWindowRect.minY)

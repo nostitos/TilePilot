@@ -41,8 +41,26 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
     private static let pinnedShortcutsDefaultsKey = "TilePilot.pinnedShortcutKeys"
     private static let pinnedDirectionalGroupsDefaultsKey = "TilePilot.pinnedDirectionalGroupIDs"
+    private static let pinnedFeatureControlsDefaultsKey = "TilePilot.pinnedFeatureControlIDs"
     private static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     private static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
+    private static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
+    private static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
+    private static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
+    private static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
+    private static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
+
+    private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: AppModel.appForegroundPolicyByNameDefaultsKey) as? [String: String] else {
+            return [:]
+        }
+        var mapped: [String: AppForegroundPolicy] = [:]
+        for (appKey, rawPolicy) in raw {
+            guard let policy = AppForegroundPolicy(rawValue: rawPolicy) else { continue }
+            mapped[appKey] = policy
+        }
+        return mapped
+    }
 
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
@@ -54,8 +72,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published private(set) var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published private(set) var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
+    @Published private(set) var pinnedFeatureControlIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedFeatureControlsDefaultsKey) ?? []
     @Published private(set) var selectedShortcutStableKey: String?
     @Published private(set) var requestedFileEditorTarget: EditorTarget?
+    @Published private(set) var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
     @Published var managedConfigDraft: String = ""
     @Published private(set) var editableFiles: [EditableConfigFile] = []
     @Published private(set) var selectedEditableFilePath: String?
@@ -106,6 +126,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSavingYabaiConfig = false
     @Published private(set) var isRestoringYabaiConfig = false
     @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default
+    @Published var raiseOnFloatToggleEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.raiseOnFloatToggleDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: AppModel.raiseOnFloatToggleDefaultsKey)
+    }()
+    @Published private(set) var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName()
     @Published var showWindowBadgeOverlay: Bool = {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: AppModel.showWindowBadgeOverlayDefaultsKey) == nil {
@@ -128,6 +156,7 @@ final class AppModel: ObservableObject {
     private let configService = ConfigService()
     private let yabaiRulesConfigService = YabaiRulesConfigService()
     private let configFilesService = ConfigFilesService()
+    private let releaseDefaultsService = ReleaseDefaultsService()
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var degradedModeActive = false
@@ -142,9 +171,16 @@ final class AppModel: ObservableObject {
     private var scriptHeaderDescriptionCache: [String: String?] = [:]
     private var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
     private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
+    private var lastRaisedAtByWindowID: [Int: Date] = [:]
+    private let raiseCooldownSeconds: TimeInterval = 1.2
+    private let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
+    private var hasAttemptedReleaseDefaultsInitialization = false
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
+        Task { [weak self] in
+            await self?.ensureReleaseDefaultsInitializedIfNeeded()
+        }
         autoRefreshTask = Task { [weak self] in
             guard let self else { return }
             await self.refreshDoctor()
@@ -266,17 +302,169 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    var releaseDefaultsResetButtonTitle: String {
+        "Reset to Release Defaults (\(releaseDefaultsStatus.currentVersion))"
+    }
+
+    func ensureReleaseDefaultsInitializedIfNeeded() async {
+        updateReleaseDefaultsStatus()
+        guard !hasAttemptedReleaseDefaultsInitialization else { return }
+        hasAttemptedReleaseDefaultsInitialization = true
+
+        let profile = releaseDefaultsService.currentProfile()
+        do {
+            try releaseDefaultsService.writeProfileSnapshotToDisk(profile)
+        } catch {
+            // Snapshot file is informational. Keep runtime defaults flow alive.
+        }
+
+        let defaults = UserDefaults.standard
+        let initialized = defaults.bool(forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
+        if !initialized {
+            let hasLegacyFootprint = await detectLegacySettingsFootprint()
+            if hasLegacyFootprint {
+                defaults.set(true, forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
+                defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
+                updateReleaseDefaultsStatus(currentProfile: profile)
+                return
+            }
+            _ = await applyReleaseDefaultsProfile(profile, mode: .firstInstall)
+            updateReleaseDefaultsStatus(currentProfile: profile)
+            return
+        }
+
+        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
+        updateReleaseDefaultsStatus(currentProfile: profile)
+    }
+
+    func resetToReleaseDefaults() {
+        Task { [weak self] in
+            guard let self else { return }
+            let profile = self.releaseDefaultsService.currentProfile()
+            do {
+                try self.releaseDefaultsService.writeProfileSnapshotToDisk(profile)
+            } catch {
+                // Keep reset flow running even if snapshot write fails.
+            }
+            _ = await self.applyReleaseDefaultsProfile(profile, mode: .manualReset)
+            self.updateReleaseDefaultsStatus(currentProfile: profile)
+        }
+    }
+
+    private func detectLegacySettingsFootprint() async -> Bool {
+        if releaseDefaultsService.hasLegacyUserDefaultsFootprint() {
+            return true
+        }
+        if let state = try? await configService.loadConfigDocument(), state.hasManagedSection {
+            return true
+        }
+        if let state = try? await yabaiRulesConfigService.loadConfigDocument(), state.hasManagedSection {
+            return true
+        }
+        return false
+    }
+
+    private func applyReleaseDefaultsProfile(_ profile: ReleaseDefaultsProfile, mode: ReleaseDefaultsApplyMode) async -> Bool {
+        if isSavingConfig || isSavingYabaiConfig || isRestoringConfig || isRestoringYabaiConfig {
+            lastErrorMessage = "Please wait for current save/restore operations to finish."
+            lastActionMessage = nil
+            return false
+        }
+
+        let previousPolicy = (try? await yabaiRulesConfigService.loadConfigDocument())?.policy ?? originalWindowBehaviorPolicy
+
+        do {
+            _ = try await configService.saveManagedSection(body: profile.configState.managedSkhdSectionBody)
+        } catch {
+            lastErrorMessage = "Applying release defaults failed while saving skhdrc: \(error.localizedDescription)"
+            lastActionMessage = nil
+            return false
+        }
+
+        do {
+            _ = try await yabaiRulesConfigService.saveWindowBehaviorPolicy(profile.configState.windowBehaviorPolicy)
+        } catch {
+            lastErrorMessage = "Applying release defaults failed while saving yabairc: \(error.localizedDescription)"
+            lastActionMessage = nil
+            return false
+        }
+
+        applyReleaseDefaultsUserState(profile.userState)
+
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
+        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsAppliedVersionDefaultsKey)
+        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
+
+        await runBestEffortSkhdRestart(afterConfigChange: false)
+        if canRunYabaiRuntimeCommands {
+            await applyWindowBehaviorRuntime(previous: previousPolicy, current: profile.configState.windowBehaviorPolicy)
+        } else {
+            await refreshWindowBehaviorConfig()
+        }
+        await refreshConfig()
+        await refreshShortcuts()
+        await refreshLiveState()
+        await refreshDoctor()
+        await refreshBootstrapSetup()
+
+        switch mode {
+        case .firstInstall:
+            lastActionMessage = "Applied release defaults \(profile.profileVersion) on first launch."
+        case .manualReset:
+            lastActionMessage = "Applied release defaults \(profile.profileVersion)."
+        }
+        lastErrorMessage = nil
+        return true
+    }
+
+    private func applyReleaseDefaultsUserState(_ state: ReleaseDefaultsUserState) {
+        pinnedFeatureControlIDs = Array(NSOrderedSet(array: state.pinnedFeatureControlIDs)) as? [String] ?? state.pinnedFeatureControlIDs
+        pinnedDirectionalGroupIDs = Array(NSOrderedSet(array: state.pinnedDirectionalGroupIDs)) as? [String] ?? state.pinnedDirectionalGroupIDs
+        pinnedShortcutKeys = []
+        persistPinnedFeatureControlIDs()
+        persistPinnedDirectionalGroupIDs()
+        persistPinnedShortcutKeys()
+
+        showWindowBadgeOverlay = state.showWindowBadgeOverlay
+        UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
+        showWindowOutlineOverlay = state.showWindowOutlineOverlay
+        UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
+        raiseOnFloatToggleEnabled = state.raiseOnFloatToggleEnabled
+        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
+
+        appForegroundPolicyByName = state.appForegroundPolicyByName
+        persistAppForegroundPolicies()
+        refreshWindowBadges()
+    }
+
+    private func updateReleaseDefaultsStatus(currentProfile: ReleaseDefaultsProfile? = nil) {
+        let profile = currentProfile ?? releaseDefaultsService.currentProfile()
+        let defaults = UserDefaults.standard
+        if let applied = defaults.string(forKey: AppModel.releaseDefaultsAppliedVersionDefaultsKey) {
+            if applied == profile.profileVersion {
+                releaseDefaultsStatus = .upToDate(version: profile.profileVersion)
+            } else {
+                releaseDefaultsStatus = .updateAvailable(currentVersion: profile.profileVersion, lastAppliedVersion: applied)
+            }
+        } else {
+            releaseDefaultsStatus = .neverApplied(currentVersion: profile.profileVersion)
+        }
+    }
+
     func refreshLiveState() async {
         guard !isRefreshingLiveState else { return }
         isRefreshingLiveState = true
         defer { isRefreshingLiveState = false }
 
+        let previousSnapshot = liveStateSnapshot
         let poll = await yabaiStateService.pollLiveState()
         applyDegradedModeCounters(yabaiWindowTotal: poll.yabaiWindowTotal, fallbackWindowTotal: poll.fallbackWindowTotal)
 
         let snapshot = makeLiveStateSnapshot(from: poll)
         liveStateSnapshot = snapshot
         refreshWindowBadges()
+        await applyForegroundPolicyTransitions(previous: previousSnapshot, current: snapshot)
     }
 
     func refreshShortcuts() async {
@@ -293,6 +481,7 @@ final class AppModel: ObservableObject {
         scriptHeaderDescriptionCache.removeAll()
         shortcutFilePath = result.filePath
         shortcutParseIssues = result.issues
+        migrateLegacyPinnedShortcutsToFeaturePins()
         await refreshEditableFiles()
     }
 
@@ -521,6 +710,44 @@ final class AppModel: ObservableObject {
         lastErrorMessage = nil
     }
 
+    func toggleRaiseOnFloatToggle() {
+        raiseOnFloatToggleEnabled.toggle()
+        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
+        lastActionMessage = raiseOnFloatToggleEnabled ? "Raise on float toggle enabled." : "Raise on float toggle disabled."
+        lastErrorMessage = nil
+    }
+
+    func setRaiseOnFloatToggleEnabled(_ enabled: Bool) {
+        guard raiseOnFloatToggleEnabled != enabled else { return }
+        raiseOnFloatToggleEnabled = enabled
+        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
+        lastActionMessage = raiseOnFloatToggleEnabled ? "Raise on float toggle enabled." : "Raise on float toggle disabled."
+        lastErrorMessage = nil
+    }
+
+    func bringFloatingWindowsToFrontCurrentDesktop() {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.bringFloatingWindowsToFrontCurrentDesktop(
+                flaggedOnly: false,
+                reason: .manualAll,
+                bypassCooldown: true
+            )
+        }
+    }
+
+    func bringFlaggedFloatingWindowsToFrontCurrentDesktop(reason: String = "manual") {
+        Task { [weak self] in
+            guard let self else { return }
+            let internalReason: FloatingBringReason = reason == "auto" ? .autoTransition : .manualFlagged
+            await self.bringFloatingWindowsToFrontCurrentDesktop(
+                flaggedOnly: true,
+                reason: internalReason,
+                bypassCooldown: internalReason != .autoTransition
+            )
+        }
+    }
+
     func tileFocusedWindowNow() {
         guard let focused = focusedWindowState else {
             lastErrorMessage = "No focused window detected."
@@ -588,8 +815,20 @@ final class AppModel: ObservableObject {
             }
             guard toggle.isSuccess else { return }
 
-            if shouldFloat && bringToFrontOnFloat {
-                await self.bringWindowToFront(windowID: windowID)
+            let foregroundPolicyEnabled = self.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
+            if shouldFloat && (bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled) {
+                _ = await self.raiseWindowOnly(
+                    windowID: windowID,
+                    bypassCooldown: true,
+                    allowFocusFallback: bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled
+                )
+            }
+            if shouldFloat && foregroundPolicyEnabled {
+                await self.bringFloatingWindowsToFrontCurrentDesktop(
+                    flaggedOnly: true,
+                    reason: .floatToggle,
+                    bypassCooldown: false
+                )
             }
 
             await MainActor.run {
@@ -602,6 +841,17 @@ final class AppModel: ObservableObject {
 
     func openWindowBehaviorSettings() {
         requestOpenTilePilotTab(.windowBehavior)
+    }
+
+    func openShortcutsDashboard() {
+        acknowledgeInitialStatusIfNeeded()
+        requestOpenTilePilotTab(.shortcuts)
+        NSApp.activate(ignoringOtherApps: true)
+        if let mainWindow = NSApp.windows.first(where: { window in
+            window.styleMask.contains(.titled) && window.title == "TilePilot"
+        }) {
+            mainWindow.makeKeyAndOrderFront(nil)
+        }
     }
 
     func openShortcutSource(_ entry: ShortcutEntry) {
@@ -657,6 +907,14 @@ final class AppModel: ObservableObject {
         parseShortcutComboDisplay(entry.combo).symbolsSpaced
     }
 
+    func displayShortcutComboSymbols(from combo: String) -> String {
+        parseShortcutComboDisplay(combo).symbols
+    }
+
+    func displayShortcutComboWords(from combo: String) -> String {
+        parseShortcutComboDisplay(combo).words
+    }
+
     func displayShortcutPrimaryKey(_ entry: ShortcutEntry) -> String {
         let trimmed = entry.combo.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "?" }
@@ -689,7 +947,10 @@ final class AppModel: ObservableObject {
     }
 
     func isShortcutPinned(_ entry: ShortcutEntry) -> Bool {
-        pinnedShortcutKeys.contains(entry.stableKey)
+        if let featureID = featureDefinition(for: entry)?.id {
+            return isFeaturePinned(featureID)
+        }
+        return pinnedShortcutKeys.contains(entry.stableKey)
     }
 
     func isDirectionalGroupPinned(_ group: DirectionalShortcutGroup) -> Bool {
@@ -706,6 +967,10 @@ final class AppModel: ObservableObject {
 
     func toggleShortcutPinned(_ entry: ShortcutEntry) {
         selectShortcut(entry)
+        if let featureID = featureDefinition(for: entry)?.id {
+            toggleFeaturePinned(featureID)
+            return
+        }
         if isShortcutPinned(entry) {
             pinnedShortcutKeys.removeAll { $0 == entry.stableKey }
             lastActionMessage = "Removed shortcut from right-click menu."
@@ -740,6 +1005,10 @@ final class AppModel: ObservableObject {
         guard let entry = shortcutEntries.first(where: { $0.stableKey == stableKey }) else {
             lastErrorMessage = "Pinned shortcut is no longer in skhdrc. Open Shortcuts to refresh or unpin it."
             lastActionMessage = nil
+            return
+        }
+        if let featureID = featureDefinition(for: entry)?.id {
+            runFeatureControl(featureID, source: .statusMenu)
             return
         }
         runShortcut(entry)
@@ -1019,6 +1288,39 @@ final class AppModel: ObservableObject {
 
     private func persistPinnedDirectionalGroupIDs() {
         UserDefaults.standard.set(pinnedDirectionalGroupIDs, forKey: AppModel.pinnedDirectionalGroupsDefaultsKey)
+    }
+
+    private func persistPinnedFeatureControlIDs() {
+        UserDefaults.standard.set(pinnedFeatureControlIDs, forKey: AppModel.pinnedFeatureControlsDefaultsKey)
+    }
+
+    private func migrateLegacyPinnedShortcutsToFeaturePins() {
+        guard !pinnedShortcutKeys.isEmpty else { return }
+
+        var remainingLegacy: [String] = []
+        var migrated = false
+        for key in pinnedShortcutKeys {
+            guard let entry = shortcutEntries.first(where: { $0.stableKey == key }) else {
+                remainingLegacy.append(key)
+                continue
+            }
+            guard let featureID = featureDefinition(for: entry)?.id else {
+                remainingLegacy.append(key)
+                continue
+            }
+            if !pinnedFeatureControlIDs.contains(featureID.rawValue) {
+                pinnedFeatureControlIDs.append(featureID.rawValue)
+            }
+            migrated = true
+        }
+
+        pinnedShortcutKeys = Array(NSOrderedSet(array: remainingLegacy)) as? [String] ?? remainingLegacy
+        pinnedFeatureControlIDs = Array(NSOrderedSet(array: pinnedFeatureControlIDs)) as? [String] ?? pinnedFeatureControlIDs
+
+        if migrated {
+            persistPinnedShortcutKeys()
+            persistPinnedFeatureControlIDs()
+        }
     }
 
     private func parseShortcutComboDisplay(_ combo: String) -> (symbols: String, symbolsSpaced: String, words: String) {
@@ -2051,24 +2353,50 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let candidates = snapshot.windows.filter { window in
-            window.isVisible && !window.isMinimized && !window.isHidden && window.frameW > 40 && window.frameH > 24
+        let sizeFiltered = snapshot.windows.filter { window in
+            guard !window.isMinimized && !window.isHidden else { return false }
+            if window.focused { return true }
+            return window.frameW > 40 && window.frameH > 24
         }
-        guard !candidates.isEmpty else {
+        guard !sizeFiltered.isEmpty else {
             windowBadges = []
             hoveredWindowIDForBadges = nil
             return
         }
 
         let activeSpaceIndex: Int? =
-            candidates.first(where: \.focused)?.space
+            sizeFiltered.first(where: \.focused)?.space
             ?? snapshot.spaces.first(where: \.focused)?.index
             ?? snapshot.spaces.first(where: \.visible)?.index
-        let activeCandidates: [WindowState]
+        let activeSpaceCandidates: [WindowState]
         if let activeSpaceIndex {
-            activeCandidates = candidates.filter { $0.space == activeSpaceIndex }
+            activeSpaceCandidates = sizeFiltered.filter { $0.space == activeSpaceIndex }
         } else {
-            activeCandidates = candidates
+            activeSpaceCandidates = sizeFiltered
+        }
+        guard !activeSpaceCandidates.isEmpty else {
+            windowBadges = []
+            hoveredWindowIDForBadges = nil
+            return
+        }
+
+        // Prefer truly visible windows, but keep a frontmost-app fallback when AX focus is unavailable
+        // (e.g. Chromium variants that report has-ax-reference=false).
+        var selectedWindows = activeSpaceCandidates.filter(\.isVisible)
+        let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        let frontmostCandidate = activeSpaceCandidates
+            .filter { $0.pid == frontmostPID }
+            .sorted { lhs, rhs in
+                let lhsArea = lhs.frameW * lhs.frameH
+                let rhsArea = rhs.frameW * rhs.frameH
+                if lhsArea != rhsArea { return lhsArea > rhsArea }
+                return lhs.id < rhs.id
+            }
+            .first
+
+        if let frontmostCandidate,
+           !selectedWindows.contains(where: { $0.id == frontmostCandidate.id }) {
+            selectedWindows.append(frontmostCandidate)
         }
 
         guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
@@ -2077,20 +2405,30 @@ final class AppModel: ObservableObject {
             return
         }
         hoveredWindowIDForBadges = nil
-        let selected = activeCandidates.sorted { lhs, rhs in
+        let sortedSelected = selectedWindows.sorted { lhs, rhs in
             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
             if lhs.app != rhs.app { return lhs.app.localizedCaseInsensitiveCompare(rhs.app) == .orderedAscending }
             return lhs.id < rhs.id
         }
 
-        windowBadges = selected.map { window in
+        let explicitFocused = sortedSelected.first(where: \.focused)
+        let effectiveFocusedID: Int? = {
+            if let frontmostCandidate {
+                if explicitFocused == nil { return frontmostCandidate.id }
+                if explicitFocused?.pid != frontmostCandidate.pid { return frontmostCandidate.id }
+            }
+            return explicitFocused?.id
+        }()
+
+        windowBadges = sortedSelected.map { window in
             WindowBadgeState(
                 windowID: window.id,
                 pid: window.pid,
                 app: window.app,
                 title: window.title,
                 isFloating: window.floating,
-                isFocused: window.focused,
+                isFocused: window.id == effectiveFocusedID,
+                isRuntimeManageable: window.isRuntimeManageable,
                 frameX: window.frameX,
                 frameY: window.frameY,
                 frameW: window.frameW,
@@ -2189,7 +2527,8 @@ final class AppModel: ObservableObject {
                 secondaryActionIDs: [],
                 isExperimental: group == .experimental,
                 disabledReason: matchingAction.flatMap { actionCard(for: $0)?.disabledReason },
-                intentKey: intent
+                intentKey: intent,
+                featureID: nil
             )
             byIntent[intent] = row
         }
@@ -2208,7 +2547,8 @@ final class AppModel: ObservableObject {
                         secondaryActionIDs: existing.secondaryActionIDs,
                         isExperimental: existing.isExperimental,
                         disabledReason: card.disabledReason,
-                        intentKey: existing.intentKey
+                        intentKey: existing.intentKey,
+                        featureID: existing.featureID
                     )
                     byIntent[intent] = existing
                 } else if existing.actionID != card.id {
@@ -2228,7 +2568,8 @@ final class AppModel: ObservableObject {
                         secondaryActionIDs: dedupedSecondary,
                         isExperimental: existing.isExperimental,
                         disabledReason: existing.disabledReason ?? card.disabledReason,
-                        intentKey: existing.intentKey
+                        intentKey: existing.intentKey,
+                        featureID: existing.featureID
                     )
                     byIntent[intent] = existing
                 }
@@ -2250,7 +2591,8 @@ final class AppModel: ObservableObject {
                 secondaryActionIDs: [],
                 isExperimental: group == .experimental,
                 disabledReason: card.disabledReason,
-                intentKey: intent
+                intentKey: intent,
+                featureID: nil
             )
         }
 
@@ -2271,6 +2613,565 @@ final class AppModel: ObservableObject {
                 row.shortcutEntry?.command.lowercased().contains(q) == true ||
                 row.group.title.lowercased().contains(q)
         }
+    }
+
+    private struct FeatureDefinition: Sendable {
+        let id: FeatureControlID
+        let group: UnifiedControlGroup
+        let title: String
+        let description: String
+        let backend: FeatureExecutionBackend
+        let capabilityGate: FeatureCapabilityGate
+        let defaultCombo: String?
+        let commandMatchers: [String]
+        let matchAllCommandMatchers: Bool
+        let preferredCommand: String?
+        let actionID: TilePilotActionID?
+        let isExperimental: Bool
+    }
+
+    private var featureDefinitions: [FeatureDefinition] {
+        [
+            FeatureDefinition(
+                id: "screen.set-floating-all-visible",
+                group: .tilingLayout,
+                title: "All Windows → Floating",
+                description: "Sets windows to floating. Applies to windows visible on the current desktop.",
+                backend: .scriptPath,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - d",
+                commandMatchers: ["/.config/yabai/scripts/disable-tiling-all-visible.sh"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "~/.config/yabai/scripts/disable-tiling-all-visible.sh",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.set-tiled-all-visible",
+                group: .tilingLayout,
+                title: "All Windows → Tiled",
+                description: "Sets windows to tiled. Applies to windows visible on the current desktop.",
+                backend: .scriptPath,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - e",
+                commandMatchers: ["/.config/yabai/scripts/enable-tiling-all-visible.sh"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "~/.config/yabai/scripts/enable-tiling-all-visible.sh",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.grid-floating",
+                group: .tilingLayout,
+                title: "Grid Tiling (Floating)",
+                description: "Packs visible windows into a grid and keeps them floating.",
+                backend: .scriptPath,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - p",
+                commandMatchers: ["/.config/yabai/scripts/grid-tiling-floating.sh", "/.config/yabai/scripts/grid-pack-toggle.sh"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "~/.config/yabai/scripts/grid-tiling-floating.sh",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.grid-auto-tiled",
+                group: .tilingLayout,
+                title: "Grid Tiling (Auto-Tiled)",
+                description: "Packs visible windows into a grid, then returns windows to tiled mode.",
+                backend: .scriptPath,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - o",
+                commandMatchers: ["/.config/yabai/scripts/grid-tiling-auto-tiled.sh"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "~/.config/yabai/scripts/grid-tiling-auto-tiled.sh",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.layout-bsp-balance",
+                group: .tilingLayout,
+                title: "Tile Layout + Balance",
+                description: "Switches current desktop to tile layout and rebalances.",
+                backend: .shortcutCommand,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - g",
+                commandMatchers: ["yabai -m space --layout bsp", "yabai -m space --balance"],
+                matchAllCommandMatchers: true,
+                preferredCommand: "yabai -m space --layout bsp; yabai -m space --balance",
+                actionID: .layoutBSPAndBalance,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.balance-current-desktop",
+                group: .tilingLayout,
+                title: "Balance Tiles",
+                description: "Rebalances tiled windows without changing layout mode.",
+                backend: .shortcutCommand,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "alt - 0",
+                commandMatchers: ["yabai -m space --balance"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m space --balance",
+                actionID: .balanceSpace,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.layout-stack",
+                group: .tilingLayout,
+                title: "Stack Layout",
+                description: "Sets the current desktop to stack layout.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "shift + alt - v",
+                commandMatchers: ["yabai -m space --layout stack"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m space --layout stack",
+                actionID: .layoutStack,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.rotate-layout",
+                group: .tilingLayout,
+                title: "Rotate Layout",
+                description: "Rotates the current desktop layout by 90 degrees.",
+                backend: .shortcutCommand,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "shift + alt - r",
+                commandMatchers: ["yabai -m space --rotate"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m space --rotate 90",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.toggle-float",
+                group: .tilingLayout,
+                title: "Toggle Floating/Tiled",
+                description: "Toggles the focused window between floating and tiled.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "ctrl + shift + alt - ~",
+                commandMatchers: ["yabai -m window --toggle float"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m window --toggle float",
+                actionID: .toggleFloat,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.focus-left",
+                group: .focus,
+                title: "Focus Left",
+                description: "Moves focus to the window on the left.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "alt - j",
+                commandMatchers: ["yabai -m window --focus west"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m window --focus west",
+                actionID: .focusWest,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.focus-right",
+                group: .focus,
+                title: "Focus Right",
+                description: "Moves focus to the window on the right.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "alt - l",
+                commandMatchers: ["yabai -m window --focus east"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m window --focus east",
+                actionID: .focusEast,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.focus-up",
+                group: .focus,
+                title: "Focus Up",
+                description: "Moves focus to the window above.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "alt - i",
+                commandMatchers: ["yabai -m window --focus north"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m window --focus north",
+                actionID: .focusNorth,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "action.focus-down",
+                group: .focus,
+                title: "Focus Down",
+                description: "Moves focus to the window below.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: "alt - k",
+                commandMatchers: ["yabai -m window --focus south"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m window --focus south",
+                actionID: .focusSouth,
+                isExperimental: false
+            ),
+        ]
+    }
+
+    private func featureDefinition(for entry: ShortcutEntry) -> FeatureDefinition? {
+        let command = entry.command.lowercased()
+        return featureDefinitions.first { definition in
+            guard !definition.commandMatchers.isEmpty else { return false }
+            if definition.matchAllCommandMatchers {
+                return definition.commandMatchers.allSatisfy { command.contains($0) }
+            }
+            return definition.commandMatchers.contains(where: { command.contains($0) })
+        }
+    }
+
+    private func featureDefinition(forActionID actionID: TilePilotActionID) -> FeatureDefinition? {
+        featureDefinitions.first(where: { $0.actionID == actionID })
+    }
+
+    var featureControlRows: [FeatureControlRow] {
+        let baseRows = unifiedControlRows
+        var usedFeatureIDs: Set<FeatureControlID> = []
+        var result: [FeatureControlRow] = []
+        var featureRowsByID: [FeatureControlID: FeatureControlRow] = [:]
+        var seenNonFeatureSignatures: Set<String> = []
+
+        for row in baseRows {
+            let mappedDefinition = row.shortcutEntry.flatMap(featureDefinition(for:))
+                ?? row.actionID.flatMap(featureDefinition(forActionID:))
+            if let mappedDefinition {
+                usedFeatureIDs.insert(mappedDefinition.id)
+            }
+            let disabledReason = mappedDefinition.map { featureDisabledReason(for: $0.capabilityGate) } ?? row.disabledReason
+            let bindingState: FeatureShortcutBindingState
+            if let disabledReason {
+                bindingState = .disabled(reason: disabledReason)
+            } else if let entry = row.shortcutEntry {
+                bindingState = .assigned(combo: entry.combo)
+            } else {
+                bindingState = .missing(defaultCombo: mappedDefinition?.defaultCombo)
+            }
+            let candidate = FeatureControlRow(
+                id: mappedDefinition.map { "feature-\($0.id.rawValue)" } ?? row.id,
+                featureID: mappedDefinition?.id,
+                group: mappedDefinition?.group ?? row.group,
+                title: mappedDefinition?.title ?? row.title,
+                description: mappedDefinition?.description ?? row.description,
+                backend: mappedDefinition?.backend ?? (row.shortcutEntry == nil ? .tilePilotAction : .shortcutCommand),
+                capabilityGate: mappedDefinition?.capabilityGate ?? .none,
+                shortcutEntry: row.shortcutEntry,
+                actionID: mappedDefinition?.actionID ?? row.actionID,
+                preferredCommand: mappedDefinition?.preferredCommand,
+                assignedCombo: row.shortcutEntry?.combo,
+                defaultCombo: mappedDefinition?.defaultCombo,
+                bindingState: bindingState,
+                isExperimental: mappedDefinition?.isExperimental ?? row.isExperimental,
+                disabledReason: disabledReason
+            )
+            if let featureID = candidate.featureID {
+                if let existing = featureRowsByID[featureID] {
+                    featureRowsByID[featureID] = preferredFeatureRow(existing: existing, candidate: candidate)
+                } else {
+                    featureRowsByID[featureID] = candidate
+                }
+            } else {
+                let signature = nonFeatureRowSignature(candidate)
+                if seenNonFeatureSignatures.insert(signature).inserted {
+                    result.append(candidate)
+                }
+            }
+        }
+
+        result.append(contentsOf: featureRowsByID.values)
+
+        for definition in featureDefinitions where !usedFeatureIDs.contains(definition.id) {
+            let disabledReason = featureDisabledReason(for: definition.capabilityGate)
+            let bindingState: FeatureShortcutBindingState
+            if let disabledReason {
+                bindingState = .disabled(reason: disabledReason)
+            } else {
+                bindingState = .missing(defaultCombo: definition.defaultCombo)
+            }
+            result.append(
+                FeatureControlRow(
+                    id: "feature-\(definition.id.rawValue)",
+                    featureID: definition.id,
+                    group: definition.group,
+                    title: definition.title,
+                    description: definition.description,
+                    backend: definition.backend,
+                    capabilityGate: definition.capabilityGate,
+                    shortcutEntry: nil,
+                    actionID: definition.actionID,
+                    preferredCommand: definition.preferredCommand,
+                    assignedCombo: nil,
+                    defaultCombo: definition.defaultCombo,
+                    bindingState: bindingState,
+                    isExperimental: definition.isExperimental,
+                    disabledReason: disabledReason
+                )
+            )
+        }
+
+        return result.sorted { lhs, rhs in
+            if lhs.group.sortRank != rhs.group.sortRank { return lhs.group.sortRank < rhs.group.sortRank }
+            if lhs.group == .tilingLayout && rhs.group == .tilingLayout {
+                let lhsPriority = featureControlRowSortPriority(lhs)
+                let rhsPriority = featureControlRowSortPriority(rhs)
+                if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+            }
+            if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+    }
+
+    func featureControlRowSortPriority(_ row: FeatureControlRow) -> Int {
+        guard row.group == .tilingLayout else { return 1_000 }
+        if let featureID = row.featureID {
+            switch featureID.rawValue {
+            case "screen.set-floating-all-visible": return 10
+            case "screen.set-tiled-all-visible": return 20
+            case "screen.grid-floating": return 30
+            case "screen.grid-auto-tiled": return 40
+            case "screen.balance-current-desktop": return 50
+            case "screen.layout-bsp-balance": return 60
+            case "action.layout-stack": return 70
+            case "screen.rotate-layout": return 80
+            default: return 500
+            }
+        }
+
+        let command = row.shortcutEntry?.command.lowercased() ?? row.preferredCommand?.lowercased() ?? ""
+        let title = row.title.lowercased()
+        if command.contains("yabai -m space --rotate") || title.contains("rotate layout") { return 80 }
+        if command.contains("yabai -m space --layout stack") || title.contains("stack layout") { return 70 }
+        if command.contains("yabai -m space --layout bsp") || title.contains("tile layout + balance") { return 60 }
+        if command.contains("yabai -m space --balance") || title.contains("balance tiles") { return 50 }
+        return 500
+    }
+
+    func filteredFeatureControlRows(query: String) -> [FeatureControlRow] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return featureControlRows }
+        return featureControlRows.filter { row in
+            row.title.lowercased().contains(q) ||
+                row.description.lowercased().contains(q) ||
+                row.assignedCombo?.lowercased().contains(q) == true ||
+                row.shortcutEntry?.command.lowercased().contains(q) == true ||
+                row.group.title.lowercased().contains(q)
+        }
+    }
+
+    private func preferredFeatureRow(existing: FeatureControlRow, candidate: FeatureControlRow) -> FeatureControlRow {
+        if existing.shortcutEntry == nil, candidate.shortcutEntry != nil { return candidate }
+        if existing.shortcutEntry != nil, candidate.shortcutEntry == nil { return existing }
+        if existing.disabledReason != nil, candidate.disabledReason == nil { return candidate }
+        if existing.assignedCombo == nil, candidate.assignedCombo != nil { return candidate }
+        if let existingLine = existing.shortcutEntry?.sourceLine,
+           let candidateLine = candidate.shortcutEntry?.sourceLine,
+           candidateLine < existingLine {
+            return candidate
+        }
+        return existing
+    }
+
+    private func nonFeatureRowSignature(_ row: FeatureControlRow) -> String {
+        let combo = row.assignedCombo ?? ""
+        let action = row.actionID?.rawValue ?? ""
+        let command = row.shortcutEntry?.command ?? row.preferredCommand ?? ""
+        return "\(row.group.rawValue)|\(row.title)|\(combo)|\(action)|\(command)"
+    }
+
+    var pinnedFeatureControlRows: [FeatureControlRow] {
+        var byID: [String: FeatureControlRow] = [:]
+        for row in featureControlRows {
+            guard let id = row.featureID else { continue }
+            byID[id.rawValue] = row
+        }
+        return pinnedFeatureControlIDs.compactMap { byID[$0] }
+    }
+
+    func featureControlRow(forShortcutEntry entry: ShortcutEntry) -> FeatureControlRow? {
+        featureControlRows.first { $0.shortcutEntry?.stableKey == entry.stableKey }
+    }
+
+    func featureControlRow(forID featureID: FeatureControlID) -> FeatureControlRow? {
+        featureControlRows.first { $0.featureID == featureID }
+    }
+
+    func isFeaturePinned(_ featureID: FeatureControlID) -> Bool {
+        pinnedFeatureControlIDs.contains(featureID.rawValue)
+    }
+
+    func toggleFeaturePinned(_ featureID: FeatureControlID) {
+        if isFeaturePinned(featureID) {
+            pinnedFeatureControlIDs.removeAll { $0 == featureID.rawValue }
+            lastActionMessage = "Removed feature from right-click menu."
+        } else {
+            pinnedFeatureControlIDs.append(featureID.rawValue)
+            pinnedFeatureControlIDs = Array(NSOrderedSet(array: pinnedFeatureControlIDs)) as? [String] ?? pinnedFeatureControlIDs
+            lastActionMessage = "Pinned feature to right-click menu."
+        }
+        persistPinnedFeatureControlIDs()
+        lastErrorMessage = nil
+    }
+
+    func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource) {
+        guard let row = featureControlRow(forID: featureID) else {
+            lastErrorMessage = "Feature is no longer available."
+            lastActionMessage = nil
+            return
+        }
+        if let disabledReason = row.disabledReason {
+            lastErrorMessage = disabledReason
+            lastActionMessage = nil
+            return
+        }
+        if let entry = row.shortcutEntry {
+            runShortcut(entry)
+            return
+        }
+        if let actionID = row.actionID {
+            performTilePilotAction(actionID)
+            return
+        }
+        if let command = row.preferredCommand {
+            runShortcutCommand(command, shortcutLabel: row.title)
+            return
+        }
+        lastErrorMessage = "No shortcut assigned yet. Use Set Shortcut in Shortcuts."
+        lastActionMessage = nil
+    }
+
+    func assignShortcut(combo: String, to featureID: FeatureControlID) {
+        guard let definition = featureDefinitions.first(where: { $0.id == featureID }) else {
+            lastErrorMessage = "Unknown feature."
+            lastActionMessage = nil
+            return
+        }
+        guard let preferredCommand = definition.preferredCommand else {
+            lastErrorMessage = "This feature has no assignable command yet."
+            lastActionMessage = nil
+            return
+        }
+        let normalizedTarget = normalizedShortcutCombo(combo)
+        guard !normalizedTarget.isEmpty else {
+            lastErrorMessage = "Shortcut cannot be empty."
+            lastActionMessage = nil
+            return
+        }
+
+        if let conflict = shortcutEntries.first(where: {
+            normalizedShortcutCombo($0.combo) == normalizedTarget &&
+                (featureDefinition(for: $0)?.id != featureID)
+        }) {
+            let conflictName = featureDefinition(for: conflict)?.title ?? shortcutTitle(conflict)
+            let suggestions = suggestShortcutAlternatives(for: combo)
+            let suggestionText = suggestions.isEmpty ? "" : " Try: \(suggestions.joined(separator: ", "))."
+            lastErrorMessage = "Shortcut already used by \(conflictName).\(suggestionText)"
+            lastActionMessage = nil
+            return
+        }
+
+        let command = NSString(string: preferredCommand).expandingTildeInPath
+        upsertManagedFeatureShortcut(featureID: featureID, combo: combo, command: command)
+        saveManagedConfigSection()
+    }
+
+    func removeShortcut(for featureID: FeatureControlID) {
+        removeManagedFeatureShortcut(featureID: featureID)
+        saveManagedConfigSection()
+    }
+
+    func suggestShortcutAlternatives(for combo: String) -> [String] {
+        let used = Set(shortcutEntries.map { normalizedShortcutCombo($0.combo) })
+        let pool = [
+            "ctrl + shift + alt - d",
+            "ctrl + shift + alt - e",
+            "ctrl + shift + alt - p",
+            "ctrl + shift + alt - o",
+            "ctrl + shift + alt - g",
+            "ctrl + shift + alt - f",
+            "ctrl + shift + alt - b",
+            "ctrl + shift + alt - n",
+            "ctrl + shift + alt - m",
+            "shift + alt - b",
+            "shift + alt - v",
+            "alt - 0",
+        ]
+        let normalizedCurrent = normalizedShortcutCombo(combo)
+        return pool.filter { candidate in
+            let normalizedCandidate = normalizedShortcutCombo(candidate)
+            return normalizedCandidate != normalizedCurrent && !used.contains(normalizedCandidate)
+        }
+        .prefix(4)
+        .map { $0 }
+    }
+
+    private func featureDisabledReason(for gate: FeatureCapabilityGate) -> String? {
+        switch gate {
+        case .none:
+            return nil
+        case .yabaiRuntime:
+            return canRunYabaiRuntimeCommands ? nil : (yabaiRuntimeControlDisabledReason ?? "yabai runtime controls are unavailable.")
+        case .scriptingAddition:
+            return canRunScriptingAdditionDesktopActions ? nil : "Requires scripting addition."
+        }
+    }
+
+    private func normalizedShortcutCombo(_ combo: String) -> String {
+        combo
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s*\\+\\s*", with: " + ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s*-\\s*", with: " - ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func upsertManagedFeatureShortcut(featureID: FeatureControlID, combo: String, command: String) {
+        let marker = managedFeatureMarkerPrefix + featureID.rawValue
+        let shortcutLine = "\(combo) : \(command)"
+        var lines = managedConfigDraft.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+
+        if let markerIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == marker }) {
+            if markerIndex + 1 < lines.count, lines[markerIndex + 1].contains(":") {
+                lines[markerIndex + 1] = shortcutLine
+            } else {
+                lines.insert(shortcutLine, at: markerIndex + 1)
+            }
+        } else {
+            if !lines.isEmpty, !lines.last!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("")
+            }
+            lines.append(marker)
+            lines.append(shortcutLine)
+        }
+        managedConfigDraft = lines.joined(separator: "\n")
+        recomputeConfigDiffPreview()
+    }
+
+    private func removeManagedFeatureShortcut(featureID: FeatureControlID) {
+        let marker = managedFeatureMarkerPrefix + featureID.rawValue
+        var lines = managedConfigDraft.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        var index = 0
+        while index < lines.count {
+            if lines[index].trimmingCharacters(in: .whitespaces) == marker {
+                lines.remove(at: index)
+                if index < lines.count, lines[index].contains(":") {
+                    lines.remove(at: index)
+                }
+                if index < lines.count, lines[index].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    lines.remove(at: index)
+                }
+                continue
+            }
+            index += 1
+        }
+        managedConfigDraft = lines.joined(separator: "\n")
+        recomputeConfigDiffPreview()
     }
 
     func addNeverTileApp(_ name: String) {
@@ -2330,6 +3231,38 @@ final class AppModel: ObservableObject {
             return "Auto-tiling is forced by an existing rule in your yabairc (outside TilePilot)."
         case .useDefault:
             return nil
+        }
+    }
+
+    func appForegroundPolicy(for appName: String) -> AppForegroundPolicy {
+        let key = normalizedAppRuleKey(appName)
+        return appForegroundPolicyByName[key] ?? .useDefault
+    }
+
+    func setAppForegroundPolicy(_ policy: AppForegroundPolicy, for appName: String) {
+        let key = normalizedAppRuleKey(appName)
+        guard !key.isEmpty else { return }
+        if policy == .useDefault {
+            appForegroundPolicyByName.removeValue(forKey: key)
+        } else {
+            appForegroundPolicyByName[key] = policy
+        }
+        persistAppForegroundPolicies()
+        let displayName = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if policy == .useDefault {
+            lastActionMessage = "Keep-on-top behavior for \(displayName) reset to default."
+        } else {
+            lastActionMessage = "\(displayName) will stay on top when floating."
+            bringFlaggedFloatingWindowsToFrontCurrentDesktop()
+        }
+        lastErrorMessage = nil
+    }
+
+    func toggleKeepFrontWhenFloating(for appName: String) {
+        let next: AppForegroundPolicy = appForegroundPolicy(for: appName) == .keepFrontWhenFloating ? .useDefault : .keepFrontWhenFloating
+        setAppForegroundPolicy(next, for: appName)
+        if next == .keepFrontWhenFloating {
+            bringFlaggedFloatingWindowsToFrontCurrentDesktop()
         }
     }
 
@@ -2683,8 +3616,17 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private func persistAppForegroundPolicies() {
+        let raw = appForegroundPolicyByName.mapValues(\.rawValue)
+        UserDefaults.standard.set(raw, forKey: AppModel.appForegroundPolicyByNameDefaultsKey)
+    }
+
     private func normalizedAppRuleKey(_ appName: String) -> String {
-        appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        appName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"[\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]"#, with: "", options: .regularExpression)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
     }
 
     private func parseExternalYabaiAppBehaviors(from fullContent: String) -> [String: AppTilingBehavior] {
@@ -2869,13 +3811,166 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func bringWindowToFront(windowID: Int) async {
+    private enum FloatingBringReason {
+        case manualAll
+        case manualFlagged
+        case autoTransition
+        case floatToggle
+    }
+
+    private func applyForegroundPolicyTransitions(previous: LiveStateSnapshot?, current: LiveStateSnapshot) async {
+        let currentTransition = foregroundTransitionSnapshot(from: current)
+        guard currentTransition.isEligible else { return }
+
+        let previousTransition: (isEligible: Bool, activeSpace: Int?, visibleFlaggedFloatingWindowIDs: Set<Int>)
+        if let previous {
+            previousTransition = foregroundTransitionSnapshot(from: previous)
+        } else {
+            previousTransition = (true, nil, [])
+        }
+        guard previousTransition.isEligible else { return }
+
+        let activeDesktopChanged = previousTransition.activeSpace != currentTransition.activeSpace
+        let newlyVisibleFlagged = currentTransition.visibleFlaggedFloatingWindowIDs.subtracting(previousTransition.visibleFlaggedFloatingWindowIDs)
+        guard activeDesktopChanged || !newlyVisibleFlagged.isEmpty else { return }
+        await bringFloatingWindowsToFrontCurrentDesktop(flaggedOnly: true, reason: .autoTransition, bypassCooldown: false)
+    }
+
+    private func foregroundTransitionSnapshot(from snapshot: LiveStateSnapshot?) -> (isEligible: Bool, activeSpace: Int?, visibleFlaggedFloatingWindowIDs: Set<Int>) {
+        guard let snapshot, snapshot.source == .yabai, !snapshot.degraded else {
+            return (false, nil, [])
+        }
+        let activeSpace = activeSpaceIndex(in: snapshot)
+        let windows = candidateFloatingWindows(in: snapshot, activeSpace: activeSpace, flaggedOnly: true)
+        return (true, activeSpace, Set(windows.map(\.id)))
+    }
+
+    private func activeSpaceIndex(in snapshot: LiveStateSnapshot) -> Int? {
+        snapshot.windows.first(where: \.focused)?.space
+            ?? snapshot.spaces.first(where: \.focused)?.index
+            ?? snapshot.spaces.first(where: \.visible)?.index
+    }
+
+    private func candidateFloatingWindows(
+        in snapshot: LiveStateSnapshot,
+        activeSpace: Int?,
+        flaggedOnly: Bool
+    ) -> [WindowState] {
+        snapshot.windows.filter { window in
+            guard window.floating else { return false }
+            guard window.isVisible && !window.isMinimized && !window.isHidden else { return false }
+            guard window.isRuntimeManageable else { return false }
+            if let activeSpace, window.space != activeSpace { return false }
+            if flaggedOnly && appForegroundPolicy(for: window.app) != .keepFrontWhenFloating {
+                return false
+            }
+            return true
+        }
+        .sorted { lhs, rhs in
+            let lhsArea = lhs.frameW * lhs.frameH
+            let rhsArea = rhs.frameW * rhs.frameH
+            if lhsArea != rhsArea { return lhsArea > rhsArea }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func bringFloatingWindowsToFrontCurrentDesktop(
+        flaggedOnly: Bool,
+        reason: FloatingBringReason,
+        bypassCooldown: Bool
+    ) async {
+        guard canRunYabaiRuntimeCommands else {
+            if reason == .manualAll || reason == .manualFlagged {
+                lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
+                lastActionMessage = nil
+            }
+            return
+        }
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
+            if reason == .manualAll || reason == .manualFlagged {
+                lastErrorMessage = "Live window mapping is not precise right now."
+                lastActionMessage = nil
+            }
+            return
+        }
+
+        let activeSpace = activeSpaceIndex(in: snapshot)
+        let candidates = candidateFloatingWindows(in: snapshot, activeSpace: activeSpace, flaggedOnly: flaggedOnly)
+
+        guard !candidates.isEmpty else {
+            if reason == .manualAll {
+                lastActionMessage = "No floating windows on the current desktop."
+                lastErrorMessage = nil
+            } else if reason == .manualFlagged {
+                lastActionMessage = "No flagged floating windows on the current desktop."
+                lastErrorMessage = nil
+            }
+            return
+        }
+
+        var raisedCount = 0
+        for window in candidates {
+            if await raiseWindowOnly(
+                windowID: window.id,
+                bypassCooldown: bypassCooldown,
+                allowFocusFallback: reason == .manualAll || reason == .manualFlagged
+            ) {
+                raisedCount += 1
+            }
+        }
+
+        switch reason {
+        case .manualAll:
+            let desktopLabel = activeSpace.map { "Desktop \($0)" } ?? "current desktop"
+            lastActionMessage = "Kept \(raisedCount) floating window(s) on top on \(desktopLabel)."
+            lastErrorMessage = nil
+        case .manualFlagged:
+            let desktopLabel = activeSpace.map { "Desktop \($0)" } ?? "current desktop"
+            lastActionMessage = "Kept \(raisedCount) flagged floating window(s) on top on \(desktopLabel)."
+            lastErrorMessage = nil
+        case .autoTransition, .floatToggle:
+            break
+        }
+    }
+
+    private func raiseWindowOnly(
+        windowID: Int,
+        bypassCooldown: Bool = false,
+        allowFocusFallback: Bool = false
+    ) async -> Bool {
+        let now = Date()
+        if !bypassCooldown,
+           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
+           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
+            return false
+        }
+
         let raise = await doctorService.runSupportCommand(
             ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(windowID), "--raise"], timeout: 1.5)
         )
         await MainActor.run {
             self.appendCommandLog(from: raise)
         }
+        if !raise.isSuccess {
+            guard allowFocusFallback, isScriptingAdditionRaiseFailure(raise) else {
+                return false
+            }
+            let focus = await doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+            )
+            await MainActor.run {
+                self.appendCommandLog(from: focus)
+            }
+            guard focus.isSuccess else { return false }
+            lastRaisedAtByWindowID[windowID] = now
+            return true
+        }
+        lastRaisedAtByWindowID[windowID] = now
+        return true
+    }
+
+    private func bringWindowToFront(windowID: Int) async {
+        _ = await raiseWindowOnly(windowID: windowID, bypassCooldown: true, allowFocusFallback: true)
 
         let focus = await doctorService.runSupportCommand(
             ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
@@ -2883,6 +3978,12 @@ final class AppModel: ObservableObject {
         await MainActor.run {
             self.appendCommandLog(from: focus)
         }
+    }
+
+    private func isScriptingAdditionRaiseFailure(_ result: CommandResult) -> Bool {
+        let text = "\(result.stderr)\n\(result.stdout)".lowercased()
+        return text.contains("scripting-addition")
+            || text.contains("scripting addition")
     }
 
     private func runtimeControllableWindow(windowID: Int) -> WindowState? {
@@ -2893,6 +3994,11 @@ final class AppModel: ObservableObject {
         }
         guard let window = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else {
             lastErrorMessage = "Window is no longer available."
+            lastActionMessage = nil
+            return nil
+        }
+        guard window.isRuntimeManageable else {
+            lastErrorMessage = "\(window.app) does not expose move/control hooks for this window right now, so TilePilot cannot tile/float it."
             lastActionMessage = nil
             return nil
         }
@@ -3586,6 +4692,9 @@ final class AppModel: ObservableObject {
                         frameW: $0.frameW,
                         frameH: $0.frameH,
                         floating: $0.floating,
+                        hasAXReference: $0.hasAXReference,
+                        canMove: $0.canMove,
+                        canResize: $0.canResize,
                         title: $0.title,
                         focused: $0.focused,
                         isVisible: $0.isVisible,

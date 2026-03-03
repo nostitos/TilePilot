@@ -134,12 +134,12 @@ final class StatusBarController: NSObject {
         menu.autoenablesItems = false
         menu.addItem(item("Open TilePilot", action: #selector(openTilePilot)))
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
-        menu.addItem(item("Open Controls", action: #selector(openShortcuts)))
+        menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
-        addScreenWideShortcutItems(to: menu)
-        menu.addItem(.separator())
+
+        let hasPinnedFeatures = addPinnedFeatureItems(to: menu)
         let hasPinnedShortcuts = addPinnedShortcutItems(to: menu)
-        if hasPinnedShortcuts {
+        if hasPinnedFeatures || hasPinnedShortcuts {
             menu.addItem(.separator())
         }
 
@@ -174,6 +174,47 @@ final class StatusBarController: NSObject {
         autoTileItem.state = autoTileNewWindows ? .on : .off
         menu.addItem(autoTileItem)
 
+        let raiseOnFloatItem = item(
+            runtimeEnabled ? "Raise On Float Toggle" : "Raise On Float Toggle (\(runtimeReason))",
+            action: #selector(toggleRaiseOnFloatToggle),
+            enabled: runtimeEnabled
+        )
+        raiseOnFloatItem.state = model.raiseOnFloatToggleEnabled ? .on : .off
+        menu.addItem(raiseOnFloatItem)
+
+        let focusedAppName = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusedAppAvailable = focusedAppName?.isEmpty == false
+        let keepFocusedAppTitle: String
+        if let focusedAppName, !focusedAppName.isEmpty {
+            keepFocusedAppTitle = "Keep \(focusedAppName) on Top (When Floating)"
+        } else {
+            keepFocusedAppTitle = "Keep Focused App on Top (When Floating)"
+        }
+        let keepFocusedAppEnabled = runtimeEnabled && focusedAppAvailable
+        let keepFocusedAppItem = item(
+            keepFocusedAppEnabled ? keepFocusedAppTitle : "\(keepFocusedAppTitle) (\(runtimeEnabled ? "No focused app" : runtimeReason))",
+            action: #selector(toggleFocusedAppKeepFrontWhenFloating),
+            enabled: keepFocusedAppEnabled
+        )
+        if let focusedAppName, !focusedAppName.isEmpty {
+            keepFocusedAppItem.state = model.appForegroundPolicy(for: focusedAppName) == .keepFrontWhenFloating ? .on : .off
+        }
+        menu.addItem(keepFocusedAppItem)
+
+        let bringFloatingItem = item(
+            runtimeEnabled ? "Keep Floating Windows on Top" : "Keep Floating Windows on Top (\(runtimeReason))",
+            action: #selector(bringFloatingWindowsToFront),
+            enabled: runtimeEnabled
+        )
+        menu.addItem(bringFloatingItem)
+
+        let bringFlaggedFloatingItem = item(
+            runtimeEnabled ? "Keep Flagged Floating Windows on Top" : "Keep Flagged Floating Windows on Top (\(runtimeReason))",
+            action: #selector(bringFlaggedFloatingWindowsToFront),
+            enabled: runtimeEnabled
+        )
+        menu.addItem(bringFlaggedFloatingItem)
+
         let badgeItem = item("Window Badges", action: #selector(toggleWindowBadgeOverlay))
         badgeItem.state = model.showWindowBadgeOverlay ? .on : .off
         menu.addItem(badgeItem)
@@ -201,11 +242,39 @@ final class StatusBarController: NSObject {
         return item
     }
 
+    private func addPinnedFeatureItems(to menu: NSMenu) -> Bool {
+        let pinned = model.pinnedFeatureControlRows
+        if pinned.isEmpty {
+            return false
+        }
+        for row in pinned {
+            guard let featureID = row.featureID else { continue }
+            let combo = row.shortcutEntry.map { model.displayShortcutComboSymbols($0) }
+                ?? row.assignedCombo.map { model.displayShortcutComboSymbols(from: $0) }
+                ?? row.defaultCombo.map { model.displayShortcutComboSymbols(from: $0) }
+            let comboPrefix = (combo?.isEmpty == false) ? "\(combo!)  " : ""
+            let label = comboPrefix + row.title
+            let disabledReason = row.disabledReason
+            let item = self.item(
+                disabledReason == nil ? label : "\(label) (\(disabledReason!))",
+                action: #selector(runPinnedFeature(_:)),
+                enabled: disabledReason == nil
+            )
+            item.representedObject = featureID.rawValue
+            menu.addItem(item)
+        }
+        return true
+    }
+
     private func addPinnedShortcutItems(to menu: NSMenu) -> Bool {
         let pinnedGroups = model.pinnedDirectionalGroupBindings
         let pinnedRaw = model.pinnedShortcutEntries
         let pinned = pinnedRaw.filter { entry in
-            !(model.isScriptingAdditionDesktopShortcut(entry) && !model.canRunScriptingAdditionDesktopActions)
+            // Feature-backed shortcuts now render through pinnedFeatureControlRows.
+            if model.featureControlRow(forShortcutEntry: entry)?.featureID != nil {
+                return false
+            }
+            return !(model.isScriptingAdditionDesktopShortcut(entry) && !model.canRunScriptingAdditionDesktopActions)
         }
         if pinnedGroups.isEmpty && pinned.isEmpty {
             return false
@@ -279,75 +348,6 @@ final class StatusBarController: NSObject {
         model.quickActionCards.first(where: { $0.id == .balanceSpace })?.enabled ?? false
     }
 
-    private func addScreenWideShortcutItems(to menu: NSMenu) {
-        let header = NSMenuItem(title: "Screen-wide Controls", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-
-        let runtimeEnabled = model.canRunYabaiRuntimeCommands
-        let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
-
-        struct EntrySpec {
-            let title: String
-            let matcher: (ShortcutEntry) -> Bool
-        }
-
-        let specs: [EntrySpec] = [
-            EntrySpec(
-                title: "Set All Visible Windows: Floating",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/disable-tiling-all-visible.sh") }
-            ),
-            EntrySpec(
-                title: "Set All Visible Windows: Tiled",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/enable-tiling-all-visible.sh") }
-            ),
-            EntrySpec(
-                title: "Grid Tiling (Floating)",
-                matcher: { command in
-                    let c = command.command.lowercased()
-                    return c.contains("/.config/yabai/scripts/grid-tiling-floating.sh")
-                        || c.contains("/.config/yabai/scripts/grid-pack-toggle.sh")
-                }
-            ),
-            EntrySpec(
-                title: "Grid -> Auto-Tile (BSP)",
-                matcher: { $0.command.lowercased().contains("/.config/yabai/scripts/grid-tiling-auto-tiled.sh") }
-            ),
-            EntrySpec(
-                title: "Split Tree Layout (BSP + Balance)",
-                matcher: { command in
-                    let c = command.command.lowercased()
-                    return c.contains("yabai -m space --layout bsp") && c.contains("yabai -m space --balance")
-                }
-            ),
-            EntrySpec(
-                title: "Balance Current Desktop",
-                matcher: { command in
-                    let c = command.command.lowercased()
-                    return c.contains("yabai -m space --balance") && !c.contains("yabai -m space --layout bsp")
-                }
-            ),
-        ]
-
-        var shown = 0
-        for spec in specs {
-            guard let entry = model.shortcutEntries.first(where: spec.matcher) else { continue }
-            let combo = model.displayShortcutComboSymbolsSpaced(entry)
-            let label = combo.isEmpty ? spec.title : "\(combo)  \(spec.title)"
-            let title = runtimeEnabled ? label : "\(label) (\(runtimeReason))"
-            let item = self.item(title, action: #selector(runPinnedShortcut(_:)), enabled: runtimeEnabled)
-            item.representedObject = entry.stableKey
-            menu.addItem(item)
-            shown += 1
-        }
-
-        if shown == 0 {
-            let missing = NSMenuItem(title: "No screen-wide shortcuts found in skhdrc", action: nil, keyEquivalent: "")
-            missing.isEnabled = false
-            menu.addItem(missing)
-        }
-    }
-
     @objc private func openTilePilot() { onOpenTilePilot() }
 
     @objc private func runDoctor() {
@@ -396,6 +396,31 @@ final class StatusBarController: NSObject {
         } else {
             model.enableManualTilingMode()
         }
+    }
+
+    @objc private func toggleRaiseOnFloatToggle() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.toggleRaiseOnFloatToggle()
+    }
+
+    @objc private func toggleFocusedAppKeepFrontWhenFloating() {
+        model.acknowledgeInitialStatusIfNeeded()
+        guard let appName = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines), !appName.isEmpty else {
+            model.lastErrorMessage = "No focused app detected."
+            model.lastActionMessage = nil
+            return
+        }
+        model.toggleKeepFrontWhenFloating(for: appName)
+    }
+
+    @objc private func bringFloatingWindowsToFront() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.bringFloatingWindowsToFrontCurrentDesktop()
+    }
+
+    @objc private func bringFlaggedFloatingWindowsToFront() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.bringFlaggedFloatingWindowsToFrontCurrentDesktop()
     }
 
     @objc private func toggleWindowBadgeOverlay() {
@@ -450,6 +475,12 @@ final class StatusBarController: NSObject {
         guard let stableKey = sender.representedObject as? String else { return }
         model.acknowledgeInitialStatusIfNeeded()
         model.runPinnedShortcut(stableKey: stableKey)
+    }
+
+    @objc private func runPinnedFeature(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        model.acknowledgeInitialStatusIfNeeded()
+        model.runFeatureControl(FeatureControlID(rawValue: raw), source: .statusMenu)
     }
 
     @objc private func copyIssueSummary() {

@@ -69,6 +69,20 @@ TilePilot-managed blocks use:
 - `TILEPILOT MANAGED ...` in `skhdrc`
 - `TILEPILOT YABAI CONFIG ...` in `yabairc`
 
+## Release Defaults Checklist
+
+For each release that changes defaults:
+
+1. Bump `ReleaseDefaultsService.currentProfileVersion`.
+2. Update `ReleaseDefaultsService.currentProfile()` content (pins/toggles/managed defaults).
+3. Launch the packaged app once and verify snapshot files are written under:
+   - `~/Library/Application Support/TilePilot/Defaults/`
+4. Verify:
+   - fresh install applies profile on first launch,
+   - existing install does not auto-overwrite,
+   - `Reset to Release Defaults` reapplies latest profile.
+5. Put behavior-impacting defaults changes in release notes.
+
 ## Scripting Addition / SIP Support Notes (for TilePilot UX)
 
 Desktop shortcuts that feel "basic" to users often depend on `yabai`'s scripting addition, including:

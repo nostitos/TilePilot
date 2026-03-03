@@ -6,6 +6,7 @@ struct FilesDashboardView: View {
     let showNavigationContainer: Bool
     @State private var searchText = ""
     @State private var editorJumpLine: Int?
+    @State private var showResetDefaultsConfirm = false
 
     init(showNavigationContainer: Bool = true) {
         self.showNavigationContainer = showNavigationContainer
@@ -65,6 +66,14 @@ struct FilesDashboardView: View {
                 editorJumpLine = nil
             }
         }
+        .alert("Reset to Release Defaults?", isPresented: $showResetDefaultsConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                model.resetToReleaseDefaults()
+            }
+        } message: {
+            Text("This resets TilePilot app settings and TilePilot-managed skhdrc/yabairc sections. Non-managed lines stay unchanged.")
+        }
     }
 
     private var leftPane: some View {
@@ -74,6 +83,10 @@ struct FilesDashboardView: View {
                     Label("Config & Script Files", systemImage: "folder")
                         .font(.headline)
                     Spacer()
+                    Button("Reset Defaults") {
+                        showResetDefaultsConfirm = true
+                    }
+                    .font(.caption)
                     Button(model.isRefreshingEditableFiles ? "Reloading..." : "Reload") {
                         Task {
                             await model.refreshEditableFiles()

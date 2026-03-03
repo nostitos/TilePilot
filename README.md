@@ -65,6 +65,23 @@ Some advanced desktop actions (especially moving windows between desktops) depen
   - `Window Badges`
   - `Window Outline Overlay`
 
+## Feature Shortcuts (Unified)
+
+- TilePilot now treats screen-wide controls and regular controls as one shortcut feature list.
+- `Actions & Shortcuts` can show controls even when no shortcut is currently assigned.
+- You can pin feature controls directly to the right-click menu.
+- Screen-wide controls appear in the right-click menu only when pinned.
+- Shortcut assignment is saved in the TilePilot-managed `skhdrc` section (non-managed lines are preserved).
+- If a shortcut combo conflicts with an existing binding, TilePilot blocks save and suggests alternatives.
+
+## Release Defaults Profile
+
+- Each binary release ships a versioned TilePilot defaults profile.
+- On a fresh install, TilePilot applies that profile once (pins, toggles, and TilePilot-managed config sections).
+- On upgrades, TilePilot keeps your settings unchanged.
+- Use `System` -> `Reset to Release Defaults (...)` to force-apply the latest shipped defaults.
+- Reset scope is safe: only TilePilot app state plus TilePilot-managed `skhdrc`/`yabairc` sections are touched.
+
 ## Notes
 
 - TilePilot preserves your existing `yabairc` and `skhdrc` content outside the app-managed blocks.

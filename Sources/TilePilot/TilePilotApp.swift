@@ -95,6 +95,7 @@ struct SystemDashboardView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showAdvancedConfig = false
     @State private var showAdvancedDiagnostics = false
+    @State private var showResetDefaultsConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -119,6 +120,14 @@ struct SystemDashboardView: View {
             .onChange(of: model.requestedSystemPanelSection) { _ in
                 applyRequestedSectionIfNeeded()
             }
+            .alert("Reset to Release Defaults?", isPresented: $showResetDefaultsConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset", role: .destructive) {
+                    model.resetToReleaseDefaults()
+                }
+            } message: {
+                Text("This resets TilePilot app settings and TilePilot-managed skhdrc/yabairc sections. Non-managed lines stay unchanged.")
+            }
         }
     }
 
@@ -130,6 +139,10 @@ struct SystemDashboardView: View {
 
                 Text(model.systemSummaryLine)
                     .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Text(model.releaseDefaultsStatus.summaryText)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
@@ -153,6 +166,12 @@ struct SystemDashboardView: View {
                         model.performSystemCheckAction(.recheck)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button(model.releaseDefaultsResetButtonTitle) {
+                        showResetDefaultsConfirm = true
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
 
@@ -350,8 +369,9 @@ struct NowDashboardView: View {
             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
             return lhs.id < rhs.id
         }
-        let allWindows = snapshot.windows
+        let allWindows = snapshot.windows.filter { !shouldHideFromOverview($0) }
         let visibleWindows = snapshot.windows.filter { window in
+            !shouldHideFromOverview(window) &&
             window.isVisible && !window.isMinimized && !window.isHidden
         }
         let windowsBySpaceAll = Dictionary(grouping: allWindows, by: \.space)
@@ -450,6 +470,17 @@ struct NowDashboardView: View {
         }
     }
 
+    private func shouldHideFromOverview(_ window: WindowState) -> Bool {
+        // Zoom surfaces a tiny helper/dialog window ("Window", ~66x20) near the top-left.
+        // It is not a practical user window and causes misleading counts/actions in Overview.
+        guard window.app == "zoom.us" else { return false }
+        guard !window.canResize else { return false }
+        let tiny = window.frameW <= 140 || window.frameH <= 60
+        guard tiny else { return false }
+        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedTitle.isEmpty || normalizedTitle == "window"
+    }
+
     private func fallbackMapCard(_ snapshot: LiveStateSnapshot) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
@@ -525,11 +556,19 @@ struct NowDashboardView: View {
             Button {
                 model.toggleWindowFloating(windowID: window.id)
             } label: {
-                statusPill(window.floating ? "Floating" : "Tiled", color: window.floating ? .orange : .green)
+                if window.isRuntimeManageable {
+                    statusPill(window.floating ? "Floating" : "Tiled", color: window.floating ? .orange : .green)
+                } else {
+                    statusPill("Limited", color: .gray)
+                }
             }
             .buttonStyle(.plain)
-            .disabled(!runtimeEnabled)
-            .help(runtimeEnabled ? "Toggle floating/tiled state." : runtimeDisabledReason)
+            .disabled(!runtimeEnabled || !window.isRuntimeManageable)
+            .help(
+                !window.isRuntimeManageable
+                ? "\(window.app) does not expose move/control hooks for this window right now."
+                : (runtimeEnabled ? "Toggle floating/tiled state." : runtimeDisabledReason)
+            )
 
             Menu {
                 Button("Set Floating") {
@@ -546,7 +585,7 @@ struct NowDashboardView: View {
                     .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
-            .disabled(!runtimeEnabled)
+            .disabled(!runtimeEnabled || !window.isRuntimeManageable)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -684,6 +723,12 @@ struct WindowBehaviorDashboardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Raise window when switching to Floating", isOn: Binding(
+                    get: { model.raiseOnFloatToggleEnabled },
+                    set: { model.setRaiseOnFloatToggleEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+
                 HStack(spacing: 8) {
                     Label("Quick toggle focused window", systemImage: "keyboard")
                         .font(.caption.weight(.semibold))
@@ -780,6 +825,9 @@ struct WindowBehaviorDashboardView: View {
                              ? "Choose how each app should behave. 'Default' currently means float by default."
                              : "Choose how each app should behave. 'Default' currently means auto-tile by default.")
                             .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Keep-on-top policy applies only when app windows are floating.")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                         CurrentAppsBehaviorListView(apps: model.appNamesForBehaviorEditor)
                         Text("Note: Older rules in your `yabairc` outside the TilePilot managed section can also make apps float/tile.")
@@ -935,7 +983,7 @@ struct CurrentAppsBehaviorListView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         AppNameWithIconView(appName: app)
-                            .frame(minWidth: 180, idealWidth: 220, maxWidth: 260, alignment: .leading)
+                            .frame(minWidth: 170, idealWidth: 210, maxWidth: 250, alignment: .leading)
                         Picker("", selection: Binding(
                             get: { model.appTilingBehavior(for: app) },
                             set: { model.setAppTilingBehavior($0, for: app) }
@@ -946,7 +994,18 @@ struct CurrentAppsBehaviorListView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .frame(width: 120)
+                        .frame(width: 116)
+                        Picker("", selection: Binding(
+                            get: { model.appForegroundPolicy(for: app) },
+                            set: { model.setAppForegroundPolicy($0, for: app) }
+                        )) {
+                            ForEach(AppForegroundPolicy.allCases, id: \.self) { policy in
+                                Text(policy.displayName).tag(policy)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 190)
                         Spacer(minLength: 0)
                     }
                     if let note = model.appBehaviorSourceNote(for: app) {
@@ -1160,15 +1219,15 @@ struct ShortcutsDashboardView: View {
         }
     }
 
-    private var filteredRows: [UnifiedControlRow] {
-        model.filteredUnifiedControlRows(query: searchText)
+    private var filteredRows: [FeatureControlRow] {
+        model.filteredFeatureControlRows(query: searchText)
     }
 
     private var showGroupHeaders: Bool {
         groupedRows.count > 1
     }
 
-    private var groupedRows: [(UnifiedControlGroup, [UnifiedControlRow])] {
+    private var groupedRows: [(UnifiedControlGroup, [FeatureControlRow])] {
         let grouped = Dictionary(grouping: filteredRows, by: \.group)
         let orderedGroups = grouped.keys.sorted { lhs, rhs in
             if lhs.sortRank != rhs.sortRank { return lhs.sortRank < rhs.sortRank }
@@ -1176,6 +1235,11 @@ struct ShortcutsDashboardView: View {
         }
         return orderedGroups.map { group in
             let rows = grouped[group]?.sorted { lhs, rhs in
+                if group == .tilingLayout {
+                    let lhsPriority = model.featureControlRowSortPriority(lhs)
+                    let rhsPriority = model.featureControlRowSortPriority(rhs)
+                    if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+                }
                 if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
                 return lhs.id < rhs.id
             } ?? []
@@ -1201,9 +1265,9 @@ struct ShortcutsDashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            if !model.pinnedShortcutKeys.isEmpty || !model.pinnedDirectionalGroupIDs.isEmpty {
+            if !model.pinnedFeatureControlIDs.isEmpty || !model.pinnedShortcutKeys.isEmpty || !model.pinnedDirectionalGroupIDs.isEmpty {
                 HStack(spacing: 8) {
-                    Label("\(model.pinnedShortcutEntries.count) pinned", systemImage: "pin.fill")
+                    Label("\(model.pinnedFeatureControlRows.count + model.pinnedShortcutEntries.count) pinned", systemImage: "pin.fill")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !model.pinnedDirectionalGroupIDs.isEmpty {
@@ -1294,12 +1358,11 @@ struct ShortcutsDashboardView: View {
     }
 
     private func shortcutRow(_ entry: ShortcutEntry) -> some View {
+        let featureRow = model.featureControlRow(forShortcutEntry: entry)
+        let featureID = featureRow?.featureID
         let title = model.shortcutTitle(entry)
         let secondaryText = model.shortcutSecondaryText(entry)
         return HStack(alignment: .center, spacing: 8) {
-            comboSummaryView(for: entry)
-                .frame(minWidth: 190, idealWidth: 240, maxWidth: 300, alignment: .leading)
-
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -1321,14 +1384,21 @@ struct ShortcutsDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            comboSummaryView(for: entry)
+                .frame(minWidth: 170, idealWidth: 210, maxWidth: 270, alignment: .leading)
+
             HStack(spacing: 4) {
                 Button {
-                    model.toggleShortcutPinned(entry)
+                    if let featureID {
+                        model.toggleFeaturePinned(featureID)
+                    } else {
+                        model.toggleShortcutPinned(entry)
+                    }
                 } label: {
-                    Image(systemName: model.isShortcutPinned(entry) ? "pin.fill" : "pin")
+                    Image(systemName: (featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "pin.fill" : "pin")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .help(model.isShortcutPinned(entry) ? "Unpin from quick menu" : "Pin to quick menu")
+                .help((featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "Unpin from quick menu" : "Pin to quick menu")
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .frame(minWidth: 24)
@@ -1368,9 +1438,9 @@ struct ShortcutsDashboardView: View {
         .id(entry.stableKey)
     }
 
-    private func unifiedActionOnlyRow(_ row: UnifiedControlRow) -> some View {
+    private func unifiedActionOnlyRow(_ row: FeatureControlRow) -> some View {
         HStack(alignment: .center, spacing: 8) {
-            Image(systemName: "cursorarrow.click.2")
+            Image(systemName: row.shortcutEntry == nil ? "keyboard.badge.ellipsis" : "cursorarrow.click.2")
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
 
@@ -1385,16 +1455,50 @@ struct ShortcutsDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let actionID = row.actionID {
-                let card = model.actionCard(for: actionID)
-                Button("Test") {
-                    model.performTilePilotAction(actionID)
+            HStack(spacing: 4) {
+                if let featureID = row.featureID {
+                    Button {
+                        model.toggleFeaturePinned(featureID)
+                    } label: {
+                        Image(systemName: model.isFeaturePinned(featureID) ? "pin.fill" : "pin")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .frame(minWidth: 24)
                 }
-                .disabled((card?.enabled == false) || model.activeActionID != nil)
+
+                Button("Test") {
+                    if let featureID = row.featureID {
+                        model.runFeatureControl(featureID, source: .shortcutsUI)
+                    } else if let actionID = row.actionID {
+                        model.performTilePilotAction(actionID)
+                    }
+                }
+                .disabled(row.disabledReason != nil || model.activeActionID != nil)
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .font(.system(size: 12, weight: .semibold))
                 .frame(minWidth: 52)
+
+                if let featureID = row.featureID, row.shortcutEntry == nil {
+                    if let defaultCombo = row.defaultCombo {
+                        Button("Set Shortcut") {
+                            model.assignShortcut(combo: defaultCombo, to: featureID)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .font(.system(size: 12, weight: .semibold))
+                    }
+                } else if let entry = row.shortcutEntry {
+                    Button("Edit") {
+                        model.openShortcutSource(entry)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(minWidth: 46)
+                }
             }
         }
         .padding(.horizontal, 8)

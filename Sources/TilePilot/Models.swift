@@ -168,6 +168,9 @@ struct WindowState: Identifiable, Codable, Sendable {
     let frameW: Double
     let frameH: Double
     let floating: Bool
+    let hasAXReference: Bool
+    let canMove: Bool
+    let canResize: Bool
     let title: String
     let focused: Bool
     let isVisible: Bool
@@ -175,6 +178,12 @@ struct WindowState: Identifiable, Codable, Sendable {
     let isHidden: Bool
     let source: StateSourceQuality
     let lastUpdatedAt: Date
+
+    var isRuntimeManageable: Bool {
+        // Some apps expose windows that can be tiled/floated and moved, but report can-resize=false.
+        // Treat those as controllable for runtime actions.
+        hasAXReference && canMove
+    }
 }
 
 enum WindowBadgeVisibilityMode: String, Codable, CaseIterable, Sendable {
@@ -190,6 +199,7 @@ struct WindowBadgeState: Identifiable, Sendable, Equatable {
     let title: String
     let isFloating: Bool
     let isFocused: Bool
+    let isRuntimeManageable: Bool
     let frameX: Double
     let frameY: Double
     let frameW: Double
@@ -366,6 +376,63 @@ struct UnifiedControlRow: Identifiable, Sendable {
     let isExperimental: Bool
     let disabledReason: String?
     let intentKey: String
+    let featureID: FeatureControlID?
+}
+
+struct FeatureControlID: RawRepresentable, Hashable, Codable, Sendable, Identifiable, ExpressibleByStringLiteral {
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+
+    var id: String { rawValue }
+}
+
+enum FeatureExecutionBackend: String, Codable, Sendable {
+    case shortcutCommand
+    case tilePilotAction
+    case scriptPath
+}
+
+enum FeatureCapabilityGate: String, Codable, Sendable {
+    case none
+    case yabaiRuntime
+    case scriptingAddition
+}
+
+enum FeatureShortcutBindingState: Sendable, Equatable {
+    case assigned(combo: String)
+    case missing(defaultCombo: String?)
+    case conflict(combo: String, conflictingFeatureTitle: String, suggestions: [String])
+    case disabled(reason: String)
+}
+
+enum FeatureRunSource: String, Sendable {
+    case shortcutsUI
+    case statusMenu
+}
+
+struct FeatureControlRow: Identifiable, Sendable {
+    let id: String
+    let featureID: FeatureControlID?
+    let group: UnifiedControlGroup
+    let title: String
+    let description: String
+    let backend: FeatureExecutionBackend
+    let capabilityGate: FeatureCapabilityGate
+    let shortcutEntry: ShortcutEntry?
+    let actionID: TilePilotActionID?
+    let preferredCommand: String?
+    let assignedCombo: String?
+    let defaultCombo: String?
+    let bindingState: FeatureShortcutBindingState
+    let isExperimental: Bool
+    let disabledReason: String?
 }
 
 struct ConfigBackupInfo: Identifiable, Codable, Sendable {
@@ -535,6 +602,71 @@ enum AppTilingBehavior: String, Codable, CaseIterable, Sendable {
         case .useDefault: return "Default"
         case .neverTile: return "Never Tile"
         case .alwaysTile: return "Always Tile"
+        }
+    }
+}
+
+enum AppForegroundPolicy: String, Codable, CaseIterable, Sendable {
+    case useDefault
+    case keepFrontWhenFloating
+
+    var displayName: String {
+        switch self {
+        case .useDefault: return "Default"
+        case .keepFrontWhenFloating: return "Keep on Top (When Floating)"
+        }
+    }
+}
+
+enum ReleaseDefaultsApplyMode: String, Codable, Sendable {
+    case firstInstall
+    case manualReset
+}
+
+struct ReleaseDefaultsUserState: Codable, Sendable {
+    let pinnedFeatureControlIDs: [String]
+    let pinnedDirectionalGroupIDs: [String]
+    let showWindowBadgeOverlay: Bool
+    let showWindowOutlineOverlay: Bool
+    let raiseOnFloatToggleEnabled: Bool
+    let appForegroundPolicyByName: [String: AppForegroundPolicy]
+}
+
+struct ReleaseDefaultsConfigState: Codable, Sendable {
+    let managedSkhdSectionBody: String
+    let windowBehaviorPolicy: ManagedWindowBehaviorPolicy
+}
+
+struct ReleaseDefaultsProfile: Codable, Sendable {
+    let profileVersion: String
+    let userState: ReleaseDefaultsUserState
+    let configState: ReleaseDefaultsConfigState
+}
+
+enum ReleaseDefaultsStatus: Sendable, Equatable {
+    case upToDate(version: String)
+    case updateAvailable(currentVersion: String, lastAppliedVersion: String)
+    case neverApplied(currentVersion: String)
+
+    var summaryText: String {
+        switch self {
+        case .upToDate(let version):
+            return "Release defaults \(version) are applied."
+        case .updateAvailable(let currentVersion, let lastAppliedVersion):
+            return "New release defaults available (\(lastAppliedVersion) -> \(currentVersion))."
+        case .neverApplied(let currentVersion):
+            return "Release defaults \(currentVersion) have not been applied yet."
+        }
+    }
+
+    var currentVersion: String {
+        switch self {
+        case .upToDate(let version):
+            return version
+        case .updateAvailable(let currentVersion, _):
+            return currentVersion
+        case .neverApplied(let currentVersion):
+            return currentVersion
         }
     }
 }

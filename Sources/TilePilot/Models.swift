@@ -137,6 +137,10 @@ enum StateSourceQuality: String, Codable, Sendable {
 struct DisplayState: Identifiable, Codable, Sendable {
     let id: Int
     let name: String
+    let frameX: Double
+    let frameY: Double
+    let frameW: Double
+    let frameH: Double
     let focused: Bool
     let windowCount: Int
     let source: StateSourceQuality
@@ -234,6 +238,39 @@ struct LiveStateSnapshot: Codable, Sendable {
     let consecutiveMismatchSamples: Int
     let consecutiveHealthySamples: Int
     let lastErrorMessage: String?
+}
+
+struct OverviewDisplayPreview: Identifiable, Sendable {
+    let id: Int
+    let name: String
+    let focused: Bool
+    let aspectRatio: Double
+    let frameW: Double
+    let frameH: Double
+    let desktops: [OverviewDesktopPreview]
+}
+
+struct OverviewDesktopPreview: Identifiable, Sendable {
+    let id: String
+    let displayID: Int
+    let desktopIndex: Int
+    let focused: Bool
+    let visible: Bool
+    let windows: [OverviewWindowPreview]
+}
+
+struct OverviewWindowPreview: Identifiable, Sendable {
+    let id: Int
+    let app: String
+    let title: String
+    let floating: Bool
+    let runtimeManageable: Bool
+    let focused: Bool
+    let visible: Bool
+    let normalizedX: Double
+    let normalizedY: Double
+    let normalizedW: Double
+    let normalizedH: Double
 }
 
 struct ShortcutEntry: Identifiable, Codable, Sendable {
@@ -435,6 +472,58 @@ struct FeatureControlRow: Identifiable, Sendable {
     let disabledReason: String?
 }
 
+enum ShortcutsDisplayItem: Identifiable, Sendable {
+    case featureRow(FeatureControlRow)
+    case directionalFamily(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])
+    case desktopJumpFamily(entries: [ShortcutEntry])
+    case desktopMoveFamily(entries: [ShortcutEntry])
+
+    var id: String {
+        switch self {
+        case .featureRow(let row):
+            if let featureID = row.featureID {
+                return "feature.\(featureID.rawValue)"
+            }
+            if let stableKey = row.shortcutEntry?.stableKey {
+                return "shortcut.\(stableKey)"
+            }
+            if let actionID = row.actionID {
+                return "action.\(actionID.rawValue)"
+            }
+            return "row.\(row.id)"
+        case .directionalFamily(let group, _):
+            return "directional.\(group.rawValue)"
+        case .desktopJumpFamily:
+            return "family.desktop-jump"
+        case .desktopMoveFamily:
+            return "family.desktop-move"
+        }
+    }
+}
+
+enum PinnedShortcutContextItem: Identifiable, Sendable {
+    case feature(FeatureControlRow)
+    case directional(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])
+    case shortcut(ShortcutEntry)
+
+    var id: String {
+        switch self {
+        case .feature(let row):
+            if let featureID = row.featureID {
+                return "feature.\(featureID.rawValue)"
+            }
+            if let stableKey = row.shortcutEntry?.stableKey {
+                return "shortcut.\(stableKey)"
+            }
+            return "feature-row.\(row.id)"
+        case .directional(let group, _):
+            return "directional.\(group.rawValue)"
+        case .shortcut(let entry):
+            return "shortcut.\(entry.stableKey)"
+        }
+    }
+}
+
 struct ConfigBackupInfo: Identifiable, Codable, Sendable {
     let id: UUID
     let path: String
@@ -626,10 +715,50 @@ enum ReleaseDefaultsApplyMode: String, Codable, Sendable {
 struct ReleaseDefaultsUserState: Codable, Sendable {
     let pinnedFeatureControlIDs: [String]
     let pinnedDirectionalGroupIDs: [String]
+    let shortcutsCustomOrderIDs: [String]
     let showWindowBadgeOverlay: Bool
     let showWindowOutlineOverlay: Bool
     let raiseOnFloatToggleEnabled: Bool
     let appForegroundPolicyByName: [String: AppForegroundPolicy]
+
+    init(
+        pinnedFeatureControlIDs: [String],
+        pinnedDirectionalGroupIDs: [String],
+        shortcutsCustomOrderIDs: [String] = [],
+        showWindowBadgeOverlay: Bool,
+        showWindowOutlineOverlay: Bool,
+        raiseOnFloatToggleEnabled: Bool,
+        appForegroundPolicyByName: [String: AppForegroundPolicy]
+    ) {
+        self.pinnedFeatureControlIDs = pinnedFeatureControlIDs
+        self.pinnedDirectionalGroupIDs = pinnedDirectionalGroupIDs
+        self.shortcutsCustomOrderIDs = shortcutsCustomOrderIDs
+        self.showWindowBadgeOverlay = showWindowBadgeOverlay
+        self.showWindowOutlineOverlay = showWindowOutlineOverlay
+        self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
+        self.appForegroundPolicyByName = appForegroundPolicyByName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pinnedFeatureControlIDs
+        case pinnedDirectionalGroupIDs
+        case shortcutsCustomOrderIDs
+        case showWindowBadgeOverlay
+        case showWindowOutlineOverlay
+        case raiseOnFloatToggleEnabled
+        case appForegroundPolicyByName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pinnedFeatureControlIDs = try container.decode([String].self, forKey: .pinnedFeatureControlIDs)
+        pinnedDirectionalGroupIDs = try container.decode([String].self, forKey: .pinnedDirectionalGroupIDs)
+        shortcutsCustomOrderIDs = try container.decodeIfPresent([String].self, forKey: .shortcutsCustomOrderIDs) ?? []
+        showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
+        showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
+        raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
+        appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
+    }
 }
 
 struct ReleaseDefaultsConfigState: Codable, Sendable {

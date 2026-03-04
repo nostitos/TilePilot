@@ -48,6 +48,16 @@ Manual approvals still required:
 - Some Mission Control settings
 - Optional scripting-addition setup for advanced desktop/window controls
 
+## Desktop Switching Reality (Important)
+
+- On many systems, `yabai -m space --focus` needs yabai scripting addition support.
+- Without scripting addition, direct desktop focus commands can fail even if yabai/skhd are installed.
+- TilePilot falls back to:
+  1. focusing an existing window on the target desktop,
+  2. then macOS Mission Control desktop shortcuts (if configured).
+- For reliable no-SIP desktop jumps, set macOS shortcuts in:
+  `System Settings -> Keyboard -> Keyboard Shortcuts -> Mission Control`.
+
 ## Scripting Addition + SIP (Advanced)
 
 Some advanced desktop actions (especially moving windows between desktops) depend on yabai’s scripting addition, which may require partial SIP changes depending on macOS version/hardware; TilePilot can launch repair/install helpers, but it cannot change SIP or bypass Recovery Mode/security constraints. Review official guidance before enabling it: <https://github.com/koekeishiya/yabai/wiki/Disabling-System-Integrity-Protection>.

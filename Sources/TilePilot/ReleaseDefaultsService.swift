@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.0-defaults.1"
+    static let currentProfileVersion = "v0.2.1-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -17,6 +17,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                     "screen.balance-current-desktop",
                 ],
                 pinnedDirectionalGroupIDs: [],
+                shortcutsCustomOrderIDs: [],
                 showWindowBadgeOverlay: true,
                 showWindowOutlineOverlay: false,
                 raiseOnFloatToggleEnabled: true,
@@ -55,6 +56,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             "TilePilot.pinnedShortcutKeys",
             "TilePilot.pinnedDirectionalGroupIDs",
             "TilePilot.pinnedFeatureControlIDs",
+            "TilePilot.shortcutsCustomOrderIDs",
             "TilePilot.showWindowBadgeOverlay",
             "TilePilot.showWindowOutlineOverlay",
             "TilePilot.raiseOnFloatToggle",

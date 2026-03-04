@@ -137,9 +137,7 @@ final class StatusBarController: NSObject {
         menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
 
-        let hasPinnedFeatures = addPinnedFeatureItems(to: menu)
-        let hasPinnedShortcuts = addPinnedShortcutItems(to: menu)
-        if hasPinnedFeatures || hasPinnedShortcuts {
+        if addPinnedContextItems(to: menu) {
             menu.addItem(.separator())
         }
 
@@ -242,59 +240,32 @@ final class StatusBarController: NSObject {
         return item
     }
 
-    private func addPinnedFeatureItems(to menu: NSMenu) -> Bool {
-        let pinned = model.pinnedFeatureControlRows
-        if pinned.isEmpty {
-            return false
-        }
-        for row in pinned {
-            guard let featureID = row.featureID else { continue }
-            let combo = row.shortcutEntry.map { model.displayShortcutComboSymbols($0) }
-                ?? row.assignedCombo.map { model.displayShortcutComboSymbols(from: $0) }
-                ?? row.defaultCombo.map { model.displayShortcutComboSymbols(from: $0) }
-            let comboPrefix = (combo?.isEmpty == false) ? "\(combo!)  " : ""
-            let label = comboPrefix + row.title
-            let disabledReason = row.disabledReason
-            let item = self.item(
-                disabledReason == nil ? label : "\(label) (\(disabledReason!))",
-                action: #selector(runPinnedFeature(_:)),
-                enabled: disabledReason == nil
-            )
-            item.representedObject = featureID.rawValue
-            menu.addItem(item)
-        }
-        return true
-    }
+    private func addPinnedContextItems(to menu: NSMenu) -> Bool {
+        let pinnedItems = model.pinnedShortcutContextItems
+        guard !pinnedItems.isEmpty else { return false }
 
-    private func addPinnedShortcutItems(to menu: NSMenu) -> Bool {
-        let pinnedGroups = model.pinnedDirectionalGroupBindings
-        let pinnedRaw = model.pinnedShortcutEntries
-        let pinned = pinnedRaw.filter { entry in
-            // Feature-backed shortcuts now render through pinnedFeatureControlRows.
-            if model.featureControlRow(forShortcutEntry: entry)?.featureID != nil {
-                return false
-            }
-            return !(model.isScriptingAdditionDesktopShortcut(entry) && !model.canRunScriptingAdditionDesktopActions)
-        }
-        if pinnedGroups.isEmpty && pinned.isEmpty {
-            return false
-        }
-
-        if !pinnedGroups.isEmpty {
-            for group in pinnedGroups {
-                addPinnedDirectionalGroupItems(to: menu, group: group.group, bindings: group.bindings)
-            }
-            if !pinned.isEmpty {
-                menu.addItem(.separator())
-            }
-        }
-
-        if !pinned.isEmpty {
-            for entry in pinned {
-                let title = pinnedShortcutMenuTitle(for: entry)
-                let item = self.item(title, action: #selector(runPinnedShortcut(_:)))
-                item.representedObject = entry.stableKey
-                menu.addItem(item)
+        for item in pinnedItems {
+            switch item {
+            case .feature(let row):
+                guard let featureID = row.featureID else { continue }
+                let disabledReason = row.disabledReason
+                let leftLabel = disabledReason == nil ? row.title : "\(row.title) (\(disabledReason!))"
+                let menuItem = self.item(
+                    leftLabel,
+                    action: #selector(runPinnedFeature(_:)),
+                    enabled: disabledReason == nil
+                )
+                let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+                applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
+                menuItem.representedObject = featureID.rawValue
+                menu.addItem(menuItem)
+            case .directional(let group, let bindings):
+                addPinnedDirectionalGroupItems(to: menu, group: group, bindings: bindings)
+            case .shortcut(let entry):
+                let menuItem = self.item(model.shortcutTitle(entry), action: #selector(runPinnedShortcut(_:)))
+                applyMenuShortcut(to: menuItem, comboRaw: entry.combo)
+                menuItem.representedObject = entry.stableKey
+                menu.addItem(menuItem)
             }
         }
         return true
@@ -311,9 +282,9 @@ final class StatusBarController: NSObject {
         menu.addItem(header)
 
         for binding in bindings {
-            let combo = model.displayShortcutComboSymbolsSpaced(binding.entry)
-            let title = "\(combo)  \(binding.direction.arrow)  \(directionActionLabel(for: group, direction: binding.direction))"
+            let title = "\(binding.direction.arrow)  \(directionActionLabel(for: group, direction: binding.direction))"
             let item = self.item(title, action: #selector(runPinnedShortcut(_:)))
+            applyMenuShortcut(to: item, comboRaw: binding.entry.combo)
             item.representedObject = binding.entry.stableKey
             menu.addItem(item)
         }
@@ -335,13 +306,79 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func pinnedShortcutMenuTitle(for entry: ShortcutEntry) -> String {
-        let symbols = model.displayShortcutComboSymbols(entry)
-        let explanation = model.shortcutExplanation(entry)
-        let combo = symbols.isEmpty ? model.displayShortcutComboWords(entry) : symbols
-        let raw = "\(combo)  \(explanation)"
-        if raw.count <= 72 { return raw }
-        return String(raw.prefix(69)) + "..."
+    private struct ParsedMenuShortcut {
+        let keyEquivalent: String
+        let modifiers: NSEvent.ModifierFlags
+    }
+
+    private func applyMenuShortcut(to item: NSMenuItem, comboRaw: String?) {
+        guard let parsed = parseMenuShortcut(comboRaw) else { return }
+        item.keyEquivalent = parsed.keyEquivalent
+        item.keyEquivalentModifierMask = parsed.modifiers
+    }
+
+    private func parseMenuShortcut(_ comboRaw: String?) -> ParsedMenuShortcut? {
+        guard let comboRaw, !comboRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let normalized = comboRaw.replacingOccurrences(of: "—", with: "-")
+        guard let splitIndex = normalized.lastIndex(of: "-") else { return nil }
+
+        let modifiersPart = String(normalized[..<splitIndex]).lowercased()
+        let keyPartRaw = String(normalized[normalized.index(after: splitIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyPartRaw.isEmpty else { return nil }
+        let keyToken = keyPartRaw
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .first?
+            .lowercased() ?? keyPartRaw.lowercased()
+
+        guard let keyEquivalent = menuKeyEquivalent(for: keyToken) else { return nil }
+
+        var modifiers: NSEvent.ModifierFlags = []
+        let modifierTokens = modifiersPart
+            .replacingOccurrences(of: "+", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .map { String($0).lowercased() }
+        for token in modifierTokens {
+            switch token {
+            case "shift":
+                modifiers.insert(.shift)
+            case "alt", "option":
+                modifiers.insert(.option)
+            case "ctrl", "control":
+                modifiers.insert(.control)
+            case "cmd", "command":
+                modifiers.insert(.command)
+            default:
+                continue
+            }
+        }
+
+        return ParsedMenuShortcut(keyEquivalent: keyEquivalent, modifiers: modifiers)
+    }
+
+    private func menuKeyEquivalent(for token: String) -> String? {
+        if token == "0x32" { return "`" }
+        if token.count == 1 { return token.lowercased() }
+        switch token {
+        case "space":
+            return " "
+        case "tab":
+            return "\t"
+        case "return", "enter":
+            return "\r"
+        case "escape", "esc":
+            return String(UnicodeScalar(0x1B)!)
+        case "left":
+            return String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+        case "right":
+            return String(UnicodeScalar(NSRightArrowFunctionKey)!)
+        case "up":
+            return String(UnicodeScalar(NSUpArrowFunctionKey)!)
+        case "down":
+            return String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        default:
+            return nil
+        }
     }
 
     private func balanceTilesQuickActionEnabled() -> Bool {
@@ -540,6 +577,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowBadgeOverlayController: WindowBadgeOverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if shouldTerminateAsDuplicateInstance() {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
         NSApp.setActivationPolicy(.accessory)
 
         tilePilotWindowController = TilePilotWindowController(model: model)
@@ -550,6 +592,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
 
         model.startIfNeeded()
+    }
+
+    private func shouldTerminateAsDuplicateInstance() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        guard instances.count > 1 else { return false }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let keeperPID = instances.map(\.processIdentifier).min() ?? currentPID
+        return currentPID != keeperPID
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

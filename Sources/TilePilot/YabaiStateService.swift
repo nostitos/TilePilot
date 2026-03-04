@@ -218,9 +218,14 @@ final class YabaiStateService: @unchecked Sendable {
                 return nil
             }
             let name = resolvedDisplayName(from: row, fallbackID: id, screenDescriptors: screenDescriptors)
+            let frame = yabaiFrame(from: row["frame"]) ?? .zero
             return DisplayState(
                 id: id,
                 name: name,
+                frameX: frame.origin.x,
+                frameY: frame.origin.y,
+                frameW: frame.size.width,
+                frameH: frame.size.height,
                 focused: bool(from: row["has-focus"]) ?? false,
                 windowCount: windowCountByDisplay[id] ?? 0,
                 source: .yabai,

@@ -66,7 +66,7 @@ final class WindowBadgeOverlayController {
         if model.showWindowBadgeOverlay {
             removeStalePanels(from: &badgePanels, keepIDs: badgeTargetIDs)
             for badge in badgeTargetStates {
-                let panel = badgePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: false)
+                let panel = badgePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: false, level: .floating)
                 badgePanels[badge.windowID] = panel
                 updateBadgePanel(panel: panel, with: badge)
             }
@@ -77,7 +77,7 @@ final class WindowBadgeOverlayController {
         if model.showWindowOutlineOverlay {
             removeStalePanels(from: &outlinePanels, keepIDs: targetIDs)
             for badge in badges {
-                let panel = outlinePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: true)
+                let panel = outlinePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: true, level: .normal)
                 outlinePanels[badge.windowID] = panel
                 updateOutlinePanel(panel: panel, with: badge)
             }
@@ -121,7 +121,7 @@ final class WindowBadgeOverlayController {
         panels.removeAll()
     }
 
-    private func createPanel(ignoresMouseEvents: Bool) -> BadgePanel {
+    private func createPanel(ignoresMouseEvents: Bool, level: NSWindow.Level) -> BadgePanel {
         let frame = NSRect(origin: .zero, size: NSSize(width: 60, height: 14))
         let panel = BadgePanel(
             contentRect: frame,
@@ -142,7 +142,7 @@ final class WindowBadgeOverlayController {
             .transient,
             .stationary,
         ]
-        panel.level = .normal
+        panel.level = level
         panel.contentView = NSHostingView(rootView: AnyView(EmptyView()))
         return panel
     }
@@ -186,11 +186,7 @@ final class WindowBadgeOverlayController {
         panel.ignoresMouseEvents = false
         setPanelRootView(panel, AnyView(rootView))
         panel.setFrame(NSRect(x: x, y: y, width: badgeWidth, height: badgeHeight), display: true)
-        if let windowNumber = targetWindowNumber(for: badge, targetWindowRect: targetWindowRect) {
-            panel.order(.above, relativeTo: Int(windowNumber))
-        } else {
-            panel.orderFront(nil)
-        }
+        panel.orderFront(nil)
     }
 
     private func updateOutlinePanel(panel: BadgePanel, with badge: WindowBadgeState) {

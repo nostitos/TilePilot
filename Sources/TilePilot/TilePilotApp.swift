@@ -279,54 +279,119 @@ struct NowDashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if model.shouldShowWindowBehaviorRecommendation {
-                        GroupBox {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Windows moving around too much?")
-                                    .font(.headline)
-                                Text("Stabilize your Mac by floating new windows by default and disabling hover focus.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                HStack {
-                                    Button("Enable Manual Tiling Mode") { model.enableManualTilingMode() }
-                                    Button("Disable Hover Focus") { model.disableHoverFocus() }
-                                    Button("Open Window Behavior") {
-                                        model.openWindowBehaviorSettings()
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if model.shouldShowWindowBehaviorRecommendation {
+                            GroupBox {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Windows moving around too much?")
+                                        .font(.headline)
+                                    Text("Stabilize your Mac by floating new windows by default and disabling hover focus.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    HStack {
+                                        Button("Enable Manual Tiling Mode") { model.enableManualTilingMode() }
+                                        Button("Disable Hover Focus") { model.disableHoverFocus() }
+                                        Button("Open Window Behavior") {
+                                            model.openWindowBehaviorSettings()
+                                        }
                                     }
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            } label: {
+                                Label("Recommended", systemImage: "sparkles")
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        } label: {
-                            Label("Recommended", systemImage: "sparkles")
+                        }
+
+                        if let snapshot = model.liveStateSnapshot {
+                            if snapshot.degraded, let reason = snapshot.degradedReason {
+                                degradedBanner(reason: reason)
+                            }
+
+                            if snapshot.source == .yabai && !snapshot.degraded {
+                                desktopPreviewCard(snapshot, scrollProxy: scrollProxy)
+                                yabaiMapCard(snapshot)
+                            } else {
+                                desktopPreviewUnavailableCard
+                                fallbackMapCard(snapshot)
+                            }
+                        } else {
+                            EmptyStateView(
+                                title: "Loading windows",
+                                systemImage: "rectangle.3.group",
+                                message: "Loading your windows and desktops. If `yabai` is unavailable, the app falls back to a simpler display view."
+                            )
                         }
                     }
+                    .padding()
+                }
+                .navigationTitle("TilePilot")
+                .task {
+                    await model.refreshLiveState()
+                }
+            }
+        }
+    }
 
-                    if let snapshot = model.liveStateSnapshot {
-                        if snapshot.degraded, let reason = snapshot.degradedReason {
-                            degradedBanner(reason: reason)
-                        }
+    private var desktopPreviewUnavailableCard: some View {
+        GroupBox {
+            Text("Desktop preview unavailable in fallback/degraded mode.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Desktop Preview", systemImage: "square.grid.3x3")
+        }
+    }
 
-                        if snapshot.source == .yabai && !snapshot.degraded {
-                            yabaiMapCard(snapshot)
-                        } else {
-                            fallbackMapCard(snapshot)
+    private func desktopPreviewCard(_ snapshot: LiveStateSnapshot, scrollProxy: ScrollViewProxy) -> some View {
+        let previews = model.buildOverviewPreviews(from: snapshot)
+        let maxDisplayArea = previews
+            .map { max($0.frameW, 1) * max($0.frameH, 1) }
+            .max() ?? 1
+        return GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                if previews.isEmpty {
+                    Text("No preview available for current displays.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(previews) { display in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Label(display.name, systemImage: display.focused ? "display.and.arrow.down" : "display")
+                                    .font(.caption.weight(.semibold))
+                                Spacer(minLength: 0)
+                            }
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: previewDesktopCardMinimumWidth(for: display, maxDisplayArea: maxDisplayArea)), spacing: 8)], spacing: 8) {
+                                ForEach(display.desktops) { desktop in
+                                    OverviewDesktopPreviewCard(
+                                        desktop: desktop,
+                                        displayAspectRatio: display.aspectRatio,
+                                        selectedWindowID: selectedWindowID,
+                                        onDesktopSelect: { desktopIndex in
+                                            model.focusDesktop(index: desktopIndex)
+                                        },
+                                        onWindowSelect: { windowID in
+                                            selectedWindowID = windowID
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                scrollProxy.scrollTo("overview-window-\(windowID)", anchor: .center)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
-                    } else {
-                        EmptyStateView(
-                            title: "Loading windows",
-                            systemImage: "rectangle.3.group",
-                            message: "Loading your windows and desktops. If `yabai` is unavailable, the app falls back to a simpler display view."
-                        )
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
-                .padding()
             }
-            .navigationTitle("TilePilot")
-            .task {
-                await model.refreshLiveState()
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Desktop Preview", systemImage: "square.grid.3x3")
         }
     }
 
@@ -369,9 +434,9 @@ struct NowDashboardView: View {
             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
             return lhs.id < rhs.id
         }
-        let allWindows = snapshot.windows.filter { !shouldHideFromOverview($0) }
+        let allWindows = snapshot.windows.filter { !model.isOverviewExcludedWindow($0) }
         let visibleWindows = snapshot.windows.filter { window in
-            !shouldHideFromOverview(window) &&
+            !model.isOverviewExcludedWindow(window) &&
             window.isVisible && !window.isMinimized && !window.isHidden
         }
         let windowsBySpaceAll = Dictionary(grouping: allWindows, by: \.space)
@@ -417,8 +482,14 @@ struct NowDashboardView: View {
                                 ForEach(displaySpaces) { space in
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
-                                            Text(spaceTitle(space))
-                                                .font(.subheadline.weight(.semibold))
+                                            Button {
+                                                model.focusDesktop(index: space.index)
+                                            } label: {
+                                                Text(spaceTitle(space))
+                                                    .font(.subheadline.weight(.semibold))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help("Switch to Desktop \(space.index).")
                                             Spacer()
                                             Text("Visible: \(visibleWindowCountBySpace[space.index] ?? 0) · Total: \(totalWindowCountBySpace[space.index] ?? 0)")
                                                 .font(.caption)
@@ -468,17 +539,6 @@ struct NowDashboardView: View {
         } label: {
             Label("Displays and Desktops", systemImage: "rectangle.grid.3x2")
         }
-    }
-
-    private func shouldHideFromOverview(_ window: WindowState) -> Bool {
-        // Zoom surfaces a tiny helper/dialog window ("Window", ~66x20) near the top-left.
-        // It is not a practical user window and causes misleading counts/actions in Overview.
-        guard window.app == "zoom.us" else { return false }
-        guard !window.canResize else { return false }
-        let tiny = window.frameW <= 140 || window.frameH <= 60
-        guard tiny else { return false }
-        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalizedTitle.isEmpty || normalizedTitle == "window"
     }
 
     private func fallbackMapCard(_ snapshot: LiveStateSnapshot) -> some View {
@@ -605,18 +665,16 @@ struct NowDashboardView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(selectedWindowID == window.id ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
         )
+        .id("overview-window-\(window.id)")
     }
 
     private func defaultBehaviorBadge(for appName: String) -> (text: String, color: Color, help: String) {
         let behavior = model.appTilingBehavior(for: appName)
-        let sourceNote = model.appBehaviorSourceNote(for: appName)
         switch behavior {
         case .neverTile:
-            let note = sourceNote ?? "App rule says this app should stay floating by default."
-            return ("Default Float", .orange, note)
+            return ("Default Float", .orange, "App rule says this app should stay floating by default.")
         case .alwaysTile:
-            let note = sourceNote ?? "App rule says this app should be auto-tiled by default."
-            return ("Default Tiled", .green, note)
+            return ("Default Tiled", .green, "App rule says this app should be auto-tiled by default.")
         case .useDefault:
             if model.windowBehaviorPolicyDraft.manualTilingModeEnabled {
                 return ("Default Float", .orange, "No app-specific rule. Global default is floating because Manual Tiling Mode is enabled.")
@@ -669,6 +727,187 @@ struct NowDashboardView: View {
             )
         }
 
+        return nil
+    }
+
+    private func previewDesktopCardMinimumWidth(for display: OverviewDisplayPreview, maxDisplayArea: Double) -> CGFloat {
+        guard maxDisplayArea > 1 else { return 300 }
+        let area = max(display.frameW, 1) * max(display.frameH, 1)
+        let normalized = max(0.35, min(1.0, area / maxDisplayArea))
+        let scale = sqrt(normalized)
+        let minWidth: Double = 240
+        let maxWidth: Double = 340
+        return CGFloat(minWidth + (maxWidth - minWidth) * scale)
+    }
+}
+
+private struct OverviewDesktopPreviewCard: View {
+    let desktop: OverviewDesktopPreview
+    let displayAspectRatio: Double
+    let selectedWindowID: Int?
+    let onDesktopSelect: (Int) -> Void
+    let onWindowSelect: (Int) -> Void
+
+    @ObservedObject private var iconCache = OverviewMiniMapIconCache.shared
+
+    var body: some View {
+        let visibleCount = desktop.windows.filter(\.visible).count
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button {
+                    onDesktopSelect(desktop.desktopIndex)
+                } label: {
+                    Text("Desktop \(desktop.desktopIndex)")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .help("Switch to Desktop \(desktop.desktopIndex).")
+                if desktop.focused {
+                    Text("Focused")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.12), in: Capsule())
+                } else if desktop.visible {
+                    Text("Visible")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+                Spacer(minLength: 0)
+                Text(visibleCount == desktop.windows.count ? "\(desktop.windows.count)" : "\(visibleCount)/\(desktop.windows.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ZStack(alignment: .topLeading) {
+                GeometryReader { proxy in
+                    let size = proxy.size
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.secondary.opacity(0.08))
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+
+                        ForEach(desktop.windows) { window in
+                            OverviewMiniWindowTile(
+                                window: window,
+                                canvasSize: size,
+                                icon: iconCache.icon(for: window.app),
+                                isSelected: selectedWindowID == window.id,
+                                onSelect: onWindowSelect
+                            )
+                        }
+                    }
+                }
+            }
+            .aspectRatio(max(displayAspectRatio, 0.1), contentMode: .fit)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct OverviewMiniWindowTile: View {
+    let window: OverviewWindowPreview
+    let canvasSize: CGSize
+    let icon: NSImage?
+    let isSelected: Bool
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        let frame = normalizedFrame(in: canvasSize)
+        let iconSize = iconDimension(for: frame.size)
+        Button {
+            onSelect(window.id)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(window.visible ? 0.05 : 0.025))
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: iconSize, height: iconSize)
+                        .opacity(window.visible ? 1 : 0.75)
+                } else {
+                    Image(systemName: "app")
+                        .font(.system(size: max(7, iconSize * 0.65), weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .opacity(window.visible ? 1 : 0.75)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(borderColor.opacity(window.visible ? 1 : 0.72), lineWidth: isSelected ? 2 : 1.2)
+            )
+            .overlay(alignment: .topTrailing) {
+                if window.focused {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 5, height: 5)
+                        .padding(2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+        .frame(width: frame.width, height: frame.height, alignment: .center)
+        .offset(x: frame.minX, y: frame.minY)
+    }
+
+    private var borderColor: Color {
+        if !window.runtimeManageable { return .gray }
+        return window.floating ? .orange : .blue
+    }
+
+    private func iconDimension(for size: CGSize) -> CGFloat {
+        let base = min(size.width, size.height) * 0.52
+        return max(8, min(18, base))
+    }
+
+    private func normalizedFrame(in canvasSize: CGSize) -> CGRect {
+        let x = max(0, min(1, window.normalizedX)) * canvasSize.width
+        let y = max(0, min(1, window.normalizedY)) * canvasSize.height
+        let maxWidth = max(0, canvasSize.width - x)
+        let maxHeight = max(0, canvasSize.height - y)
+        let width = min(maxWidth, max(10, window.normalizedW * canvasSize.width))
+        let height = min(maxHeight, max(8, window.normalizedH * canvasSize.height))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private var helpText: String {
+        let base = window.title.isEmpty ? window.app : "\(window.app) — \(window.title)"
+        return window.visible ? base : "\(base) (not currently visible)"
+    }
+}
+
+@MainActor
+private final class OverviewMiniMapIconCache: ObservableObject {
+    static let shared = OverviewMiniMapIconCache()
+
+    private var cache: [String: NSImage?] = [:]
+
+    func icon(for appName: String) -> NSImage? {
+        let key = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = cache[key] {
+            return cached
+        }
+        if let runningIcon = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == key })?.icon {
+            cache[key] = runningIcon
+            return runningIcon
+        }
+        if let path = NSWorkspace.shared.fullPath(forApplication: key) {
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            cache[key] = icon
+            return icon
+        }
+        cache[key] = nil
         return nil
     }
 }
@@ -1008,12 +1247,6 @@ struct CurrentAppsBehaviorListView: View {
                         .frame(width: 190)
                         Spacer(minLength: 0)
                     }
-                    if let note = model.appBehaviorSourceNote(for: app) {
-                        Text(note)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 24)
-                    }
                 }
                 .padding(.vertical, 2)
             }
@@ -1182,100 +1415,108 @@ struct ActionsDashboardView: View {
 
 struct ShortcutsDashboardView: View {
     @EnvironmentObject private var model: AppModel
+    private let shortcutDescriptionColumnWidth: CGFloat = 410
     @State private var searchText = ""
+    @State private var showDesktopMoveAdvanced = false
+    @State private var isReordering = false
+    @State private var draggedItemID: String?
+    @State private var reorderInsertionIndex: Int?
+    @State private var reorderDraftIDs: [String] = []
+    @State private var reorderBaseItems: [ShortcutsDisplayItem] = []
+    @State private var rowFramesByID: [String: CGRect] = [:]
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            shortcutsToolbar
-                            searchCard
+            VStack(alignment: .leading, spacing: 10) {
+                shortcutsToolbar
+                searchCard
 
-                            if !model.shortcutParseIssues.isEmpty {
-                                issuesCard
-                            }
-
-                            shortcutsListCard
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                    }
-                    .onChange(of: model.selectedShortcutStableKey) { stableKey in
-                        guard let stableKey else { return }
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(stableKey, anchor: .center)
-                        }
-                    }
+                if !model.shortcutParseIssues.isEmpty {
+                    issuesCard
                 }
+
+                shortcutsListCard
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .navigationTitle("TilePilot")
             .task {
                 if model.shortcutEntries.isEmpty && !model.isRefreshingShortcuts {
                     await model.refreshShortcuts()
                 }
             }
-        }
-    }
-
-    private var filteredRows: [FeatureControlRow] {
-        model.filteredFeatureControlRows(query: searchText)
-    }
-
-    private var showGroupHeaders: Bool {
-        groupedRows.count > 1
-    }
-
-    private var groupedRows: [(UnifiedControlGroup, [FeatureControlRow])] {
-        let grouped = Dictionary(grouping: filteredRows, by: \.group)
-        let orderedGroups = grouped.keys.sorted { lhs, rhs in
-            if lhs.sortRank != rhs.sortRank { return lhs.sortRank < rhs.sortRank }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-        }
-        return orderedGroups.map { group in
-            let rows = grouped[group]?.sorted { lhs, rhs in
-                if group == .tilingLayout {
-                    let lhsPriority = model.featureControlRowSortPriority(lhs)
-                    let rhsPriority = model.featureControlRowSortPriority(rhs)
-                    if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+            .onChange(of: searchText) { _ in
+                if isSearchActive {
+                    isReordering = false
                 }
-                if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
-                return lhs.id < rhs.id
-            } ?? []
-            return (group, rows)
+            }
+            .onChange(of: isReordering) { enabled in
+                if enabled {
+                    reorderBaseItems = model.flatShortcutsItems(query: "")
+                    syncReorderDraft()
+                } else {
+                    reorderDraftIDs = []
+                    reorderBaseItems = []
+                    draggedItemID = nil
+                    reorderInsertionIndex = nil
+                    rowFramesByID = [:]
+                }
+            }
+            .onChange(of: model.shortcutEntries.map(\.id)) { _ in
+                if reorderEnabled {
+                    reorderBaseItems = model.flatShortcutsItems(query: "")
+                    syncReorderDraft()
+                }
+            }
+            .onChange(of: draggedItemID) { value in
+                guard value == nil, reorderEnabled, !reorderDraftIDs.isEmpty else { return }
+                model.applyShortcutsCustomOrderIDs(reorderDraftIDs)
+                reorderBaseItems = model.flatShortcutsItems(query: "")
+                syncReorderDraft()
+                reorderInsertionIndex = nil
+            }
         }
+    }
+
+    private var filteredItems: [ShortcutsDisplayItem] {
+        if reorderEnabled {
+            let byID = Dictionary(uniqueKeysWithValues: reorderBaseItems.map { ($0.id, $0) })
+            let ids = reorderDraftIDs.isEmpty ? reorderBaseItems.map(\.id) : reorderDraftIDs
+            return ids.compactMap { byID[$0] }
+        }
+        return model.flatShortcutsItems(query: searchText)
+    }
+
+    private var isSearchActive: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var reorderEnabled: Bool {
+        isReordering && !isSearchActive
+    }
+
+    private func syncReorderDraft() {
+        let allIDs = reorderBaseItems.map(\.id)
+        let allSet = Set(allIDs)
+        var seen: Set<String> = []
+        var next: [String] = []
+        for id in reorderDraftIDs where allSet.contains(id) {
+            guard seen.insert(id).inserted else { continue }
+            next.append(id)
+        }
+        for id in allIDs where !seen.contains(id) {
+            seen.insert(id)
+            next.append(id)
+        }
+        reorderDraftIDs = next
     }
 
     private var shortcutsToolbar: some View {
         HStack(spacing: 8) {
-            Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
-                Task { await model.refreshShortcuts() }
-            }
-            .disabled(model.isRefreshingShortcuts)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            if model.isRefreshingShortcuts {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            Text("\(filteredRows.count) shown")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if !model.pinnedFeatureControlIDs.isEmpty || !model.pinnedShortcutKeys.isEmpty || !model.pinnedDirectionalGroupIDs.isEmpty {
-                HStack(spacing: 8) {
-                    Label("\(model.pinnedFeatureControlRows.count + model.pinnedShortcutEntries.count) pinned", systemImage: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if !model.pinnedDirectionalGroupIDs.isEmpty {
-                        Label("\(model.pinnedDirectionalGroups.count) groups", systemImage: "square.grid.2x2")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            if isSearchActive {
+                Text("Clear search to reorder")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -1286,7 +1527,7 @@ struct ShortcutsDashboardView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search controls, shortcuts, or categories", text: $searchText)
+            TextField("Search controls or shortcuts", text: $searchText)
         }
         .textFieldStyle(.plain)
         .padding(.horizontal, 8)
@@ -1302,6 +1543,12 @@ struct ShortcutsDashboardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
+            Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload") {
+                Task { await model.refreshShortcuts() }
+            }
+            .disabled(model.isRefreshingShortcuts)
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
             Button("Logs") {
                 model.requestOpenSystemSection(.diagnostics)
             }
@@ -1315,7 +1562,8 @@ struct ShortcutsDashboardView: View {
 
     private var shortcutsListCard: some View {
         Group {
-            if filteredRows.isEmpty {
+            reorderControlBar
+            if filteredItems.isEmpty {
                 EmptyStateView(
                     title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
                     systemImage: "keyboard",
@@ -1324,37 +1572,309 @@ struct ShortcutsDashboardView: View {
                         : "Try a broader search query."
                 )
                 .frame(minHeight: 160)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(groupedRows, id: \.0) { group, rows in
-                        VStack(alignment: .leading, spacing: 6) {
-                            if showGroupHeaders {
-                                Text(group.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .textCase(.uppercase)
-                            }
-
-                            let shortcutEntries = rows.compactMap(\.shortcutEntry)
-                            let actionOnlyRows = rows.filter { $0.shortcutEntry == nil }
-
-                            if group == .desktops || group == .experimental {
-                                desktopShortcutsSection(shortcutEntries)
-                                ForEach(actionOnlyRows, id: \.id) { row in
-                                    unifiedActionOnlyRow(row)
-                                }
-                            } else {
-                                directionalShortcutsSection(shortcutEntries)
-                                ForEach(actionOnlyRows, id: \.id) { row in
-                                    unifiedActionOnlyRow(row)
-                                }
-                            }
+                if model.shortcutEntries.isEmpty {
+                    HStack {
+                        Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
+                            Task { await model.refreshShortcuts() }
                         }
+                        .disabled(model.isRefreshingShortcuts)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        Spacer(minLength: 0)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                if reorderEnabled {
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(filteredItems) { item in
+                                flatShortcutsRow(item)
+                                    .background(
+                                        GeometryReader { proxy in
+                                            Color.clear
+                                                .preference(
+                                                    key: ShortcutsRowFramePreferenceKey.self,
+                                                    value: [item.id: proxy.frame(in: .named("shortcuts-reorder-space"))]
+                                                )
+                                        }
+                                    )
+                            }
+                            if reorderInsertionIndex == reorderDraftIDs.count, draggedItemID != nil {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.9))
+                                    .frame(height: 2)
+                                    .padding(.leading, 22)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .coordinateSpace(name: "shortcuts-reorder-space")
+                    .onPreferenceChange(ShortcutsRowFramePreferenceKey.self) { frames in
+                        rowFramesByID = frames
+                    }
+                } else {
+                    List {
+                        ForEach(filteredItems) { item in
+                            flatShortcutsRow(item)
+                                .listRowInsets(.init(top: 2, leading: 0, bottom: 2, trailing: 0))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                }
             }
         }
+    }
+
+    private var reorderControlBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                if !isReordering && isSearchActive {
+                    searchText = ""
+                }
+                isReordering.toggle()
+            } label: {
+                Label(isReordering ? "Done Shortcut Ordering" : "Shortcut Ordering", systemImage: isReordering ? "checkmark.circle.fill" : "arrow.up.arrow.down.circle.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .environment(\.controlActiveState, .key)
+            .help("Click to toggle row ordering")
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func flatShortcutsRow(_ item: ShortcutsDisplayItem) -> some View {
+        if reorderEnabled {
+            HStack(alignment: .center, spacing: 6) {
+                reorderHandle(for: item)
+                flatShortcutsRowBody(item)
+            }
+            .overlay(alignment: .top) {
+                if shouldShowInsertionLine(before: item.id) {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.9))
+                        .frame(height: 2)
+                        .padding(.leading, 22)
+                }
+            }
+        } else {
+            flatShortcutsRowBody(item)
+        }
+    }
+
+    @ViewBuilder
+    private func flatShortcutsRowBody(_ item: ShortcutsDisplayItem) -> some View {
+        switch item {
+        case .featureRow(let row):
+            if let entry = row.shortcutEntry {
+                shortcutRow(entry)
+            } else {
+                unifiedActionOnlyRow(row)
+            }
+        case .directionalFamily(let group, let bindings):
+            if let summary = directionalSummary(group: group, bindings: bindings) {
+                directionalShortcutFamilyCard(summary, emphasized: group == .focusWindow || group == .resizeWindow)
+            }
+        case .desktopJumpFamily(let entries):
+            jumpDesktopFamilyCard(entries)
+        case .desktopMoveFamily(let entries):
+            desktopMoveAdvancedFamilyCard(entries)
+        }
+    }
+
+    private func reorderHandle(for item: ShortcutsDisplayItem) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 14)
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("shortcuts-reorder-space"))
+                    .onChanged { value in
+                        updateReorderDrag(itemID: item.id, locationY: value.location.y)
+                    }
+                    .onEnded { value in
+                        finishReorderDrag(itemID: item.id, locationY: value.location.y)
+                    }
+            )
+        .help("Drag to reorder")
+    }
+
+    private func shouldShowInsertionLine(before itemID: String) -> Bool {
+        guard let insertion = reorderInsertionIndex, draggedItemID != nil else { return false }
+        guard let rowIndex = reorderDraftIDs.firstIndex(of: itemID) else { return false }
+        return insertion == rowIndex
+    }
+
+    private func updateReorderDrag(itemID: String, locationY: CGFloat) {
+        guard reorderEnabled else { return }
+        if draggedItemID == nil {
+            draggedItemID = itemID
+        }
+        reorderInsertionIndex = insertionIndex(for: locationY, draggingID: itemID)
+    }
+
+    private func finishReorderDrag(itemID: String, locationY: CGFloat) {
+        guard reorderEnabled else { return }
+        defer {
+            draggedItemID = nil
+            reorderInsertionIndex = nil
+        }
+        guard let sourceIndex = reorderDraftIDs.firstIndex(of: itemID) else { return }
+        let insertion = insertionIndex(for: locationY, draggingID: itemID)
+        var nextIDs = reorderDraftIDs
+        let movingID = nextIDs.remove(at: sourceIndex)
+        var destination = insertion
+        if sourceIndex < insertion {
+            destination = max(0, insertion - 1)
+        }
+        destination = min(max(0, destination), nextIDs.count)
+        nextIDs.insert(movingID, at: destination)
+        reorderDraftIDs = nextIDs
+    }
+
+    private func insertionIndex(for locationY: CGFloat, draggingID: String) -> Int {
+        let ids = reorderDraftIDs
+        for id in ids where id != draggingID {
+            guard let frame = rowFramesByID[id] else { continue }
+            if locationY < frame.midY, let index = ids.firstIndex(of: id) {
+                return index
+            }
+        }
+        return ids.count
+    }
+
+    private func jumpDesktopFamilyCard(_ entries: [ShortcutEntry]) -> some View {
+        let mapped = entries.compactMap { entry -> (entry: ShortcutEntry, desktop: Int)? in
+            guard let desktop = desktopGoToTarget(from: entry.command) else { return nil }
+            return (entry: entry, desktop: desktop)
+        }
+        .sorted { lhs, rhs in
+            if lhs.desktop != rhs.desktop { return lhs.desktop < rhs.desktop }
+            return lhs.entry.sourceLine < rhs.entry.sourceLine
+        }
+        let displayed = Array(mapped.prefix(3))
+        let hasMore = mapped.count > displayed.count
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("Jump to Desktop #")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Button("Open macOS Keyboard Shortcuts") {
+                    model.openMissionControlKeyboardShortcuts()
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .environment(\.controlActiveState, .key)
+            }
+
+            if mapped.isEmpty {
+                Text("No Jump shortcuts are configured yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    HStack(spacing: 6) {
+                        ForEach(displayed, id: \.entry.id) { sample in
+                            Button {
+                                model.selectShortcut(sample.entry)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack(alignment: .center, spacing: 6) {
+                                        Text(model.displayShortcutComboWords(sample.entry))
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .lineLimit(1)
+                                        shortcutSymbolCaps(for: sample.entry, glyphSize: 13, highlighted: true)
+                                    }
+                                    Text("Desktop \(sample.desktop)")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .help("\(model.displayShortcutComboWords(sample.entry)) jumps to Desktop \(sample.desktop).")
+                        }
+                        if hasMore {
+                            Text("...")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Text("Then: Keyboard Shortcuts → Desktop Controls (Mission Control).")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func desktopMoveAdvancedFamilyCard(_ entries: [ShortcutEntry]) -> some View {
+        let sortedEntries = entries.sorted { lhs, rhs in
+            let lhsDesktop = desktopMoveAndFollowTarget(from: lhs.command) ?? Int.max
+            let rhsDesktop = desktopMoveAndFollowTarget(from: rhs.command) ?? Int.max
+            if lhsDesktop != rhsDesktop { return lhsDesktop < rhsDesktop }
+            return lhs.sourceLine < rhs.sourceLine
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 8) {
+                Label("Advanced Desktop Move", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                if !model.canRunScriptingAdditionDesktopActions {
+                    Button("Open System Setup") {
+                        model.requestOpenTilePilotTab(.system)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .environment(\.controlActiveState, .key)
+                }
+            }
+
+            Text("Requires yabai scripting addition (security override / SIP changes). Hidden by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            DisclosureGroup(
+                isExpanded: $showDesktopMoveAdvanced,
+                content: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(sortedEntries, id: \.id) { entry in
+                            shortcutRow(entry)
+                        }
+                    }
+                    .padding(.top, 4)
+                },
+                label: {
+                    Text(showDesktopMoveAdvanced ? "Hide Advanced Desktop Move Shortcuts" : "Show Advanced Desktop Move Shortcuts")
+                        .font(.caption.weight(.semibold))
+                }
+            )
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func shortcutRow(_ entry: ShortcutEntry) -> some View {
@@ -1362,7 +1882,22 @@ struct ShortcutsDashboardView: View {
         let featureID = featureRow?.featureID
         let title = model.shortcutTitle(entry)
         let secondaryText = model.shortcutSecondaryText(entry)
-        return HStack(alignment: .center, spacing: 8) {
+        return HStack(alignment: .center, spacing: 4) {
+            Button {
+                if let featureID {
+                    model.toggleFeaturePinned(featureID)
+                } else {
+                    model.toggleShortcutPinned(entry)
+                }
+            } label: {
+                Image(systemName: (featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "pin.fill" : "pin")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .help((featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "Unpin from quick menu" : "Pin to quick menu")
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .frame(minWidth: 24)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -1382,34 +1917,23 @@ struct ShortcutsDashboardView: View {
                         .lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: shortcutDescriptionColumnWidth, alignment: .leading)
+            .layoutPriority(5)
 
             comboSummaryView(for: entry)
-                .frame(minWidth: 170, idealWidth: 210, maxWidth: 270, alignment: .leading)
+                .frame(minWidth: 220, idealWidth: 260, maxWidth: 320, alignment: .leading)
+                .layoutPriority(8)
+
+            Spacer(minLength: 2)
 
             HStack(spacing: 4) {
-                Button {
-                    if let featureID {
-                        model.toggleFeaturePinned(featureID)
-                    } else {
-                        model.toggleShortcutPinned(entry)
-                    }
-                } label: {
-                    Image(systemName: (featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "pin.fill" : "pin")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .help((featureID.map(model.isFeaturePinned) ?? model.isShortcutPinned(entry)) ? "Unpin from quick menu" : "Pin to quick menu")
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .frame(minWidth: 24)
-
                 Button("Test") {
                     model.runShortcut(entry)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .font(.system(size: 12, weight: .semibold))
-                .frame(minWidth: 46)
+                .lineLimit(1)
 
                 Button("Edit") {
                     model.openShortcutSource(entry)
@@ -1417,9 +1941,9 @@ struct ShortcutsDashboardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .font(.system(size: 12, weight: .semibold))
-                .frame(minWidth: 46)
+                .lineLimit(1)
             }
-            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(-1)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -1439,7 +1963,22 @@ struct ShortcutsDashboardView: View {
     }
 
     private func unifiedActionOnlyRow(_ row: FeatureControlRow) -> some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 4) {
+            if let featureID = row.featureID {
+                Button {
+                    model.toggleFeaturePinned(featureID)
+                } label: {
+                    Image(systemName: model.isFeaturePinned(featureID) ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .frame(minWidth: 24)
+            } else {
+                Color.clear
+                    .frame(width: 24, height: 1)
+            }
+
             Image(systemName: row.shortcutEntry == nil ? "keyboard.badge.ellipsis" : "cursorarrow.click.2")
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
@@ -1453,21 +1992,10 @@ struct ShortcutsDashboardView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: shortcutDescriptionColumnWidth, alignment: .leading)
+            .layoutPriority(5)
 
             HStack(spacing: 4) {
-                if let featureID = row.featureID {
-                    Button {
-                        model.toggleFeaturePinned(featureID)
-                    } label: {
-                        Image(systemName: model.isFeaturePinned(featureID) ? "pin.fill" : "pin")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .frame(minWidth: 24)
-                }
-
                 Button("Test") {
                     if let featureID = row.featureID {
                         model.runFeatureControl(featureID, source: .shortcutsUI)
@@ -1479,7 +2007,7 @@ struct ShortcutsDashboardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .font(.system(size: 12, weight: .semibold))
-                .frame(minWidth: 52)
+                .lineLimit(1)
 
                 if let featureID = row.featureID, row.shortcutEntry == nil {
                     if let defaultCombo = row.defaultCombo {
@@ -1497,9 +2025,10 @@ struct ShortcutsDashboardView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .font(.system(size: 12, weight: .semibold))
-                    .frame(minWidth: 46)
+                    .lineLimit(1)
                 }
             }
+            .layoutPriority(-1)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -1581,8 +2110,11 @@ struct ShortcutsDashboardView: View {
     }
 
     @ViewBuilder
-    private func directionalShortcutsSection(_ entries: [ShortcutEntry]) -> some View {
-        let summaries = directionalShortcutFamilies(from: entries).filter { $0.kind == .moveWindow }
+    private func directionalShortcutsSection(
+        _ entries: [ShortcutEntry],
+        kinds: Set<DirectionalShortcutFamilySummary.Kind>
+    ) -> some View {
+        let summaries = directionalShortcutFamilies(from: entries).filter { kinds.contains($0.kind) }
         let covered = Set(summaries.flatMap { $0.entries.map { $0.entry.id } })
         let leftovers = entries.filter { !covered.contains($0.id) }
 
@@ -1598,7 +2130,37 @@ struct ShortcutsDashboardView: View {
         }
     }
 
+    private func directionalSummary(
+        group: DirectionalShortcutGroup,
+        bindings: [DirectionalShortcutBinding]
+    ) -> DirectionalShortcutFamilySummary? {
+        guard let kind = DirectionalShortcutFamilySummary.Kind(rawValue: group.rawValue) else { return nil }
+        let mappedEntries: [(entry: ShortcutEntry, direction: DirectionalShortcutFamilySummary.Direction)] = bindings.compactMap { binding in
+            guard let direction = DirectionalShortcutFamilySummary.Direction(rawValue: binding.direction.rawValue) else { return nil }
+            return (entry: binding.entry, direction: direction)
+        }
+        guard !mappedEntries.isEmpty else { return nil }
+        return DirectionalShortcutFamilySummary(kind: kind, entries: mappedEntries)
+    }
+
+    private func directionalKinds(for group: UnifiedControlGroup) -> Set<DirectionalShortcutFamilySummary.Kind> {
+        switch group {
+        case .windowPlacement:
+            return [.moveWindow, .swapWindow]
+        case .windowSize:
+            return [.resizeWindow]
+        case .focus:
+            return [.focusWindow]
+        default:
+            return []
+        }
+    }
+
     private func directionalShortcutFamilyCard(_ summary: DirectionalShortcutFamilySummary) -> some View {
+        directionalShortcutFamilyCard(summary, emphasized: false)
+    }
+
+    private func directionalShortcutFamilyCard(_ summary: DirectionalShortcutFamilySummary, emphasized: Bool) -> some View {
         let orderedEntries = summary.entries.sorted { lhs, rhs in
             if lhs.direction.sortRank != rhs.direction.sortRank { return lhs.direction.sortRank < rhs.direction.sortRank }
             return lhs.entry.sourceLine < rhs.entry.sourceLine
@@ -1609,7 +2171,7 @@ struct ShortcutsDashboardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .center, spacing: 8) {
                     Text(directionalFamilyTitle(summary.kind))
-                        .font(.subheadline.weight(.semibold))
+                        .font(emphasized ? .headline.weight(.semibold) : .subheadline.weight(.semibold))
                     if let group = directionalGroup(from: summary.kind) {
                         Button {
                             model.toggleDirectionalGroupPinned(group)
@@ -1623,11 +2185,12 @@ struct ShortcutsDashboardView: View {
                 }
 
                 Text(directionalFamilyDescription(summary.kind))
-                    .font(.caption)
+                    .font(emphasized ? .subheadline : .caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: shortcutDescriptionColumnWidth, alignment: .leading)
+            .layoutPriority(5)
 
             VStack(spacing: 5) {
                 HStack {
@@ -1642,6 +2205,10 @@ struct ShortcutsDashboardView: View {
                     directionalDirectionBox(direction: .right, entry: byDirection[.right])
                 }
             }
+            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320, alignment: .leading)
+            .layoutPriority(8)
+
+            Spacer(minLength: 2)
         }
         .padding(8)
         .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
@@ -1715,6 +2282,9 @@ struct ShortcutsDashboardView: View {
                         model.openMissionControlKeyboardShortcuts()
                     }
                     .font(.caption)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .environment(\.controlActiveState, .key)
                 } else {
                     Text("Requires SA")
                         .font(.caption2.weight(.semibold))
@@ -1845,11 +2415,11 @@ struct ShortcutsDashboardView: View {
     private func directionalFamilyTitle(_ kind: DirectionalShortcutFamilySummary.Kind) -> String {
         switch kind {
         case .focusWindow:
-            return "Focus Window (Direction Keys)"
+            return "Change Focus"
         case .moveWindow:
             return "Move Window in Layout (Direction Keys)"
         case .resizeWindow:
-            return "Resize Window (Direction Keys)"
+            return "Resize Window"
         case .swapWindow:
             return "Swap Window (Direction Keys)"
         }
@@ -2017,6 +2587,14 @@ struct ShortcutsDashboardView: View {
         default:
             return group
         }
+    }
+}
+
+private struct ShortcutsRowFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 

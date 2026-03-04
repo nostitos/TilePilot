@@ -17,25 +17,12 @@ struct WindowBadgeView: View {
         return "Window controls unavailable"
     }
 
-    private var pinnedFeatureRows: [FeatureControlRow] {
-        model.pinnedFeatureControlRows
-    }
-
-    private var pinnedDirectionalBindings: [DirectionalShortcutBinding] {
-        model.pinnedDirectionalGroupBindings.flatMap(\.bindings)
-    }
-
-    private var pinnedShortcutEntries: [ShortcutEntry] {
-        model.pinnedShortcutEntries.filter { entry in
-            if model.featureControlRow(forShortcutEntry: entry)?.featureID != nil {
-                return false
-            }
-            return !(model.isScriptingAdditionDesktopShortcut(entry) && !model.canRunScriptingAdditionDesktopActions)
-        }
+    private var pinnedContextItems: [PinnedShortcutContextItem] {
+        model.pinnedShortcutContextItems
     }
 
     private var hasPinnedContextActions: Bool {
-        !pinnedFeatureRows.isEmpty || !pinnedDirectionalBindings.isEmpty || !pinnedShortcutEntries.isEmpty
+        !pinnedContextItems.isEmpty
     }
 
     var body: some View {
@@ -55,24 +42,42 @@ struct WindowBadgeView: View {
         .buttonStyle(.plain)
         .help(helpText)
         .contextMenu {
-            ForEach(pinnedFeatureRows, id: \.id) { row in
-                if let featureID = row.featureID {
-                    Button(featureMenuTitle(row)) {
-                        model.runFeatureControl(featureID, source: .statusMenu)
+            ForEach(pinnedContextItems, id: \.id) { item in
+                switch item {
+                case .feature(let row):
+                    if let featureID = row.featureID {
+                        let title = featureMenuTitle(row)
+                        if featureID.rawValue == "app.keep-on-top-when-floating" {
+                            Toggle(isOn: Binding(
+                                get: {
+                                    model.appForegroundPolicy(for: badge.app) == .keepFrontWhenFloating
+                                },
+                                set: { enabled in
+                                    model.setAppForegroundPolicy(enabled ? .keepFrontWhenFloating : .useDefault, for: badge.app)
+                                }
+                            )) {
+                                Text(title)
+                            }
+                            .disabled(row.disabledReason != nil)
+                        } else {
+                            Button(title) {
+                                model.runFeatureControl(featureID, source: .statusMenu, appContext: badge.app)
+                            }
+                            .disabled(row.disabledReason != nil)
+                        }
                     }
-                    .disabled(row.disabledReason != nil)
-                }
-            }
-
-            ForEach(pinnedDirectionalBindings, id: \.id) { binding in
-                Button(shortcutMenuTitle(binding.entry)) {
-                    model.runShortcut(binding.entry)
-                }
-            }
-
-            ForEach(pinnedShortcutEntries, id: \.id) { entry in
-                Button(shortcutMenuTitle(entry)) {
-                    model.runShortcut(entry)
+                case .directional(_, let bindings):
+                    ForEach(bindings, id: \.id) { binding in
+                        let title = shortcutMenuTitle(binding.entry)
+                        Button(title) {
+                            model.runShortcut(binding.entry)
+                        }
+                    }
+                case .shortcut(let entry):
+                    let title = shortcutMenuTitle(entry)
+                    Button(title) {
+                        model.runShortcut(entry)
+                    }
                 }
             }
 
@@ -117,18 +122,23 @@ struct WindowBadgeView: View {
         let symbols = row.shortcutEntry.map { model.displayShortcutComboSymbols($0) }
             ?? row.assignedCombo.map { model.displayShortcutComboSymbols(from: $0) }
             ?? row.defaultCombo.map { model.displayShortcutComboSymbols(from: $0) }
-        if let symbols, !symbols.isEmpty {
-            return "\(symbols)  \(row.title)"
-        }
-        return row.title
+        return menuTitle(left: row.title, rightShortcut: spacedSymbols(symbols))
     }
 
     private func shortcutMenuTitle(_ entry: ShortcutEntry) -> String {
         let symbols = model.displayShortcutComboSymbols(entry)
-        let explanation = model.shortcutExplanation(entry)
-        if symbols.isEmpty {
-            return explanation
-        }
-        return "\(symbols)  \(explanation)"
+        let combo = symbols.isEmpty ? model.displayShortcutComboWords(entry) : symbols
+        return menuTitle(left: model.shortcutTitle(entry), rightShortcut: spacedSymbols(combo))
+    }
+
+    private func menuTitle(left: String, rightShortcut: String?) -> String {
+        let trimmedRight = rightShortcut?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedRight.isEmpty else { return left }
+        return "\(left)\t\(trimmedRight)"
+    }
+
+    private func spacedSymbols(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        return raw.map(String.init).joined(separator: " ")
     }
 }

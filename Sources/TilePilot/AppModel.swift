@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
     private static let pinnedShortcutsDefaultsKey = "TilePilot.pinnedShortcutKeys"
     private static let pinnedDirectionalGroupsDefaultsKey = "TilePilot.pinnedDirectionalGroupIDs"
     private static let pinnedFeatureControlsDefaultsKey = "TilePilot.pinnedFeatureControlIDs"
+    private static let shortcutsCustomOrderDefaultsKey = "TilePilot.shortcutsCustomOrderIDs"
     private static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     private static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
     private static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
@@ -73,6 +74,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published private(set) var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
     @Published private(set) var pinnedFeatureControlIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedFeatureControlsDefaultsKey) ?? []
+    @Published private(set) var shortcutsCustomOrderIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.shortcutsCustomOrderDefaultsKey) ?? []
     @Published private(set) var selectedShortcutStableKey: String?
     @Published private(set) var requestedFileEditorTarget: EditorTarget?
     @Published private(set) var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
@@ -159,6 +161,7 @@ final class AppModel: ObservableObject {
     private let releaseDefaultsService = ReleaseDefaultsService()
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
+    private var keepOnTopEnforcementTask: Task<Void, Never>?
     private var degradedModeActive = false
     private var consecutiveMismatchSamples = 0
     private var consecutiveHealthySamples = 0
@@ -203,6 +206,18 @@ final class AppModel: ObservableObject {
             }
         }
 
+        guard keepOnTopEnforcementTask == nil else { return }
+        keepOnTopEnforcementTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(900))
+                if Task.isCancelled { break }
+                guard self.appForegroundPolicyByName.values.contains(.keepFrontWhenFloating) else { continue }
+                guard let snapshot = self.liveStateSnapshot else { continue }
+                await self.enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
+            }
+        }
+
         if shortcutEntries.isEmpty {
             Task { [weak self] in
                 await self?.refreshShortcuts()
@@ -233,6 +248,8 @@ final class AppModel: ObservableObject {
         autoRefreshTask = nil
         statePollingTask?.cancel()
         statePollingTask = nil
+        keepOnTopEnforcementTask?.cancel()
+        keepOnTopEnforcementTask = nil
     }
 
     func refreshDoctor() async {
@@ -421,10 +438,12 @@ final class AppModel: ObservableObject {
     private func applyReleaseDefaultsUserState(_ state: ReleaseDefaultsUserState) {
         pinnedFeatureControlIDs = Array(NSOrderedSet(array: state.pinnedFeatureControlIDs)) as? [String] ?? state.pinnedFeatureControlIDs
         pinnedDirectionalGroupIDs = Array(NSOrderedSet(array: state.pinnedDirectionalGroupIDs)) as? [String] ?? state.pinnedDirectionalGroupIDs
+        shortcutsCustomOrderIDs = Array(NSOrderedSet(array: state.shortcutsCustomOrderIDs)) as? [String] ?? state.shortcutsCustomOrderIDs
         pinnedShortcutKeys = []
         persistPinnedFeatureControlIDs()
         persistPinnedDirectionalGroupIDs()
         persistPinnedShortcutKeys()
+        persistShortcutsCustomOrderIDs()
 
         showWindowBadgeOverlay = state.showWindowBadgeOverlay
         UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
@@ -435,6 +454,7 @@ final class AppModel: ObservableObject {
 
         appForegroundPolicyByName = state.appForegroundPolicyByName
         persistAppForegroundPolicies()
+        reconcileShortcutsCustomOrderIDsToCurrentItems()
         refreshWindowBadges()
     }
 
@@ -465,6 +485,7 @@ final class AppModel: ObservableObject {
         liveStateSnapshot = snapshot
         refreshWindowBadges()
         await applyForegroundPolicyTransitions(previous: previousSnapshot, current: snapshot)
+        await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
     }
 
     func refreshShortcuts() async {
@@ -473,15 +494,18 @@ final class AppModel: ObservableObject {
         defer { isRefreshingShortcuts = false }
 
         let result = await skhdShortcutService.loadShortcuts()
-        shortcutEntries = result.entries.sorted {
+        let visibleEntries = result.entries.filter { !isDeprecatedHiddenShortcut($0) }
+        shortcutEntries = visibleEntries.sorted {
             if $0.category != $1.category { return $0.category < $1.category }
             if $0.combo != $1.combo { return $0.combo < $1.combo }
             return $0.sourceLine < $1.sourceLine
         }
+        prunePinnedShortcutKeysToLoadedEntries()
         scriptHeaderDescriptionCache.removeAll()
         shortcutFilePath = result.filePath
         shortcutParseIssues = result.issues
         migrateLegacyPinnedShortcutsToFeaturePins()
+        reconcileShortcutsCustomOrderIDsToCurrentItems()
         await refreshEditableFiles()
     }
 
@@ -788,6 +812,50 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func focusDesktop(index: Int) {
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["yabai", "-m", "space", "--focus", String(index)], timeout: 1.5)
+            )
+            await MainActor.run {
+                self.appendCommandLog(from: result)
+            }
+            if result.isSuccess {
+                await MainActor.run {
+                    self.lastActionMessage = "Switched to Desktop \(index)."
+                    self.lastErrorMessage = nil
+                }
+                await self.refreshLiveState()
+                return
+            }
+
+            if await self.focusAnyWindowOnDesktop(index: index) {
+                await MainActor.run {
+                    self.lastActionMessage = "Switched to Desktop \(index)."
+                    self.lastErrorMessage = nil
+                }
+                await self.refreshLiveState()
+                return
+            }
+
+            if self.isScriptingAdditionDesktopFocusFailure(result),
+               self.triggerMissionControlDesktopShortcut(index: index) {
+                await MainActor.run {
+                    self.lastActionMessage = "Switched to Desktop \(index) using macOS shortcut fallback."
+                    self.lastErrorMessage = nil
+                }
+                await self.refreshLiveState()
+                return
+            }
+
+            await MainActor.run {
+                self.lastErrorMessage = "Could not switch to Desktop \(index)."
+                self.lastActionMessage = nil
+            }
+        }
+    }
+
     func toggleWindowFloating(windowID: Int, bringToFrontOnFloat: Bool = false) {
         guard let window = runtimeControllableWindow(windowID: windowID) else { return }
         setWindowFloating(windowID: windowID, shouldFloat: !window.floating, bringToFrontOnFloat: bringToFrontOnFloat)
@@ -817,10 +885,14 @@ final class AppModel: ObservableObject {
 
             let foregroundPolicyEnabled = self.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
             if shouldFloat && (bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled) {
+                // Keep-on-top policy itself should not steal focus.
+                // Explicit user actions (focus/raise toggles) can still use focus fallback.
+                let shouldAllowFocusFallback = bringToFrontOnFloat || self.raiseOnFloatToggleEnabled
                 _ = await self.raiseWindowOnly(
                     windowID: windowID,
+                    targetSpace: window.space,
                     bypassCooldown: true,
-                    allowFocusFallback: bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled
+                    allowFocusFallback: shouldAllowFocusFallback
                 )
             }
             if shouldFloat && foregroundPolicyEnabled {
@@ -933,16 +1005,60 @@ final class AppModel: ObservableObject {
         for entry in shortcutEntries {
             byKey[entry.stableKey] = entry
         }
-        return pinnedShortcutKeys.compactMap { byKey[$0] }
+        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedShortcutKeys.enumerated().map { ($0.element, $0.offset) })
+        let orderRank = flatShortcutsOrderRankByID()
+        return pinnedShortcutKeys.compactMap { byKey[$0] }.sorted { lhs, rhs in
+            let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
+            let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            let lhsFallback = fallbackRank[lhs.stableKey] ?? Int.max
+            let rhsFallback = fallbackRank[rhs.stableKey] ?? Int.max
+            if lhsFallback != rhsFallback { return lhsFallback < rhsFallback }
+            return lhs.sourceLine < rhs.sourceLine
+        }
     }
 
     var pinnedDirectionalGroups: [DirectionalShortcutGroup] {
-        pinnedDirectionalGroupIDs.compactMap(DirectionalShortcutGroup.init(rawValue:))
+        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedDirectionalGroupIDs.enumerated().map { ($0.element, $0.offset) })
+        let orderRank = flatShortcutsOrderRankByID()
+        return pinnedDirectionalGroupIDs
+            .compactMap(DirectionalShortcutGroup.init(rawValue:))
+            .sorted { lhs, rhs in
+                let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
+                let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
+                if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+                let lhsFallback = fallbackRank[lhs.rawValue] ?? Int.max
+                let rhsFallback = fallbackRank[rhs.rawValue] ?? Int.max
+                return lhsFallback < rhsFallback
+            }
     }
 
     var pinnedDirectionalGroupBindings: [(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])] {
         pinnedDirectionalGroups.map { group in
             (group: group, bindings: directionalShortcutBindings(for: group))
+        }
+    }
+
+    var pinnedShortcutContextItems: [PinnedShortcutContextItem] {
+        let orderRank = flatShortcutsOrderRankByID()
+        var items: [PinnedShortcutContextItem] = []
+
+        items.append(contentsOf: pinnedFeatureControlRows.map(PinnedShortcutContextItem.feature))
+        items.append(contentsOf: pinnedDirectionalGroupBindings.map { PinnedShortcutContextItem.directional(group: $0.group, bindings: $0.bindings) })
+
+        let nonFeaturePinnedShortcuts = pinnedShortcutEntries.filter { entry in
+            if featureControlRow(forShortcutEntry: entry)?.featureID != nil {
+                return false
+            }
+            return !(isScriptingAdditionDesktopShortcut(entry) && !canRunScriptingAdditionDesktopActions)
+        }
+        items.append(contentsOf: nonFeaturePinnedShortcuts.map(PinnedShortcutContextItem.shortcut))
+
+        return items.sorted { lhs, rhs in
+            let lhsRank = orderRank[pinnedContextOrderID(lhs)] ?? Int.max
+            let rhsRank = orderRank[pinnedContextOrderID(rhs)] ?? Int.max
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return pinnedContextOrderID(lhs) < pinnedContextOrderID(rhs)
         }
     }
 
@@ -1294,6 +1410,10 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(pinnedFeatureControlIDs, forKey: AppModel.pinnedFeatureControlsDefaultsKey)
     }
 
+    func persistShortcutsCustomOrderIDs() {
+        UserDefaults.standard.set(shortcutsCustomOrderIDs, forKey: AppModel.shortcutsCustomOrderDefaultsKey)
+    }
+
     private func migrateLegacyPinnedShortcutsToFeaturePins() {
         guard !pinnedShortcutKeys.isEmpty else { return }
 
@@ -1321,6 +1441,20 @@ final class AppModel: ObservableObject {
             persistPinnedShortcutKeys()
             persistPinnedFeatureControlIDs()
         }
+    }
+
+    private func prunePinnedShortcutKeysToLoadedEntries() {
+        guard !pinnedShortcutKeys.isEmpty else { return }
+        let knownKeys = Set(shortcutEntries.map(\.stableKey))
+        let pruned = pinnedShortcutKeys.filter { knownKeys.contains($0) }
+        guard pruned != pinnedShortcutKeys else { return }
+        pinnedShortcutKeys = pruned
+        persistPinnedShortcutKeys()
+    }
+
+    private func isDeprecatedHiddenShortcut(_ entry: ShortcutEntry) -> Bool {
+        // Space-relief was an old experimental idea and should no longer appear in TilePilot UI.
+        entry.command.lowercased().contains("space-relief.sh")
     }
 
     private func parseShortcutComboDisplay(_ combo: String) -> (symbols: String, symbolsSpaced: String, words: String) {
@@ -1579,9 +1713,9 @@ final class AppModel: ObservableObject {
         }
         if c.contains("yabai -m space --layout bsp") { return "Sets the current desktop layout to tiled splits." }
         if c.contains("yabai -m space --layout stack") { return "Sets the current desktop layout to a stack." }
-        if c.contains("yabai -m space --focus prev") { return "Switches to the previous desktop." }
-        if c.contains("yabai -m space --focus next") { return "Switches to the next desktop." }
-        if c.contains("yabai -m space --focus") { return "Switches to a specific desktop." }
+        if c.contains("yabai -m space --focus prev") { return "Jumps to the previous desktop." }
+        if c.contains("yabai -m space --focus next") { return "Jumps to the next desktop." }
+        if c.contains("yabai -m space --focus") { return "Jumps to a specific desktop." }
         if c.contains("yabai -m display --focus") { return "Moves focus to another display." }
         if c.contains("yabai -m window --display") { return "Sends the focused window to another display." }
         if c.contains("open -a ") || c.hasPrefix("open ") {
@@ -1827,6 +1961,8 @@ final class AppModel: ObservableObject {
 
     func openMissionControlKeyboardShortcuts() {
         openURLCandidates([
+            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts=MissionControl",
+            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts/MissionControl",
             "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts",
             "x-apple.systempreferences:com.apple.preference.keyboard?KeyboardShortcutsTab",
             "x-apple.systempreferences:com.apple.preference.keyboard",
@@ -2337,6 +2473,66 @@ final class AppModel: ObservableObject {
         liveStateSnapshot?.windows.first(where: \.focused)
     }
 
+    func isOverviewExcludedWindow(_ window: WindowState) -> Bool {
+        // Zoom surfaces a tiny helper/dialog window ("Window", ~66x20) near the top-left.
+        // It is not a practical user window and causes misleading counts/actions in Overview.
+        guard window.app == "zoom.us" else { return false }
+        guard !window.canResize else { return false }
+        let tiny = window.frameW <= 140 || window.frameH <= 60
+        guard tiny else { return false }
+        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedTitle.isEmpty || normalizedTitle == "window"
+    }
+
+    func buildOverviewPreviews(from snapshot: LiveStateSnapshot) -> [OverviewDisplayPreview] {
+        guard snapshot.source == .yabai, !snapshot.degraded else { return [] }
+
+        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            return lhs.id < rhs.id
+        }
+        let windows = snapshot.windows.filter { window in
+            !isOverviewExcludedWindow(window) &&
+            !window.isMinimized &&
+            !window.isHidden
+        }
+        let windowsBySpace = Dictionary(grouping: windows, by: \.space)
+        let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
+
+        return sortedDisplays.compactMap { display in
+            guard display.frameW > 1, display.frameH > 1 else { return nil }
+            let desktops = (spacesByDisplay[display.id] ?? [])
+                .sorted { $0.index < $1.index }
+                .map { space in
+                    let normalizedWindows = (windowsBySpace[space.index] ?? [])
+                        .filter { $0.display == display.id }
+                        .compactMap { normalizeOverviewWindowPreview($0, in: display) }
+                        .sorted { lhs, rhs in
+                            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                            return lhs.id < rhs.id
+                        }
+                    return OverviewDesktopPreview(
+                        id: "display-\(display.id)-desktop-\(space.index)",
+                        displayID: display.id,
+                        desktopIndex: space.index,
+                        focused: space.focused,
+                        visible: space.visible,
+                        windows: normalizedWindows
+                    )
+                }
+
+            return OverviewDisplayPreview(
+                id: display.id,
+                name: display.name,
+                focused: display.focused,
+                aspectRatio: max(display.frameW, 1) / max(display.frameH, 1),
+                frameW: display.frameW,
+                frameH: display.frameH,
+                desktops: desktops
+            )
+        }
+    }
+
     var canControlFocusedWindow: Bool {
         focusedWindowState != nil && doctorSnapshot != nil
     }
@@ -2759,6 +2955,20 @@ final class AppModel: ObservableObject {
                 isExperimental: false
             ),
             FeatureDefinition(
+                id: "app.keep-on-top-when-floating",
+                group: .apps,
+                title: "Keep App on Top (When Floating)",
+                description: "Toggles keep-on-top for the focused app (or the badge app from a window badge).",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: [],
+                matchAllCommandMatchers: false,
+                preferredCommand: nil,
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
                 id: "action.focus-left",
                 group: .focus,
                 title: "Focus Left",
@@ -2965,6 +3175,301 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func flatShortcutsItems(query: String) -> [ShortcutsDisplayItem] {
+        let baseItems = buildFlatShortcutsItemsBaseOrder()
+        let orderedItems = applyShortcutsCustomOrder(baseItems)
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return orderedItems }
+        return orderedItems.filter { item in
+            switch item {
+            case .featureRow(let row):
+                return row.title.lowercased().contains(q) ||
+                    row.description.lowercased().contains(q) ||
+                    row.assignedCombo?.lowercased().contains(q) == true ||
+                    row.shortcutEntry?.combo.lowercased().contains(q) == true ||
+                    row.shortcutEntry?.command.lowercased().contains(q) == true
+            case .directionalFamily(let group, let bindings):
+                if directionalFamilyTitle(for: group).lowercased().contains(q) ||
+                    directionalFamilyDescription(for: group).lowercased().contains(q) {
+                    return true
+                }
+                return bindings.contains { binding in
+                    binding.entry.combo.lowercased().contains(q) ||
+                        binding.entry.command.lowercased().contains(q) ||
+                        shortcutExplanation(binding.entry).lowercased().contains(q) ||
+                        binding.direction.label.lowercased().contains(q)
+                }
+            case .desktopJumpFamily(let entries):
+                if "jump to desktop".contains(q) || "macos keyboard shortcuts".contains(q) {
+                    return true
+                }
+                return entries.contains { entry in
+                    entry.combo.lowercased().contains(q) ||
+                        entry.command.lowercased().contains(q) ||
+                        shortcutExplanation(entry).lowercased().contains(q)
+                }
+            case .desktopMoveFamily(let entries):
+                if "move window to desktop".contains(q) ||
+                    "advanced desktop move".contains(q) ||
+                    "scripting addition".contains(q) ||
+                    "sip".contains(q) {
+                    return true
+                }
+                return entries.contains { entry in
+                    entry.combo.lowercased().contains(q) ||
+                        entry.command.lowercased().contains(q) ||
+                        shortcutExplanation(entry).lowercased().contains(q)
+                }
+            }
+        }
+    }
+
+    func moveFlatShortcutsItems(fromOffsets: IndexSet, toOffset: Int) {
+        let orderedIDs = flatShortcutsItems(query: "").map(\.id)
+        guard !orderedIDs.isEmpty else { return }
+        var mutableIDs = orderedIDs
+        mutableIDs.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        guard mutableIDs != shortcutsCustomOrderIDs else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            shortcutsCustomOrderIDs = mutableIDs
+        }
+        persistShortcutsCustomOrderIDs()
+    }
+
+    func moveFlatShortcutsItem(draggedID: String, before targetID: String) {
+        guard draggedID != targetID else { return }
+        var orderedIDs = flatShortcutsItems(query: "").map(\.id)
+        guard
+            let sourceIndex = orderedIDs.firstIndex(of: draggedID),
+            let targetIndex = orderedIDs.firstIndex(of: targetID)
+        else { return }
+
+        let movingID = orderedIDs.remove(at: sourceIndex)
+        let destinationIndex = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
+        orderedIDs.insert(movingID, at: destinationIndex)
+
+        guard orderedIDs != shortcutsCustomOrderIDs else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            shortcutsCustomOrderIDs = orderedIDs
+        }
+        persistShortcutsCustomOrderIDs()
+    }
+
+    func resetShortcutsCustomOrderToDefault() {
+        shortcutsCustomOrderIDs = []
+        persistShortcutsCustomOrderIDs()
+        reconcileShortcutsCustomOrderIDsToCurrentItems()
+    }
+
+    func applyShortcutsCustomOrderIDs(_ ids: [String]) {
+        let normalized = Array(NSOrderedSet(array: ids)) as? [String] ?? ids
+        guard normalized != shortcutsCustomOrderIDs else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            shortcutsCustomOrderIDs = normalized
+        }
+        persistShortcutsCustomOrderIDs()
+    }
+
+    func directionalFamilyTitle(for group: DirectionalShortcutGroup) -> String {
+        switch group {
+        case .focusWindow:
+            return "Change Focus"
+        case .moveWindow:
+            return "Move Window in Layout (Direction Keys)"
+        case .resizeWindow:
+            return "Resize Window"
+        case .swapWindow:
+            return "Swap Window (Direction Keys)"
+        }
+    }
+
+    func directionalFamilyDescription(for group: DirectionalShortcutGroup) -> String {
+        switch group {
+        case .focusWindow:
+            return "Use the I / J / K / L direction keys to move focus up, left, down, and right."
+        case .moveWindow:
+            return "Use the I / J / K / L direction keys to move the focused window to another tile position."
+        case .resizeWindow:
+            return "Use the I / J / K / L direction keys to resize the focused window up, left, down, and right."
+        case .swapWindow:
+            return "Use the I / J / K / L direction keys to swap with a neighboring window in a direction."
+        }
+    }
+
+    private func buildFlatShortcutsItemsBaseOrder() -> [ShortcutsDisplayItem] {
+        let rows = featureControlRows
+        let directionalGroups: [DirectionalShortcutGroup] = [.moveWindow, .swapWindow, .focusWindow, .resizeWindow]
+        let directionalBindingsByGroup = Dictionary(uniqueKeysWithValues: directionalGroups.map { group in
+            (group, directionalShortcutBindings(for: group))
+        })
+        var insertedDirectionalGroups: Set<DirectionalShortcutGroup> = []
+        var desktopJumpEntries: [ShortcutEntry] = []
+        var desktopMoveEntries: [ShortcutEntry] = []
+        var desktopJumpInsertIndex: Int?
+        var desktopMoveInsertIndex: Int?
+        var items: [ShortcutsDisplayItem] = []
+
+        for row in rows {
+            if let entry = row.shortcutEntry, desktopJumpTarget(from: entry.command) != nil {
+                if desktopJumpInsertIndex == nil {
+                    desktopJumpInsertIndex = items.count
+                }
+                desktopJumpEntries.append(entry)
+                continue
+            }
+            if let entry = row.shortcutEntry, isScriptingAdditionDesktopShortcut(entry) {
+                if desktopMoveInsertIndex == nil {
+                    desktopMoveInsertIndex = items.count
+                }
+                desktopMoveEntries.append(entry)
+                continue
+            }
+            guard let entry = row.shortcutEntry, let binding = directionalShortcutBinding(for: entry) else {
+                items.append(.featureRow(row))
+                continue
+            }
+            if insertedDirectionalGroups.contains(binding.group) {
+                continue
+            }
+            let bindings = directionalBindingsByGroup[binding.group] ?? []
+            guard !bindings.isEmpty else { continue }
+            items.append(.directionalFamily(group: binding.group, bindings: bindings))
+            insertedDirectionalGroups.insert(binding.group)
+        }
+
+        for group in directionalGroups where !insertedDirectionalGroups.contains(group) {
+            guard let bindings = directionalBindingsByGroup[group], !bindings.isEmpty else { continue }
+            items.append(.directionalFamily(group: group, bindings: bindings))
+        }
+
+        if !desktopJumpEntries.isEmpty {
+            let sortedDesktopJumpEntries = desktopJumpEntries.sorted { lhs, rhs in
+                let lhsDesktop = desktopJumpTarget(from: lhs.command) ?? Int.max
+                let rhsDesktop = desktopJumpTarget(from: rhs.command) ?? Int.max
+                if lhsDesktop != rhsDesktop { return lhsDesktop < rhsDesktop }
+                return lhs.sourceLine < rhs.sourceLine
+            }
+            let familyItem: ShortcutsDisplayItem = .desktopJumpFamily(entries: sortedDesktopJumpEntries)
+            if let insertIndex = desktopJumpInsertIndex, insertIndex <= items.count {
+                items.insert(familyItem, at: insertIndex)
+            } else {
+                items.insert(familyItem, at: 0)
+            }
+        }
+
+        if !desktopMoveEntries.isEmpty {
+            let sortedDesktopMoveEntries = desktopMoveEntries.sorted { lhs, rhs in
+                let lhsDesktop = firstInteger(after: "--space", in: lhs.command.lowercased()) ?? Int.max
+                let rhsDesktop = firstInteger(after: "--space", in: rhs.command.lowercased()) ?? Int.max
+                if lhsDesktop != rhsDesktop { return lhsDesktop < rhsDesktop }
+                return lhs.sourceLine < rhs.sourceLine
+            }
+            let familyItem: ShortcutsDisplayItem = .desktopMoveFamily(entries: sortedDesktopMoveEntries)
+            if let insertIndex = desktopMoveInsertIndex, insertIndex <= items.count {
+                items.insert(familyItem, at: insertIndex)
+            } else {
+                items.append(familyItem)
+            }
+        }
+
+        return items
+    }
+
+    private func applyShortcutsCustomOrder(_ items: [ShortcutsDisplayItem]) -> [ShortcutsDisplayItem] {
+        var byID: [String: ShortcutsDisplayItem] = [:]
+        for item in items {
+            byID[item.id] = item
+        }
+        var ordered: [ShortcutsDisplayItem] = []
+        var seen: Set<String> = []
+
+        for id in shortcutsCustomOrderIDs {
+            guard let item = byID[id], seen.insert(id).inserted else { continue }
+            ordered.append(item)
+        }
+        for item in items {
+            guard seen.insert(item.id).inserted else { continue }
+            ordered.append(item)
+        }
+        return ordered
+    }
+
+    private func reconcileShortcutsCustomOrderIDsToCurrentItems() {
+        let availableIDs = buildFlatShortcutsItemsBaseOrder().map(\.id)
+        let availableSet = Set(availableIDs)
+        var reconciled: [String] = []
+        var seen: Set<String> = []
+
+        for id in shortcutsCustomOrderIDs where availableSet.contains(id) {
+            guard seen.insert(id).inserted else { continue }
+            reconciled.append(id)
+        }
+        for id in availableIDs where !seen.contains(id) {
+            seen.insert(id)
+            reconciled.append(id)
+        }
+
+        if reconciled != shortcutsCustomOrderIDs {
+            shortcutsCustomOrderIDs = reconciled
+            persistShortcutsCustomOrderIDs()
+        }
+    }
+
+    private func flatOrderID(for row: FeatureControlRow) -> String {
+        if let featureID = row.featureID {
+            return "feature.\(featureID.rawValue)"
+        }
+        if let stableKey = row.shortcutEntry?.stableKey {
+            return "shortcut.\(stableKey)"
+        }
+        if let actionID = row.actionID {
+            return "action.\(actionID.rawValue)"
+        }
+        return "row.\(row.id)"
+    }
+
+    private func flatOrderID(for group: DirectionalShortcutGroup) -> String {
+        "directional.\(group.rawValue)"
+    }
+
+    private func flatOrderID(for entry: ShortcutEntry) -> String {
+        if let featureID = featureDefinition(for: entry)?.id {
+            return "feature.\(featureID.rawValue)"
+        }
+        return "shortcut.\(entry.stableKey)"
+    }
+
+    private func desktopJumpTarget(from command: String) -> Int? {
+        let c = command.lowercased()
+        guard !c.contains("yabai -m window --space") else { return nil }
+        guard let range = c.range(of: "yabai -m space --focus ") else { return nil }
+        let suffix = c[range.upperBound...]
+        let digits = suffix.prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    private func pinnedContextOrderID(_ item: PinnedShortcutContextItem) -> String {
+        switch item {
+        case .feature(let row):
+            return flatOrderID(for: row)
+        case .directional(let group, _):
+            return flatOrderID(for: group)
+        case .shortcut(let entry):
+            return flatOrderID(for: entry)
+        }
+    }
+
+    private func flatShortcutsOrderRankByID() -> [String: Int] {
+        let orderedIDs = flatShortcutsItems(query: "").map(\.id)
+        return Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
+    }
+
     private func preferredFeatureRow(existing: FeatureControlRow, candidate: FeatureControlRow) -> FeatureControlRow {
         if existing.shortcutEntry == nil, candidate.shortcutEntry != nil { return candidate }
         if existing.shortcutEntry != nil, candidate.shortcutEntry == nil { return existing }
@@ -2991,7 +3496,17 @@ final class AppModel: ObservableObject {
             guard let id = row.featureID else { continue }
             byID[id.rawValue] = row
         }
-        return pinnedFeatureControlIDs.compactMap { byID[$0] }
+        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedFeatureControlIDs.enumerated().map { ($0.element, $0.offset) })
+        let orderRank = flatShortcutsOrderRankByID()
+        return pinnedFeatureControlIDs.compactMap { byID[$0] }.sorted { lhs, rhs in
+            let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
+            let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            let lhsFallback = lhs.featureID.flatMap { fallbackRank[$0.rawValue] } ?? Int.max
+            let rhsFallback = rhs.featureID.flatMap { fallbackRank[$0.rawValue] } ?? Int.max
+            if lhsFallback != rhsFallback { return lhsFallback < rhsFallback }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
     }
 
     func featureControlRow(forShortcutEntry entry: ShortcutEntry) -> FeatureControlRow? {
@@ -3019,7 +3534,7 @@ final class AppModel: ObservableObject {
         lastErrorMessage = nil
     }
 
-    func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource) {
+    func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, appContext: String? = nil) {
         guard let row = featureControlRow(forID: featureID) else {
             lastErrorMessage = "Feature is no longer available."
             lastActionMessage = nil
@@ -3028,6 +3543,18 @@ final class AppModel: ObservableObject {
         if let disabledReason = row.disabledReason {
             lastErrorMessage = disabledReason
             lastActionMessage = nil
+            return
+        }
+        if featureID.rawValue == "app.keep-on-top-when-floating" {
+            let selectedApp = appContext?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let focusedApp = focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
+            let candidateApps = [selectedApp ?? "", focusedApp ?? ""]
+            guard let appName = candidateApps.first(where: { !$0.isEmpty }) else {
+                lastErrorMessage = "No app available to apply keep-on-top."
+                lastActionMessage = nil
+                return
+            }
+            toggleKeepFrontWhenFloating(for: appName)
             return
         }
         if let entry = row.shortcutEntry {
@@ -3217,35 +3744,27 @@ final class AppModel: ObservableObject {
         return externalYabaiAppBehaviorByName[key] ?? .useDefault
     }
 
-    func appBehaviorSourceNote(for appName: String) -> String? {
-        let key = normalizedAppRuleKey(appName)
-        if windowBehaviorPolicyDraft.neverTileApps.contains(where: { normalizedAppRuleKey($0) == key }) ||
-            windowBehaviorPolicyDraft.alwaysTileApps.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return nil
-        }
-        guard let behavior = externalYabaiAppBehaviorByName[key] else { return nil }
-        switch behavior {
-        case .neverTile:
-            return "Applied by an existing rule in your yabairc (outside TilePilot)."
-        case .alwaysTile:
-            return "Auto-tiling is forced by an existing rule in your yabairc (outside TilePilot)."
-        case .useDefault:
-            return nil
-        }
-    }
-
     func appForegroundPolicy(for appName: String) -> AppForegroundPolicy {
         let key = normalizedAppRuleKey(appName)
-        return appForegroundPolicyByName[key] ?? .useDefault
+        if let exact = appForegroundPolicyByName[key] {
+            return exact
+        }
+        if let legacy = appForegroundPolicyByName[legacyTruncatedAppRuleKey(for: key)] {
+            return legacy
+        }
+        return .useDefault
     }
 
     func setAppForegroundPolicy(_ policy: AppForegroundPolicy, for appName: String) {
         let key = normalizedAppRuleKey(appName)
         guard !key.isEmpty else { return }
+        let legacyKey = legacyTruncatedAppRuleKey(for: key)
         if policy == .useDefault {
             appForegroundPolicyByName.removeValue(forKey: key)
+            appForegroundPolicyByName.removeValue(forKey: legacyKey)
         } else {
             appForegroundPolicyByName[key] = policy
+            appForegroundPolicyByName.removeValue(forKey: legacyKey)
         }
         persistAppForegroundPolicies()
         let displayName = appName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3624,9 +4143,14 @@ final class AppModel: ObservableObject {
     private func normalizedAppRuleKey(_ appName: String) -> String {
         appName
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: #"[\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\u200E\u200F\u202A-\u202E\u2066-\u2069]"#, with: "", options: .regularExpression)
             .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
             .lowercased()
+    }
+
+    private func legacyTruncatedAppRuleKey(for normalizedKey: String) -> String {
+        guard normalizedKey.count > 1 else { return normalizedKey }
+        return String(normalizedKey.dropFirst())
     }
 
     private func parseExternalYabaiAppBehaviors(from fullContent: String) -> [String: AppTilingBehavior] {
@@ -3666,6 +4190,37 @@ final class AppModel: ObservableObject {
             }
         }
         return map
+    }
+
+    private func normalizeOverviewWindowPreview(_ window: WindowState, in display: DisplayState) -> OverviewWindowPreview? {
+        let displayW = max(display.frameW, 1)
+        let displayH = max(display.frameH, 1)
+
+        let x = (window.frameX - display.frameX) / displayW
+        let y = (window.frameY - display.frameY) / displayH
+        let w = window.frameW / displayW
+        let h = window.frameH / displayH
+
+        let left = max(0, min(1, x))
+        let top = max(0, min(1, y))
+        let right = max(0, min(1, x + w))
+        let bottom = max(0, min(1, y + h))
+
+        guard right > left, bottom > top else { return nil }
+
+        return OverviewWindowPreview(
+            id: window.id,
+            app: window.app,
+            title: window.title,
+            floating: window.floating,
+            runtimeManageable: window.isRuntimeManageable,
+            focused: window.focused,
+            visible: window.isVisible,
+            normalizedX: left,
+            normalizedY: top,
+            normalizedW: right - left,
+            normalizedH: bottom - top
+        )
     }
 
     private func parseAppPattern(fromRuleLine line: String) -> String? {
@@ -3816,6 +4371,7 @@ final class AppModel: ObservableObject {
         case manualFlagged
         case autoTransition
         case floatToggle
+        case autoEnforce
     }
 
     private func applyForegroundPolicyTransitions(previous: LiveStateSnapshot?, current: LiveStateSnapshot) async {
@@ -3834,6 +4390,13 @@ final class AppModel: ObservableObject {
         let newlyVisibleFlagged = currentTransition.visibleFlaggedFloatingWindowIDs.subtracting(previousTransition.visibleFlaggedFloatingWindowIDs)
         guard activeDesktopChanged || !newlyVisibleFlagged.isEmpty else { return }
         await bringFloatingWindowsToFrontCurrentDesktop(flaggedOnly: true, reason: .autoTransition, bypassCooldown: false)
+    }
+
+    private func enforceKeepOnTopPoliciesIfNeeded(for snapshot: LiveStateSnapshot) async {
+        guard snapshot.source == .yabai, !snapshot.degraded else { return }
+        let hasKeepOnTopPolicy = appForegroundPolicyByName.values.contains(.keepFrontWhenFloating)
+        guard hasKeepOnTopPolicy else { return }
+        await bringFloatingWindowsToFrontCurrentDesktop(flaggedOnly: true, reason: .autoEnforce, bypassCooldown: false)
     }
 
     private func foregroundTransitionSnapshot(from snapshot: LiveStateSnapshot?) -> (isEligible: Bool, activeSpace: Int?, visibleFlaggedFloatingWindowIDs: Set<Int>) {
@@ -3858,7 +4421,9 @@ final class AppModel: ObservableObject {
     ) -> [WindowState] {
         snapshot.windows.filter { window in
             guard window.floating else { return false }
-            guard window.isVisible && !window.isMinimized && !window.isHidden else { return false }
+            // Keep-on-top should also recover windows that are currently occluded.
+            // Exclude only hidden/minimized windows.
+            guard !window.isMinimized && !window.isHidden else { return false }
             guard window.isRuntimeManageable else { return false }
             if let activeSpace, window.space != activeSpace { return false }
             if flaggedOnly && appForegroundPolicy(for: window.app) != .keepFrontWhenFloating {
@@ -3910,10 +4475,14 @@ final class AppModel: ObservableObject {
 
         var raisedCount = 0
         for window in candidates {
+            // When SIP-based raise is unavailable, fallback focus may be required to effectively keep a
+            // window on top across apps. Guarded in raiseWindowOnly by active desktop matching.
+            let allowFocusFallback = true
             if await raiseWindowOnly(
                 windowID: window.id,
+                targetSpace: window.space,
                 bypassCooldown: bypassCooldown,
-                allowFocusFallback: reason == .manualAll || reason == .manualFlagged
+                allowFocusFallback: allowFocusFallback
             ) {
                 raisedCount += 1
             }
@@ -3928,13 +4497,14 @@ final class AppModel: ObservableObject {
             let desktopLabel = activeSpace.map { "Desktop \($0)" } ?? "current desktop"
             lastActionMessage = "Kept \(raisedCount) flagged floating window(s) on top on \(desktopLabel)."
             lastErrorMessage = nil
-        case .autoTransition, .floatToggle:
+        case .autoTransition, .floatToggle, .autoEnforce:
             break
         }
     }
 
     private func raiseWindowOnly(
         windowID: Int,
+        targetSpace: Int?,
         bypassCooldown: Bool = false,
         allowFocusFallback: Bool = false
     ) async -> Bool {
@@ -3952,7 +4522,17 @@ final class AppModel: ObservableObject {
             self.appendCommandLog(from: raise)
         }
         if !raise.isSuccess {
+            if raiseWindowUsingAccessibility(windowID: windowID) {
+                lastRaisedAtByWindowID[windowID] = now
+                return true
+            }
             guard allowFocusFallback, isScriptingAdditionRaiseFailure(raise) else {
+                return false
+            }
+            if let targetSpace,
+               let currentSpace = await queryCurrentFocusedSpaceIndex(),
+               currentSpace != targetSpace {
+                // Never steal focus to another desktop.
                 return false
             }
             let focus = await doctorService.runSupportCommand(
@@ -3969,8 +4549,54 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    private func raiseWindowUsingAccessibility(windowID: Int) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        guard let targetWindow = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else { return false }
+
+        let appElement = AXUIElementCreateApplication(pid_t(targetWindow.pid))
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty else {
+            return false
+        }
+
+        let selectedWindow: AXUIElement
+        if windows.count == 1 {
+            selectedWindow = windows[0]
+        } else {
+            let wantedTitle = targetWindow.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !wantedTitle.isEmpty,
+               let byTitle = windows.first(where: { axStringValue($0, kAXTitleAttribute as CFString) == wantedTitle }) {
+                selectedWindow = byTitle
+            } else if let focusedWindow = windows.first(where: { axBoolValue($0, kAXFocusedAttribute as CFString) == true }) {
+                selectedWindow = focusedWindow
+            } else {
+                selectedWindow = windows[0]
+            }
+        }
+
+        return AXUIElementPerformAction(selectedWindow, kAXRaiseAction as CFString) == .success
+    }
+
+    private func axStringValue(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        return value as? String
+    }
+
+    private func axBoolValue(_ element: AXUIElement, _ attribute: CFString) -> Bool? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        if let number = value as? NSNumber {
+            return number.boolValue
+        }
+        return nil
+    }
+
     private func bringWindowToFront(windowID: Int) async {
-        _ = await raiseWindowOnly(windowID: windowID, bypassCooldown: true, allowFocusFallback: true)
+        _ = await raiseWindowOnly(windowID: windowID, targetSpace: nil, bypassCooldown: true, allowFocusFallback: true)
 
         let focus = await doctorService.runSupportCommand(
             ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
@@ -3984,6 +4610,150 @@ final class AppModel: ObservableObject {
         let text = "\(result.stderr)\n\(result.stdout)".lowercased()
         return text.contains("scripting-addition")
             || text.contains("scripting addition")
+    }
+
+    private func isScriptingAdditionDesktopFocusFailure(_ result: CommandResult) -> Bool {
+        let text = "\(result.stderr)\n\(result.stdout)".lowercased()
+        return (text.contains("cannot focus space") && text.contains("scripting-addition"))
+            || (text.contains("cannot focus space") && text.contains("scripting addition"))
+    }
+
+    private func focusAnyWindowOnDesktop(index: Int) async -> Bool {
+        let query = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--windows", "--space", String(index)], timeout: 1.2)
+        )
+        await MainActor.run {
+            appendCommandLog(from: query)
+        }
+        guard query.isSuccess,
+              let data = query.stdout.data(using: .utf8),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              !rows.isEmpty else {
+            return false
+        }
+
+        // Prefer focusable windows that expose AX and movement hooks.
+        let sorted = rows.sorted { lhs, rhs in
+            let lhsAX = boolFromAny(lhs["has-ax-reference"]) == true
+            let rhsAX = boolFromAny(rhs["has-ax-reference"]) == true
+            if lhsAX != rhsAX { return lhsAX && !rhsAX }
+            let lhsMove = boolFromAny(lhs["can-move"]) == true
+            let rhsMove = boolFromAny(rhs["can-move"]) == true
+            if lhsMove != rhsMove { return lhsMove && !rhsMove }
+            let lhsID = intFromAny(lhs["id"]) ?? Int.max
+            let rhsID = intFromAny(rhs["id"]) ?? Int.max
+            return lhsID < rhsID
+        }
+
+        guard let targetID = sorted.compactMap({ intFromAny($0["id"]) }).first else {
+            return false
+        }
+
+        let focus = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(targetID)], timeout: 1.2)
+        )
+        await MainActor.run {
+            appendCommandLog(from: focus)
+        }
+        return focus.isSuccess
+    }
+
+    private func triggerMissionControlDesktopShortcut(index: Int) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        let binding = missionControlDesktopBinding(for: index)
+            ?? missionControlDefaultBinding(for: index)
+        guard let binding else { return false }
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: binding.keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: binding.keyCode, keyDown: false) else {
+            return false
+        }
+        keyDown.flags = binding.flags
+        keyUp.flags = binding.flags
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+        return true
+    }
+
+    private struct MissionControlDesktopBinding {
+        let keyCode: CGKeyCode
+        let flags: CGEventFlags
+    }
+
+    private func missionControlDesktopBinding(for desktopIndex: Int) -> MissionControlDesktopBinding? {
+        guard (1...16).contains(desktopIndex) else { return nil }
+        let actionID = String(117 + desktopIndex) // 118 = Desktop 1, 119 = Desktop 2, ...
+
+        guard let domain = UserDefaults.standard.persistentDomain(forName: "com.apple.symbolichotkeys"),
+              let allHotKeys = domain["AppleSymbolicHotKeys"] as? [String: Any],
+              let entry = allHotKeys[actionID] as? [String: Any] else {
+            return nil
+        }
+
+        guard boolFromAny(entry["enabled"]) == true else { return nil }
+        guard let value = entry["value"] as? [String: Any],
+              let parameters = value["parameters"] as? [Any],
+              parameters.count >= 3,
+              let keyCodeInt = intFromAny(parameters[1]),
+              let modifierInt = intFromAny(parameters[2]),
+              keyCodeInt >= 0 else {
+            return nil
+        }
+
+        return MissionControlDesktopBinding(
+            keyCode: CGKeyCode(keyCodeInt),
+            flags: CGEventFlags(rawValue: UInt64(modifierInt))
+        )
+    }
+
+    private func missionControlDefaultBinding(for desktopIndex: Int) -> MissionControlDesktopBinding? {
+        let keyCode: Int
+        switch desktopIndex {
+        case 1: keyCode = 18
+        case 2: keyCode = 19
+        case 3: keyCode = 20
+        case 4: keyCode = 21
+        case 5: keyCode = 23
+        case 6: keyCode = 22
+        case 7: keyCode = 26
+        case 8: keyCode = 28
+        case 9: keyCode = 25
+        case 10: keyCode = 29
+        default: return nil
+        }
+        return MissionControlDesktopBinding(
+            keyCode: CGKeyCode(keyCode),
+            flags: .maskControl
+        )
+    }
+
+    private func boolFromAny(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        return nil
+    }
+
+    private func intFromAny(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        return nil
+    }
+
+    private func queryCurrentFocusedSpaceIndex() async -> Int? {
+        let result = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--spaces", "--space"], timeout: 1.0)
+        )
+        await MainActor.run {
+            appendCommandLog(from: result)
+        }
+        guard result.isSuccess,
+              let data = result.stdout.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let index = object["index"] as? Int { return index }
+        if let number = object["index"] as? NSNumber { return number.intValue }
+        return nil
     }
 
     private func runtimeControllableWindow(windowID: Int) -> WindowState? {
@@ -4389,7 +5159,7 @@ final class AppModel: ObservableObject {
         }
         if c.contains("yabai -m space --focus"),
            let target = firstInteger(after: "--focus", in: c) {
-            return "Go to Desktop \(target)"
+            return "Jump to Desktop \(target)"
         }
         if c.contains("yabai -m window --focus west") { return "Focus Left" }
         if c.contains("yabai -m window --focus east") { return "Focus Right" }
@@ -4631,6 +5401,10 @@ final class AppModel: ObservableObject {
                 DisplayState(
                     id: Int(item.id) ?? (idx + 1),
                     name: item.name,
+                    frameX: 0,
+                    frameY: 0,
+                    frameW: 0,
+                    frameH: 0,
                     focused: false,
                     windowCount: item.windowCount,
                     source: .fallback,
@@ -4661,6 +5435,10 @@ final class AppModel: ObservableObject {
                     DisplayState(
                         id: $0.id,
                         name: $0.name,
+                        frameX: $0.frameX,
+                        frameY: $0.frameY,
+                        frameW: $0.frameW,
+                        frameH: $0.frameH,
                         focused: $0.focused,
                         windowCount: $0.windowCount,
                         source: .stale,

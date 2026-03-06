@@ -209,6 +209,19 @@ cat > "$INFO_PLIST" <<EOF
   <string>${APP_NAME}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLName</key>
+      <string>${BUNDLE_ID}.deeplink</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>tilepilot</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleShortVersionString</key>
   <string>0.2.1</string>
   <key>CFBundleVersion</key>

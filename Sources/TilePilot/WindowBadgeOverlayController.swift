@@ -164,10 +164,10 @@ final class WindowBadgeOverlayController {
         let widthFactor = min(1.35, max(0.9, screenWidth / 1800.0))
         let baseBadgeWidth: CGFloat = scale >= 2.0 ? 52 : 48
         let baseBadgeHeight: CGFloat = scale >= 2.0 ? 11 : 10
-        let badgeWidth: CGFloat = round(baseBadgeWidth * widthFactor)
-        let badgeHeight: CGFloat = round(baseBadgeHeight * widthFactor)
-        let topInset: CGFloat = 0
-        let leftInset: CGFloat = 2
+        let badgeWidth: CGFloat = round(baseBadgeWidth * widthFactor * 0.8)   // 20% narrower
+        let badgeHeight: CGFloat = round(baseBadgeHeight * widthFactor * 0.9) // 10% shorter
+        let topInset: CGFloat = -5 // move badge 5px higher
+        let leftInset: CGFloat = 12 // +10px right from previous position
 
         var x = targetWindowRect.minX + leftInset
         var y = targetWindowRect.maxY - badgeHeight - topInset

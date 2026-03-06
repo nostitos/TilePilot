@@ -3,7 +3,13 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class TilePilotWindowController: NSWindowController {
+final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
+    private enum PersistedWindowSizeKeys {
+        static let width = "TilePilot.mainWindow.width"
+        static let height = "TilePilot.mainWindow.height"
+        static let frameAutosaveName = "TilePilotMainWindow"
+    }
+
     init(model: AppModel) {
         let rootView = TilePilotRootView()
             .environmentObject(model)
@@ -15,11 +21,15 @@ final class TilePilotWindowController: NSWindowController {
         window.setContentSize(NSSize(width: 980, height: 680))
         window.minSize = NSSize(width: 760, height: 520)
         window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.moveToActiveSpace)
         window.center()
-        window.setFrameAutosaveName("TilePilotMainWindow")
+        _ = window.setFrameUsingName(PersistedWindowSizeKeys.frameAutosaveName)
+        Self.restorePersistedSize(for: window)
+        window.setFrameAutosaveName(PersistedWindowSizeKeys.frameAutosaveName)
 
         super.init(window: window)
         shouldCascadeWindows = true
+        window.delegate = self
     }
 
     @available(*, unavailable)
@@ -28,9 +38,48 @@ final class TilePilotWindowController: NSWindowController {
     }
 
     func showAndFocus() {
+        NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func persistCurrentWindowSize() {
+        guard let window else { return }
+        persist(size: window.frame.size)
+        window.saveFrame(usingName: PersistedWindowSizeKeys.frameAutosaveName)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        persistCurrentWindowSize()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        persistCurrentWindowSize()
+    }
+
+    private static func restorePersistedSize(for window: NSWindow) {
+        let defaults = UserDefaults.standard
+        let persistedWidth = CGFloat(defaults.double(forKey: PersistedWindowSizeKeys.width))
+        let persistedHeight = CGFloat(defaults.double(forKey: PersistedWindowSizeKeys.height))
+        guard persistedWidth > 0, persistedHeight > 0 else { return }
+
+        let minWidth = window.minSize.width
+        let minHeight = window.minSize.height
+        let maxFrame = NSScreen.main?.visibleFrame.size
+        let maxWidth = maxFrame?.width ?? persistedWidth
+        let maxHeight = maxFrame?.height ?? persistedHeight
+
+        let width = min(max(persistedWidth, minWidth), maxWidth)
+        let height = min(max(persistedHeight, minHeight), maxHeight)
+        var frame = window.frame
+        frame.size = NSSize(width: width, height: height)
+        window.setFrame(frame, display: false)
+    }
+
+    private func persist(size: NSSize) {
+        let defaults = UserDefaults.standard
+        defaults.set(size.width, forKey: PersistedWindowSizeKeys.width)
+        defaults.set(size.height, forKey: PersistedWindowSizeKeys.height)
     }
 }
 
@@ -38,12 +87,14 @@ final class TilePilotWindowController: NSWindowController {
 final class StatusBarController: NSObject {
     private let model: AppModel
     private let onOpenTilePilot: () -> Void
+    private let onQuit: () -> Void
     private let statusItem: NSStatusItem
     private var cancellables: Set<AnyCancellable> = []
 
-    init(model: AppModel, onOpenTilePilot: @escaping () -> Void) {
+    init(model: AppModel, onOpenTilePilot: @escaping () -> Void, onQuit: @escaping () -> Void) {
         self.model = model
         self.onOpenTilePilot = onOpenTilePilot
+        self.onQuit = onQuit
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusButton()
@@ -146,7 +197,6 @@ final class StatusBarController: NSObject {
         let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
         let hoverEnabled = model.windowBehaviorPolicyDraft.hoverFocusMode != .off
         let cursorFollowsFocus = model.windowBehaviorPolicyDraft.mouseFollowsFocusEnabled
-        let autoTileNewWindows = !model.windowBehaviorPolicyDraft.manualTilingModeEnabled
 
         let hoverFocusItem = item(
             runtimeEnabled ? "Hover Focus" : "Hover Focus (\(runtimeReason))",
@@ -164,55 +214,6 @@ final class StatusBarController: NSObject {
         cursorFollowsFocusItem.state = cursorFollowsFocus ? .on : .off
         menu.addItem(cursorFollowsFocusItem)
 
-        let autoTileItem = item(
-            runtimeEnabled ? "Auto-Tile New Windows" : "Auto-Tile New Windows (\(runtimeReason))",
-            action: #selector(toggleAutoTileNewWindows),
-            enabled: runtimeEnabled
-        )
-        autoTileItem.state = autoTileNewWindows ? .on : .off
-        menu.addItem(autoTileItem)
-
-        let raiseOnFloatItem = item(
-            runtimeEnabled ? "Raise On Float Toggle" : "Raise On Float Toggle (\(runtimeReason))",
-            action: #selector(toggleRaiseOnFloatToggle),
-            enabled: runtimeEnabled
-        )
-        raiseOnFloatItem.state = model.raiseOnFloatToggleEnabled ? .on : .off
-        menu.addItem(raiseOnFloatItem)
-
-        let focusedAppName = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
-        let focusedAppAvailable = focusedAppName?.isEmpty == false
-        let keepFocusedAppTitle: String
-        if let focusedAppName, !focusedAppName.isEmpty {
-            keepFocusedAppTitle = "Keep \(focusedAppName) on Top (When Floating)"
-        } else {
-            keepFocusedAppTitle = "Keep Focused App on Top (When Floating)"
-        }
-        let keepFocusedAppEnabled = runtimeEnabled && focusedAppAvailable
-        let keepFocusedAppItem = item(
-            keepFocusedAppEnabled ? keepFocusedAppTitle : "\(keepFocusedAppTitle) (\(runtimeEnabled ? "No focused app" : runtimeReason))",
-            action: #selector(toggleFocusedAppKeepFrontWhenFloating),
-            enabled: keepFocusedAppEnabled
-        )
-        if let focusedAppName, !focusedAppName.isEmpty {
-            keepFocusedAppItem.state = model.appForegroundPolicy(for: focusedAppName) == .keepFrontWhenFloating ? .on : .off
-        }
-        menu.addItem(keepFocusedAppItem)
-
-        let bringFloatingItem = item(
-            runtimeEnabled ? "Keep Floating Windows on Top" : "Keep Floating Windows on Top (\(runtimeReason))",
-            action: #selector(bringFloatingWindowsToFront),
-            enabled: runtimeEnabled
-        )
-        menu.addItem(bringFloatingItem)
-
-        let bringFlaggedFloatingItem = item(
-            runtimeEnabled ? "Keep Flagged Floating Windows on Top" : "Keep Flagged Floating Windows on Top (\(runtimeReason))",
-            action: #selector(bringFlaggedFloatingWindowsToFront),
-            enabled: runtimeEnabled
-        )
-        menu.addItem(bringFlaggedFloatingItem)
-
         let badgeItem = item("Window Badges", action: #selector(toggleWindowBadgeOverlay))
         badgeItem.state = model.showWindowBadgeOverlay ? .on : .off
         menu.addItem(badgeItem)
@@ -220,10 +221,6 @@ final class StatusBarController: NSObject {
         let outlineItem = item("Window Outline Overlay", action: #selector(toggleWindowOutlineOverlay))
         outlineItem.state = model.showWindowOutlineOverlay ? .on : .off
         menu.addItem(outlineItem)
-
-        let balanceItem = item("Align Tiles (Balance)", action: #selector(runQuickAction(_:)), enabled: balanceTilesQuickActionEnabled())
-        balanceItem.representedObject = TilePilotActionID.balanceSpace.rawValue
-        menu.addItem(balanceItem)
 
         menu.addItem(.separator())
         menu.addItem(item("Quit", action: #selector(quitApp)))
@@ -381,10 +378,6 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func balanceTilesQuickActionEnabled() -> Bool {
-        model.quickActionCards.first(where: { $0.id == .balanceSpace })?.enabled ?? false
-    }
-
     @objc private func openTilePilot() { onOpenTilePilot() }
 
     @objc private func runDoctor() {
@@ -424,40 +417,6 @@ final class StatusBarController: NSObject {
     @objc private func disableManualTilingMode() {
         model.acknowledgeInitialStatusIfNeeded()
         model.disableManualTilingMode()
-    }
-
-    @objc private func toggleAutoTileNewWindows() {
-        model.acknowledgeInitialStatusIfNeeded()
-        if model.windowBehaviorPolicyDraft.manualTilingModeEnabled {
-            model.disableManualTilingMode()
-        } else {
-            model.enableManualTilingMode()
-        }
-    }
-
-    @objc private func toggleRaiseOnFloatToggle() {
-        model.acknowledgeInitialStatusIfNeeded()
-        model.toggleRaiseOnFloatToggle()
-    }
-
-    @objc private func toggleFocusedAppKeepFrontWhenFloating() {
-        model.acknowledgeInitialStatusIfNeeded()
-        guard let appName = model.focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines), !appName.isEmpty else {
-            model.lastErrorMessage = "No focused app detected."
-            model.lastActionMessage = nil
-            return
-        }
-        model.toggleKeepFrontWhenFloating(for: appName)
-    }
-
-    @objc private func bringFloatingWindowsToFront() {
-        model.acknowledgeInitialStatusIfNeeded()
-        model.bringFloatingWindowsToFrontCurrentDesktop()
-    }
-
-    @objc private func bringFlaggedFloatingWindowsToFront() {
-        model.acknowledgeInitialStatusIfNeeded()
-        model.bringFlaggedFloatingWindowsToFrontCurrentDesktop()
     }
 
     @objc private func toggleWindowBadgeOverlay() {
@@ -500,12 +459,6 @@ final class StatusBarController: NSObject {
     @objc private func runSetupInstaller() {
         model.acknowledgeInitialStatusIfNeeded()
         model.runSetupInstallerInTerminal()
-    }
-
-    @objc private func runQuickAction(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let id = TilePilotActionID(rawValue: raw) else { return }
-        model.acknowledgeInitialStatusIfNeeded()
-        model.performTilePilotAction(id)
     }
 
     @objc private func runPinnedShortcut(_ sender: NSMenuItem) {
@@ -561,7 +514,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func quitApp() {
-        NSApplication.shared.terminate(nil)
+        onQuit()
     }
 
     private func menuBarBadgeLevel() -> HealthBadgeLevel? {
@@ -585,10 +538,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         tilePilotWindowController = TilePilotWindowController(model: model)
-        statusBarController = StatusBarController(model: model) { [weak self] in
-            self?.model.acknowledgeInitialStatusIfNeeded()
-            self?.tilePilotWindowController?.showAndFocus()
-        }
+        statusBarController = StatusBarController(
+            model: model,
+            onOpenTilePilot: { [weak self] in
+                self?.model.acknowledgeInitialStatusIfNeeded()
+                self?.tilePilotWindowController?.showAndFocus()
+            },
+            onQuit: { [weak self] in
+                self?.tilePilotWindowController?.persistCurrentWindowSize()
+                NSApplication.shared.terminate(nil)
+            }
+        )
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
 
         model.startIfNeeded()
@@ -618,7 +578,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            handleDeepLink(url)
+        }
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme?.lowercased() == "tilepilot" else { return }
+        let host = url.host?.lowercased() ?? ""
+        guard host == "feature" else { return }
+        let featureRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
+        guard !featureRaw.isEmpty else { return }
+
+        model.acknowledgeInitialStatusIfNeeded()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.model.refreshLiveState()
+            self.model.runFeatureControl(FeatureControlID(rawValue: featureRaw), source: .shortcutsUI)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        tilePilotWindowController?.persistCurrentWindowSize()
         windowBadgeOverlayController = nil
     }
 }

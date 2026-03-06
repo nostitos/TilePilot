@@ -22,11 +22,29 @@ TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical f
 ## Main UI Areas
 
 - `TilePilot` (main view): windows/desktops overview + focused window controls
-- `Window Behavior`: global default tiling mode, hover focus, app rules
+- `Behavior`: desktop tiling controls, app defaults/rules, focus & cursor controls
 - `Actions & Shortcuts`: unified controls list with shortcut learning + quick actions
 - `Config Files`: raw editing for `yabairc`, `skhdrc`, and referenced scripts
 - `System`: essentials checklist + direct fix actions
   - Advanced sections (collapsed by default): managed `skhdrc` editor, diagnostics logs
+
+## How Tiling Decisions Are Made
+
+TilePilot resolves behavior in this order:
+
+1. Desktop behavior (`Desktop Tiling: On/Off`)
+2. App behavior (`Always Tile` / `Never Tile` / `Default`)
+3. Window override (manual per-window toggle)
+
+Example:
+- If Desktop 3 has tiling `Off`, a window can still behave floating there even when its app is set to `Always Tile`.
+- Re-enable desktop tiling to make that app tile on that desktop.
+
+## Behavior Apply Model
+
+- Applies immediately (debounced): global default, hover focus, cursor-follows-focus, and per-app behavior picker.
+- Requires `Apply`: manual edits in `Never Tile Apps` and `Always Tile Apps` list editors.
+- The bottom apply bar only appears when list edits are pending.
 
 ## Install (Binary)
 

@@ -40,7 +40,7 @@ struct TilePilotRootView: View {
                 .tag(TilePilotTab.now)
 
             WindowBehaviorDashboardView()
-                .tabItem { Label("Window Behavior", systemImage: "hand.raised.square") }
+                .tabItem { Label("Behaviors", systemImage: "hand.raised.square") }
                 .tag(TilePilotTab.windowBehavior)
 
             UnifiedControlsDashboardView()
@@ -336,12 +336,12 @@ struct NowDashboardView: View {
 
     private var desktopPreviewUnavailableCard: some View {
         GroupBox {
-            Text("Desktop preview unavailable in fallback/degraded mode.")
+            Text("Desktop mini-map unavailable in fallback/degraded mode.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Desktop Preview", systemImage: "square.grid.3x3")
+            Label("Desktop Mini-map", systemImage: "square.grid.3x3")
         }
     }
 
@@ -391,7 +391,7 @@ struct NowDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Desktop Preview", systemImage: "square.grid.3x3")
+            Label("Desktop Mini-map", systemImage: "square.grid.3x3")
         }
     }
 
@@ -481,6 +481,7 @@ struct NowDashboardView: View {
                             } else {
                                 ForEach(displaySpaces) { space in
                                     VStack(alignment: .leading, spacing: 4) {
+                                        let spaceTilingOn = ((space.layout ?? "").lowercased() != "float")
                                         HStack {
                                             Button {
                                                 model.focusDesktop(index: space.index)
@@ -490,6 +491,7 @@ struct NowDashboardView: View {
                                             }
                                             .buttonStyle(.plain)
                                             .help("Switch to Desktop \(space.index).")
+                                            statusPill(spaceTilingOn ? "Tiling On" : "Tiling Off", color: spaceTilingOn ? .blue : .orange)
                                             Spacer()
                                             Text("Visible: \(visibleWindowCountBySpace[space.index] ?? 0) · Total: \(totalWindowCountBySpace[space.index] ?? 0)")
                                                 .font(.caption)
@@ -519,6 +521,7 @@ struct NowDashboardView: View {
                                             ForEach(spaceWindows) { window in
                                                 windowControlRow(
                                                     window: window,
+                                                    desktopTilingEnabled: spaceTilingOn,
                                                     runtimeEnabled: runtimeEnabled,
                                                     runtimeDisabledReason: runtimeDisabledReason
                                                 )
@@ -579,12 +582,20 @@ struct NowDashboardView: View {
 
     private func windowControlRow(
         window: WindowState,
+        desktopTilingEnabled: Bool?,
         runtimeEnabled: Bool,
         runtimeDisabledReason: String
     ) -> some View {
-        let defaultBehavior = defaultBehaviorBadge(for: window.app)
+        let defaultBehavior = defaultBehaviorBadge(for: window.app, desktopTilingEnabled: desktopTilingEnabled)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            AppNameWithIconView(appName: window.app)
+            OverviewWindowIconControl(
+                window: window,
+                runtimeEnabled: runtimeEnabled,
+                runtimeDisabledReason: runtimeDisabledReason
+            )
+                .font(.caption.weight(.semibold))
+
+            Text(window.app)
                 .font(.caption.weight(.semibold))
 
             Text(window.title.isEmpty ? "Untitled" : window.title)
@@ -603,6 +614,9 @@ struct NowDashboardView: View {
                 statusPill("Hidden", color: .secondary)
             } else if !window.isVisible {
                 statusPill("Not Visible", color: .secondary)
+            }
+            if desktopTilingEnabled == false {
+                statusPill("Floating (Desktop tiling off)", color: .orange)
             }
 
             Button {
@@ -668,18 +682,19 @@ struct NowDashboardView: View {
         .id("overview-window-\(window.id)")
     }
 
-    private func defaultBehaviorBadge(for appName: String) -> (text: String, color: Color, help: String) {
+    private func defaultBehaviorBadge(for appName: String, desktopTilingEnabled: Bool?) -> (text: String, color: Color, help: String) {
         let behavior = model.appTilingBehavior(for: appName)
+        let desktopNote = desktopTilingEnabled == false ? " Desktop tiling is currently off here." : ""
         switch behavior {
         case .neverTile:
-            return ("Default Float", .orange, "App rule says this app should stay floating by default.")
+            return ("Default Float", .orange, "App rule says this app should stay floating by default.\(desktopNote)")
         case .alwaysTile:
-            return ("Default Tiled", .green, "App rule says this app should be auto-tiled by default.")
+            return ("Default Tiled", .green, "App rule says this app should be auto-tiled by default.\(desktopNote)")
         case .useDefault:
             if model.windowBehaviorPolicyDraft.manualTilingModeEnabled {
-                return ("Default Float", .orange, "No app-specific rule. Global default is floating because Manual Tiling Mode is enabled.")
+                return ("Default Float", .orange, "No app-specific rule. Global default is floating because Manual Tiling Mode is enabled.\(desktopNote)")
             } else {
-                return ("Default Tiled", .green, "No app-specific rule. Global default is auto-tiled.")
+                return ("Default Tiled", .green, "No app-specific rule. Global default is auto-tiled.\(desktopNote)")
             }
         }
     }
@@ -741,6 +756,133 @@ struct NowDashboardView: View {
     }
 }
 
+private struct OverviewWindowIconControl: View {
+    @EnvironmentObject private var model: AppModel
+
+    let window: WindowState
+    let runtimeEnabled: Bool
+    let runtimeDisabledReason: String
+
+    @State private var isHovering = false
+
+    private var hoverTitle: String {
+        window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
+    }
+
+    private var iconSize: CGFloat {
+        isHovering ? 32 : 16
+    }
+
+    private var controlSize: CGFloat {
+        20
+    }
+
+    private var keepOnTopEnabledForApp: Bool {
+        model.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            iconView
+                .frame(width: iconSize, height: iconSize)
+                .clipShape(RoundedRectangle(cornerRadius: isHovering ? 6 : 4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: isHovering ? 6 : 4)
+                        .stroke(Color.primary.opacity(isHovering ? 0.2 : 0.0), lineWidth: 0.7)
+                )
+                .scaleEffect(isHovering ? 1.0 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+                .offset(
+                    x: isHovering ? -(iconSize - controlSize) / 2 : 0,
+                    y: isHovering ? -(iconSize - controlSize) / 2 : 0
+                )
+
+            if isHovering {
+                Text(hoverTitle)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 0.7)
+                    )
+                    .offset(x: 24, y: -2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+            }
+        }
+        .frame(width: controlSize, height: controlSize, alignment: .center)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .help("Hover to preview title. Right-click for window actions.")
+        .contextMenu {
+            Button("Focus Window") {
+                model.focusWindow(windowID: window.id)
+            }
+            .disabled(!runtimeEnabled)
+
+            Divider()
+
+            Button(window.floating ? "Set Tiled" : "Set Floating") {
+                model.toggleWindowFloating(windowID: window.id)
+            }
+            .disabled(!runtimeEnabled || !window.isRuntimeManageable)
+
+            Button("Set Floating") {
+                model.setWindowFloating(windowID: window.id, shouldFloat: true)
+            }
+            .disabled(!runtimeEnabled || !window.isRuntimeManageable || window.floating)
+
+            Button("Set Tiled") {
+                model.setWindowFloating(windowID: window.id, shouldFloat: false)
+            }
+            .disabled(!runtimeEnabled || !window.isRuntimeManageable || !window.floating)
+
+            Divider()
+
+            Button((keepOnTopEnabledForApp ? "Disable " : "Enable ") + "Keep \(window.app) on Top (When Floating)") {
+                model.toggleKeepFrontWhenFloating(for: window.app)
+            }
+
+            if !runtimeEnabled {
+                Divider()
+                Text("Unavailable: \(runtimeDisabledReason)")
+            } else if !window.isRuntimeManageable {
+                Divider()
+                Text("Limited: this window cannot be floated/tiled right now.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        if let icon = appIcon() {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+        } else {
+            Image(systemName: "app")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.secondary)
+                .padding(1)
+        }
+    }
+
+    private func appIcon() -> NSImage? {
+        guard let path = NSWorkspace.shared.fullPath(forApplication: window.app) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: iconSize, height: iconSize)
+        return icon
+    }
+}
+
 private struct OverviewDesktopPreviewCard: View {
     let desktop: OverviewDesktopPreview
     let displayAspectRatio: Double
@@ -751,17 +893,16 @@ private struct OverviewDesktopPreviewCard: View {
     @ObservedObject private var iconCache = OverviewMiniMapIconCache.shared
 
     var body: some View {
-        let visibleCount = desktop.windows.filter(\.visible).count
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Button {
                     onDesktopSelect(desktop.desktopIndex)
                 } label: {
-                    Text("Desktop \(desktop.desktopIndex)")
+                    Text("#\(desktop.desktopIndex)")
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.plain)
-                .help("Switch to Desktop \(desktop.desktopIndex).")
+                .help("Switch to Desktop #\(desktop.desktopIndex).")
                 if desktop.focused {
                     Text("Focused")
                         .font(.caption2.weight(.semibold))
@@ -778,9 +919,6 @@ private struct OverviewDesktopPreviewCard: View {
                         .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
                 Spacer(minLength: 0)
-                Text(visibleCount == desktop.windows.count ? "\(desktop.windows.count)" : "\(visibleCount)/\(desktop.windows.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
             }
 
             ZStack(alignment: .topLeading) {
@@ -813,51 +951,121 @@ private struct OverviewDesktopPreviewCard: View {
 }
 
 private struct OverviewMiniWindowTile: View {
+    @EnvironmentObject private var model: AppModel
+
     let window: OverviewWindowPreview
     let canvasSize: CGSize
     let icon: NSImage?
     let isSelected: Bool
     let onSelect: (Int) -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         let frame = normalizedFrame(in: canvasSize)
-        let iconSize = iconDimension(for: frame.size)
-        Button {
-            onSelect(window.id)
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.primary.opacity(window.visible ? 0.05 : 0.025))
-                if let icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: iconSize, height: iconSize)
-                        .opacity(window.visible ? 1 : 0.75)
-                } else {
-                    Image(systemName: "app")
-                        .font(.system(size: max(7, iconSize * 0.65), weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .opacity(window.visible ? 1 : 0.75)
+        let iconSize = displayedIconDimension(for: frame.size)
+        let iconInset: CGFloat = 3
+        let runtimeEnabled = model.canRunYabaiRuntimeCommands
+        let runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
+
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isSelected ? borderColor.opacity(0.08) : Color.clear)
+                .allowsHitTesting(false)
+
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(borderColor.opacity(window.visible ? 1 : 0.72), lineWidth: isSelected ? 2 : 1.2)
+                .allowsHitTesting(false)
+
+            if window.focused {
+                Circle()
+                    .fill(Color.blue)
+                    .frame(width: 5, height: 5)
+                    .padding(2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .allowsHitTesting(false)
+            }
+
+            Button {
+                onSelect(window.id)
+            } label: {
+                Group {
+                    if let icon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: "app")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: iconSize, height: iconSize)
+                .opacity(window.visible ? 1 : 0.75)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, iconInset)
+            .padding(.leading, iconInset)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovering = hovering
                 }
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(borderColor.opacity(window.visible ? 1 : 0.72), lineWidth: isSelected ? 2 : 1.2)
-            )
-            .overlay(alignment: .topTrailing) {
-                if window.focused {
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 5, height: 5)
-                        .padding(2)
+            .contextMenu {
+                Button("Focus Window") {
+                    model.focusWindow(windowID: window.id)
                 }
+                .disabled(!runtimeEnabled)
+
+                Divider()
+
+                Button(window.floating ? "Set Tiled" : "Set Floating") {
+                    model.toggleWindowFloating(windowID: window.id)
+                }
+                .disabled(!runtimeEnabled || !window.runtimeManageable)
+
+                Button("Set Floating") {
+                    model.setWindowFloating(windowID: window.id, shouldFloat: true)
+                }
+                .disabled(!runtimeEnabled || !window.runtimeManageable || window.floating)
+
+                Button("Set Tiled") {
+                    model.setWindowFloating(windowID: window.id, shouldFloat: false)
+                }
+                .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
+
+                if !runtimeEnabled {
+                    Divider()
+                    Text("Unavailable: \(runtimeDisabledReason)")
+                } else if !window.runtimeManageable {
+                    Divider()
+                    Text("Limited: this window cannot be floated/tiled right now.")
+                }
+            }
+
+            if isHovering {
+                Text(helpText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.primary.opacity(0.14), lineWidth: 0.7)
+                    )
+                    .offset(x: iconInset + iconSize + 6, y: -2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+                    .allowsHitTesting(false)
             }
         }
-        .buttonStyle(.plain)
-        .help(helpText)
-        .frame(width: frame.width, height: frame.height, alignment: .center)
+        .frame(width: frame.width, height: frame.height, alignment: .topLeading)
         .offset(x: frame.minX, y: frame.minY)
     }
 
@@ -866,9 +1074,14 @@ private struct OverviewMiniWindowTile: View {
         return window.floating ? .orange : .blue
     }
 
-    private func iconDimension(for size: CGSize) -> CGFloat {
-        let base = min(size.width, size.height) * 0.52
-        return max(8, min(18, base))
+    private func baseIconDimension(for size: CGSize) -> CGFloat {
+        let base = min(size.width, size.height) * 0.52 * 1.5
+        return max(12, min(27, base))
+    }
+
+    private func displayedIconDimension(for size: CGSize) -> CGFloat {
+        let normal = baseIconDimension(for: size)
+        return isHovering ? min(36, normal * 2) : normal
     }
 
     private func normalizedFrame(in canvasSize: CGSize) -> CGRect {
@@ -885,6 +1098,7 @@ private struct OverviewMiniWindowTile: View {
         let base = window.title.isEmpty ? window.app : "\(window.app) — \(window.title)"
         return window.visible ? base : "\(base) (not currently visible)"
     }
+
 }
 
 @MainActor
@@ -921,6 +1135,8 @@ struct WindowBehaviorDashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    precedenceCard
+                    desktopBehaviorCard
                     defaultBehaviorCard
                     appRulesCard
                     pointerFocusCard
@@ -931,16 +1147,128 @@ struct WindowBehaviorDashboardView: View {
             }
             .navigationTitle("TilePilot")
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 0) {
-                    Divider()
-                    applyBar
-                        .padding(.horizontal)
-                        .padding(.top, 10)
-                        .padding(.bottom, 10)
+                if model.isAppRuleListApplyRequired {
+                    VStack(spacing: 0) {
+                        Divider()
+                        applyBar
+                            .padding(.horizontal)
+                            .padding(.top, 10)
+                            .padding(.bottom, 10)
+                    }
+                    .background(.ultraThinMaterial)
                 }
-                .background(.ultraThinMaterial)
             }
             .task { await model.refreshWindowBehaviorConfig() }
+        }
+    }
+
+    private var precedenceCard: some View {
+        GroupBox {
+            Text("Tiling decisions run in order: Desktop behavior -> App behavior -> Window override.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Behavior Order", systemImage: "arrow.triangle.branch")
+        }
+    }
+
+    private var desktopBehaviorCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Choose whether each desktop auto-tiles windows.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("On = tiled layout · Off = floating layout")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if let snapshot = model.liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded {
+                    let displayByID = Dictionary(uniqueKeysWithValues: snapshot.displays.map { ($0.id, $0.name) })
+                    let spaces = snapshot.spaces.sorted { lhs, rhs in
+                        if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                        return lhs.index < rhs.index
+                    }
+                    ForEach(spaces, id: \.index) { space in
+                        let enabled = model.desktopTilingEnabled(spaceIndex: space.index) ?? (((space.layout ?? "").lowercased()) != "float")
+                        let disabledReason = model.desktopTilingDisabledReason(spaceIndex: space.index)
+                        let displayName = displayByID[space.displayId] ?? "Display \(space.displayId)"
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                (
+                                    Text("Desktop \(space.index) · \(displayName)") +
+                                    (space.focused
+                                     ? Text(" (current)").foregroundColor(.blue)
+                                     : Text(""))
+                                )
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            }
+                            .frame(width: 330, alignment: .leading)
+                            Picker("", selection: Binding(
+                                get: { model.desktopTilingEnabled(spaceIndex: space.index) ?? enabled },
+                                set: { model.setDesktopTilingEnabled(spaceIndex: space.index, enabled: $0) }
+                            )) {
+                                Text("On").tag(true)
+                                Text("Off").tag(false)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 120)
+                            .disabled(disabledReason != nil)
+                            Spacer(minLength: 0)
+                        }
+                        if let disabledReason {
+                            Text(disabledReason)
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    let allDisabledReason = spaces.compactMap { model.desktopTilingDisabledReason(spaceIndex: $0.index) }.first
+                    let allEnabled = spaces.allSatisfy { space in
+                        model.desktopTilingEnabled(spaceIndex: space.index) ?? (((space.layout ?? "").lowercased()) != "float")
+                    }
+                    let anyEnabled = spaces.contains { space in
+                        model.desktopTilingEnabled(spaceIndex: space.index) ?? (((space.layout ?? "").lowercased()) != "float")
+                    }
+
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("All Desktops")
+                                .font(.subheadline.weight(.semibold))
+                            if anyEnabled && !allEnabled {
+                                Text("Mixed state")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 330, alignment: .leading)
+                        Picker("", selection: Binding(
+                            get: { allEnabled },
+                            set: { model.setAllDesktopTilingEnabled(enabled: $0) }
+                        )) {
+                            Text("On").tag(true)
+                            Text("Off").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 120)
+                        .disabled(allDisabledReason != nil)
+                        Spacer(minLength: 0)
+                    }
+                    if let allDisabledReason {
+                        Text(allDisabledReason)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Desktop tiling controls are available when yabai live desktop mapping is active.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Desktop Auto-Tiling", systemImage: "rectangle.3.group")
         }
     }
 
@@ -962,11 +1290,9 @@ struct WindowBehaviorDashboardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Toggle("Raise window when switching to Floating", isOn: Binding(
-                    get: { model.raiseOnFloatToggleEnabled },
-                    set: { model.setRaiseOnFloatToggleEnabled($0) }
-                ))
-                .toggleStyle(.switch)
+                Text("When a window is switched to Floating, TilePilot brings it to the front.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
                     Label("Quick toggle focused window", systemImage: "keyboard")
@@ -980,19 +1306,29 @@ struct WindowBehaviorDashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                if let autosaveError = model.windowBehaviorAutosaveErrorMessage {
+                    Text(autosaveError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                } else if let autosaveMessage = model.windowBehaviorAutosaveActionMessage {
+                    Text(autosaveMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Default Window Behavior", systemImage: "square.grid.3x3.topleft.filled")
+            Label("App Defaults", systemImage: "square.grid.3x3.topleft.filled")
         }
     }
 
     private var pointerFocusCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("These settings control how focus changes and whether the cursor moves automatically.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("These settings control how focus changes and whether the cursor moves automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                 Picker("Focus On Hover", selection: Binding(
                     get: { model.windowBehaviorPolicyDraft.hoverFocusMode },
@@ -1026,7 +1362,7 @@ struct WindowBehaviorDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Focus Behavior", systemImage: "cursorarrow.motionlines")
+            Label("Focus & Cursor", systemImage: "cursorarrow.motionlines")
         }
     }
 
@@ -1036,23 +1372,26 @@ struct WindowBehaviorDashboardView: View {
                 Text("Saved app behaviors are listed here and persist even when those apps are not currently open.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("Always Tile works when desktop tiling is On.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
 
                 listEditor(
                     title: "Never Tile Apps",
-                    items: model.windowBehaviorPolicyDraft.neverTileApps,
+                    items: model.stagedNeverTileApps,
                     newValue: $newNeverTileApp,
-                    addAction: { model.addNeverTileApp(newNeverTileApp); newNeverTileApp = "" },
-                    removeAction: { model.removeNeverTileApp($0) }
+                    addAction: { model.addStagedNeverTileApp(newNeverTileApp); newNeverTileApp = "" },
+                    removeAction: { model.removeStagedNeverTileApp($0) }
                 )
 
                 Divider()
 
                 listEditor(
                     title: "Always Tile Apps",
-                    items: model.windowBehaviorPolicyDraft.alwaysTileApps,
+                    items: model.stagedAlwaysTileApps,
                     newValue: $newAlwaysTileApp,
-                    addAction: { model.addAlwaysTileApp(newAlwaysTileApp); newAlwaysTileApp = "" },
-                    removeAction: { model.removeAlwaysTileApp($0) }
+                    addAction: { model.addStagedAlwaysTileApp(newAlwaysTileApp); newAlwaysTileApp = "" },
+                    removeAction: { model.removeStagedAlwaysTileApp($0) }
                 )
 
                 if !model.availableAppNamesFromLiveState.isEmpty {
@@ -1077,20 +1416,20 @@ struct WindowBehaviorDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("App Rules", systemImage: "list.bullet.clipboard")
+            Label("App Behavior", systemImage: "list.bullet.clipboard")
         }
     }
 
     private var applyBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button("Apply Changes") { model.saveWindowBehaviorPolicy() }
+                Button("Apply App Rule List Changes") { model.applyStagedAppRuleListChanges() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isSavingYabaiConfig || model.isRestoringYabaiConfig)
-                Button("Revert Draft") { model.resetWindowBehaviorDraft() }
-                    .disabled(!model.isWindowBehaviorDraftDirty)
+                    .disabled(model.isSavingYabaiConfig || model.isRestoringYabaiConfig || model.isApplyingStagedAppRules)
+                Button("Discard List Changes") { model.discardStagedAppRuleListChanges() }
+                    .disabled(model.isSavingYabaiConfig || model.isApplyingStagedAppRules)
                 Spacer()
-                if model.isSavingYabaiConfig || model.isRestoringYabaiConfig || model.isRefreshingYabaiConfig {
+                if model.isApplyingStagedAppRules || model.isSavingYabaiConfig || model.isRestoringYabaiConfig || model.isRefreshingYabaiConfig {
                     ProgressView().controlSize(.small)
                 }
             }
@@ -1246,6 +1585,20 @@ struct CurrentAppsBehaviorListView: View {
                         .pickerStyle(.menu)
                         .frame(width: 190)
                         Spacer(minLength: 0)
+                    }
+                    if model.appTilingBehavior(for: app) == .alwaysTile,
+                       let conflictDesktop = model.alwaysTileConflictDesktopIndex(for: app) {
+                        HStack(spacing: 8) {
+                            Label("Desktop tiling is Off on Desktop \(conflictDesktop).", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                            Button("Enable Desktop \(conflictDesktop) Tiling") {
+                                model.setDesktopTilingEnabled(spaceIndex: conflictDesktop, enabled: true)
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption2.weight(.semibold))
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
                 .padding(.vertical, 2)
@@ -1416,6 +1769,9 @@ struct ActionsDashboardView: View {
 struct ShortcutsDashboardView: View {
     @EnvironmentObject private var model: AppModel
     private let shortcutDescriptionColumnWidth: CGFloat = 410
+    private let shortcutComboColumnWidth: CGFloat = 220
+    private let shortcutRecordColumnWidth: CGFloat = 170
+    private let shortcutActionsColumnWidth: CGFloat = 96
     @State private var searchText = ""
     @State private var showDesktopMoveAdvanced = false
     @State private var isReordering = false
@@ -1424,6 +1780,10 @@ struct ShortcutsDashboardView: View {
     @State private var reorderDraftIDs: [String] = []
     @State private var reorderBaseItems: [ShortcutsDisplayItem] = []
     @State private var rowFramesByID: [String: CGRect] = [:]
+    @State private var recordingFeatureID: FeatureControlID?
+    @State private var recordingShortcutStableKey: String?
+    @State private var shortcutRecordMonitor: Any?
+    @State private var shortcutGlobalRecordMonitor: Any?
 
     var body: some View {
         NavigationStack {
@@ -1474,6 +1834,9 @@ struct ShortcutsDashboardView: View {
                 reorderBaseItems = model.flatShortcutsItems(query: "")
                 syncReorderDraft()
                 reorderInsertionIndex = nil
+            }
+            .onDisappear {
+                stopShortcutRecording()
             }
         }
     }
@@ -1921,10 +2284,18 @@ struct ShortcutsDashboardView: View {
             .layoutPriority(5)
 
             comboSummaryView(for: entry)
-                .frame(minWidth: 220, idealWidth: 260, maxWidth: 320, alignment: .leading)
+                .frame(width: shortcutComboColumnWidth, alignment: .leading)
                 .layoutPriority(8)
 
-            Spacer(minLength: 2)
+            Group {
+                if let featureID {
+                    shortcutRecordControl(for: featureID)
+                } else {
+                    shortcutRecordControl(for: entry)
+                }
+            }
+            .frame(width: shortcutRecordColumnWidth, alignment: .leading)
+            .layoutPriority(3)
 
             HStack(spacing: 4) {
                 Button("Test") {
@@ -1943,7 +2314,10 @@ struct ShortcutsDashboardView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
             }
-            .layoutPriority(-1)
+            .frame(width: shortcutActionsColumnWidth, alignment: .trailing)
+            .layoutPriority(2)
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -1995,6 +2369,30 @@ struct ShortcutsDashboardView: View {
             .frame(width: shortcutDescriptionColumnWidth, alignment: .leading)
             .layoutPriority(5)
 
+            if let entry = row.shortcutEntry {
+                comboSummaryView(for: entry)
+                    .frame(width: shortcutComboColumnWidth, alignment: .leading)
+                    .layoutPriority(8)
+            } else {
+                Text("—")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: shortcutComboColumnWidth, alignment: .leading)
+                    .layoutPriority(8)
+            }
+
+            Group {
+                if let featureID = row.featureID, row.preferredCommand != nil {
+                    shortcutRecordControl(for: featureID)
+                } else if let entry = row.shortcutEntry {
+                    shortcutRecordControl(for: entry)
+                } else {
+                    Color.clear.frame(height: 1)
+                }
+            }
+            .frame(width: shortcutRecordColumnWidth, alignment: .leading)
+            .layoutPriority(3)
+
             HStack(spacing: 4) {
                 Button("Test") {
                     if let featureID = row.featureID {
@@ -2009,16 +2407,7 @@ struct ShortcutsDashboardView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
 
-                if let featureID = row.featureID, row.shortcutEntry == nil {
-                    if let defaultCombo = row.defaultCombo {
-                        Button("Set Shortcut") {
-                            model.assignShortcut(combo: defaultCombo, to: featureID)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
-                        .font(.system(size: 12, weight: .semibold))
-                    }
-                } else if let entry = row.shortcutEntry {
+                if let entry = row.shortcutEntry {
                     Button("Edit") {
                         model.openShortcutSource(entry)
                     }
@@ -2028,7 +2417,10 @@ struct ShortcutsDashboardView: View {
                     .lineLimit(1)
                 }
             }
-            .layoutPriority(-1)
+            .frame(width: shortcutActionsColumnWidth, alignment: .trailing)
+            .layoutPriority(2)
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -2039,15 +2431,285 @@ struct ShortcutsDashboardView: View {
     }
 
     @ViewBuilder
-    private func comboSummaryView(for entry: ShortcutEntry) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(model.displayShortcutComboWords(entry))
+    private func shortcutRecordControl(for featureID: FeatureControlID) -> some View {
+        if recordingFeatureID == featureID {
+            HStack(spacing: 4) {
+                Button("Type Shortcut") {
+                    stopShortcutRecording()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
                 .font(.system(size: 12, weight: .semibold))
+
+                Button {
+                    stopShortcutRecording()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Cancel recording")
+            }
+        } else if model.featureControlRow(forID: featureID)?.shortcutEntry != nil {
+            HStack(spacing: 4) {
+                Button {
+                    model.removeShortcut(for: featureID)
+                } label: {
+                    Text("Clear")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Clear shortcut")
+
+                Button("Record Shortcut") {
+                    beginShortcutRecording(for: featureID)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .font(.system(size: 12, weight: .semibold))
+            }
+        } else {
+            Button("Record Shortcut") {
+                beginShortcutRecording(for: featureID)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    private func beginShortcutRecording(for featureID: FeatureControlID) {
+        stopShortcutRecording()
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.keyWindow?.makeKeyAndOrderFront(nil)
+        recordingFeatureID = featureID
+        recordingShortcutStableKey = nil
+        shortcutRecordMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            guard recordingFeatureID == featureID else { return event }
+            let consumed = handleRecordedShortcutEvent(event, for: featureID)
+            return consumed ? nil : event
+        }
+        shortcutGlobalRecordMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+            Task { @MainActor in
+                guard recordingFeatureID == featureID else { return }
+                _ = handleRecordedShortcutEvent(event, for: featureID)
+            }
+        }
+    }
+
+    private func beginShortcutRecording(for entry: ShortcutEntry) {
+        stopShortcutRecording()
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.keyWindow?.makeKeyAndOrderFront(nil)
+        recordingFeatureID = nil
+        recordingShortcutStableKey = entry.stableKey
+        shortcutRecordMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            guard recordingShortcutStableKey == entry.stableKey else { return event }
+            let consumed = handleRecordedShortcutEvent(event, for: entry)
+            return consumed ? nil : event
+        }
+        shortcutGlobalRecordMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+            Task { @MainActor in
+                guard recordingShortcutStableKey == entry.stableKey else { return }
+                _ = handleRecordedShortcutEvent(event, for: entry)
+            }
+        }
+    }
+
+    private func stopShortcutRecording() {
+        if let monitor = shortcutRecordMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = shortcutGlobalRecordMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        shortcutRecordMonitor = nil
+        shortcutGlobalRecordMonitor = nil
+        recordingFeatureID = nil
+        recordingShortcutStableKey = nil
+    }
+
+    private func handleRecordedShortcutEvent(_ event: NSEvent, for featureID: FeatureControlID) -> Bool {
+        if event.keyCode == 53 { // escape
+            stopShortcutRecording()
+            return true
+        }
+
+        guard let combo = recordedShortcutCombo(from: event) else {
+            return false
+        }
+        model.assignShortcut(combo: combo, to: featureID)
+        stopShortcutRecording()
+        return true
+    }
+
+    private func handleRecordedShortcutEvent(_ event: NSEvent, for entry: ShortcutEntry) -> Bool {
+        if event.keyCode == 53 { // escape
+            stopShortcutRecording()
+            return true
+        }
+
+        guard let combo = recordedShortcutCombo(from: event) else {
+            return false
+        }
+        model.assignShortcut(combo: combo, to: entry)
+        stopShortcutRecording()
+        return true
+    }
+
+    @ViewBuilder
+    private func shortcutRecordControl(for entry: ShortcutEntry) -> some View {
+        if recordingShortcutStableKey == entry.stableKey {
+            HStack(spacing: 4) {
+                Button("Type Shortcut") {
+                    stopShortcutRecording()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .font(.system(size: 12, weight: .semibold))
+
+                Button {
+                    stopShortcutRecording()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Cancel recording")
+            }
+        } else {
+            Button("Record Shortcut") {
+                beginShortcutRecording(for: entry)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    private func recordedShortcutCombo(from event: NSEvent) -> String? {
+        guard let keyToken = skhdKeyToken(for: event.keyCode) ?? fallbackKeyToken(from: event) else { return nil }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        var modifiers: [String] = []
+        if flags.contains(.control) { modifiers.append("ctrl") }
+        if flags.contains(.shift) { modifiers.append("shift") }
+        if flags.contains(.option) { modifiers.append("alt") }
+        if flags.contains(.command) { modifiers.append("cmd") }
+        if flags.contains(.function) { modifiers.append("fn") }
+
+        if modifiers.isEmpty {
+            return keyToken
+        }
+        return "\(modifiers.joined(separator: " + ")) - \(keyToken)"
+    }
+
+    private func fallbackKeyToken(from event: NSEvent) -> String? {
+        guard let raw = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if raw.count == 1, let scalar = raw.unicodeScalars.first {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                return raw.lowercased()
+            }
+            switch raw {
+            case "`", "~": return "0x32"
+            case "=": return "="
+            case "-": return "-"
+            case "[": return "["
+            case "]": return "]"
+            case ";": return ";"
+            case "'": return "'"
+            case "\\": return "\\"
+            case ",": return ","
+            case ".": return "."
+            case "/": return "/"
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    private func skhdKeyToken(for keyCode: UInt16) -> String? {
+        switch keyCode {
+        case 0: return "a"
+        case 1: return "s"
+        case 2: return "d"
+        case 3: return "f"
+        case 4: return "h"
+        case 5: return "g"
+        case 6: return "z"
+        case 7: return "x"
+        case 8: return "c"
+        case 9: return "v"
+        case 11: return "b"
+        case 12: return "q"
+        case 13: return "w"
+        case 14: return "e"
+        case 15: return "r"
+        case 16: return "y"
+        case 17: return "t"
+        case 18: return "1"
+        case 19: return "2"
+        case 20: return "3"
+        case 21: return "4"
+        case 22: return "6"
+        case 23: return "5"
+        case 24: return "="
+        case 25: return "9"
+        case 26: return "7"
+        case 27: return "-"
+        case 28: return "8"
+        case 29: return "0"
+        case 30: return "]"
+        case 31: return "o"
+        case 32: return "u"
+        case 33: return "["
+        case 34: return "i"
+        case 35: return "p"
+        case 36: return "return"
+        case 37: return "l"
+        case 38: return "j"
+        case 39: return "'"
+        case 40: return "k"
+        case 41: return ";"
+        case 42: return "\\"
+        case 43: return ","
+        case 44: return "/"
+        case 45: return "n"
+        case 46: return "m"
+        case 47: return "."
+        case 48: return "tab"
+        case 49: return "space"
+        case 50: return "0x32"
+        case 51: return "backspace"
+        case 52: return "enter"
+        case 53: return "escape"
+        case 55, 54, 56, 60, 58, 61, 59, 62, 63:
+            return nil
+        case 123: return "left"
+        case 124: return "right"
+        case 125: return "down"
+        case 126: return "up"
+        default:
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private func comboSummaryView(for entry: ShortcutEntry) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(model.displayShortcutComboSymbolsSpaced(entry))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.86)
 
-            shortcutSymbolCaps(for: entry, glyphSize: 14, highlighted: true)
+            Text(model.displayShortcutComboWords(entry))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 

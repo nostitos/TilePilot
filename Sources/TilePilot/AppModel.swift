@@ -128,13 +128,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSavingYabaiConfig = false
     @Published private(set) var isRestoringYabaiConfig = false
     @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default
-    @Published var raiseOnFloatToggleEnabled: Bool = {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: AppModel.raiseOnFloatToggleDefaultsKey) == nil {
-            return true
-        }
-        return defaults.bool(forKey: AppModel.raiseOnFloatToggleDefaultsKey)
-    }()
+    @Published private(set) var windowBehaviorAutosaveActionMessage: String?
+    @Published private(set) var windowBehaviorAutosaveErrorMessage: String?
+    @Published var stagedNeverTileApps: [String] = []
+    @Published var stagedAlwaysTileApps: [String] = []
+    @Published private(set) var isApplyingStagedAppRules = false
+    @Published var raiseOnFloatToggleEnabled: Bool = true
     @Published private(set) var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName()
     @Published var showWindowBadgeOverlay: Bool = {
         let defaults = UserDefaults.standard
@@ -178,6 +177,12 @@ final class AppModel: ObservableObject {
     private let raiseCooldownSeconds: TimeInterval = 1.2
     private let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
     private var hasAttemptedReleaseDefaultsInitialization = false
+    private var windowBehaviorAutoSaveTask: Task<Void, Never>?
+    private let windowBehaviorAutoSaveDelayNanoseconds: UInt64 = 400_000_000
+    private var hasInitializedStagedAppRuleLists = false
+    private var keepOnTopOcclusionActiveByWindowID: [Int: Bool] = [:]
+    private var lastKeepOnTopAutoAttemptAtByWindowID: [Int: Date] = [:]
+    private let keepOnTopAutoRetrySeconds: TimeInterval = 2.0
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
@@ -250,6 +255,8 @@ final class AppModel: ObservableObject {
         statePollingTask = nil
         keepOnTopEnforcementTask?.cancel()
         keepOnTopEnforcementTask = nil
+        windowBehaviorAutoSaveTask?.cancel()
+        windowBehaviorAutoSaveTask = nil
     }
 
     func refreshDoctor() async {
@@ -449,7 +456,7 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
         showWindowOutlineOverlay = state.showWindowOutlineOverlay
         UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
-        raiseOnFloatToggleEnabled = state.raiseOnFloatToggleEnabled
+        raiseOnFloatToggleEnabled = true
         UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
 
         appForegroundPolicyByName = state.appForegroundPolicyByName
@@ -610,17 +617,37 @@ final class AppModel: ObservableObject {
     }
 
     func resetWindowBehaviorDraft() {
+        windowBehaviorAutoSaveTask?.cancel()
+        windowBehaviorAutoSaveTask = nil
         windowBehaviorPolicyDraft = originalWindowBehaviorPolicy
+        syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
         recomputeYabaiConfigDiffPreview()
         lastActionMessage = "Reverted Window Behavior draft."
         lastErrorMessage = nil
     }
 
     func saveWindowBehaviorPolicy() {
+        saveWindowBehaviorPolicy(reason: .manual)
+    }
+
+    private enum WindowBehaviorSaveReason {
+        case manual
+        case autosave
+    }
+
+    private func saveWindowBehaviorPolicy(reason: WindowBehaviorSaveReason) {
         guard !isSavingYabaiConfig else { return }
+        guard isWindowBehaviorDraftDirty else {
+            if isApplyingStagedAppRules {
+                isApplyingStagedAppRules = false
+                syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
+            }
+            return
+        }
         isSavingYabaiConfig = true
         let draft = windowBehaviorPolicyDraft
         let previousPolicy = originalWindowBehaviorPolicy
+        let wasApplyingStagedRules = isApplyingStagedAppRules
 
         Task { [weak self] in
             guard let self else { return }
@@ -630,14 +657,37 @@ final class AppModel: ObservableObject {
                 let reloaded = try await self.yabaiRulesConfigService.loadConfigDocument()
                 await MainActor.run {
                     self.applyYabaiConfigDocumentState(reloaded, preserveDraftIfDirty: false)
-                    self.lastActionMessage = "Window behavior saved to yabairc."
+                    if wasApplyingStagedRules {
+                        self.lastActionMessage = "App rule list changes applied."
+                        self.windowBehaviorAutosaveActionMessage = nil
+                        self.windowBehaviorAutosaveErrorMessage = nil
+                    } else if reason == .manual {
+                        self.lastActionMessage = "Window behavior saved to yabairc."
+                        self.windowBehaviorAutosaveActionMessage = nil
+                        self.windowBehaviorAutosaveErrorMessage = nil
+                    } else {
+                        self.lastActionMessage = nil
+                        self.windowBehaviorAutosaveActionMessage = "Behavior changes saved."
+                        self.windowBehaviorAutosaveErrorMessage = nil
+                    }
                     self.lastErrorMessage = nil
+                    if wasApplyingStagedRules {
+                        self.isApplyingStagedAppRules = false
+                        self.syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
+                    }
                 }
                 await self.applyWindowBehaviorRuntime(previous: previousPolicy, current: draft)
             } catch {
                 await MainActor.run {
                     self.lastErrorMessage = "Saving yabairc settings failed: \(error.localizedDescription)"
                     self.lastActionMessage = nil
+                    if reason == .autosave, !wasApplyingStagedRules {
+                        self.windowBehaviorAutosaveErrorMessage = "Could not save behavior changes. Try again."
+                        self.windowBehaviorAutosaveActionMessage = nil
+                    }
+                    if wasApplyingStagedRules {
+                        self.isApplyingStagedAppRules = false
+                    }
                 }
             }
         }
@@ -694,16 +744,19 @@ final class AppModel: ObservableObject {
     func updateManualTilingModeDraft(_ enabled: Bool) {
         windowBehaviorPolicyDraft.manualTilingModeEnabled = enabled
         recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "manual-tiling")
     }
 
     func updateHoverFocusModeDraft(_ mode: HoverFocusMode) {
         windowBehaviorPolicyDraft.hoverFocusMode = mode
         recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "hover-focus")
     }
 
     func updateMouseFollowsFocusDraft(_ enabled: Bool) {
         windowBehaviorPolicyDraft.mouseFollowsFocusEnabled = enabled
         recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "mouse-follows-focus")
     }
 
     func disableHoverFocus() {
@@ -716,6 +769,44 @@ final class AppModel: ObservableObject {
         windowBehaviorPolicyDraft.mouseFollowsFocusEnabled = false
         recomputeYabaiConfigDiffPreview()
         saveWindowBehaviorPolicy()
+    }
+
+    func addStagedNeverTileApp(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        stagedAlwaysTileApps = removeAppName(trimmed, from: stagedAlwaysTileApps)
+        stagedNeverTileApps = addingAppName(trimmed, to: stagedNeverTileApps)
+    }
+
+    func removeStagedNeverTileApp(_ name: String) {
+        stagedNeverTileApps = removeAppName(name, from: stagedNeverTileApps)
+    }
+
+    func addStagedAlwaysTileApp(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        stagedNeverTileApps = removeAppName(trimmed, from: stagedNeverTileApps)
+        stagedAlwaysTileApps = addingAppName(trimmed, to: stagedAlwaysTileApps)
+    }
+
+    func removeStagedAlwaysTileApp(_ name: String) {
+        stagedAlwaysTileApps = removeAppName(name, from: stagedAlwaysTileApps)
+    }
+
+    func discardStagedAppRuleListChanges() {
+        syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
+        lastActionMessage = "Discarded app rule list edits."
+        lastErrorMessage = nil
+    }
+
+    func applyStagedAppRuleListChanges() {
+        guard isAppRuleListApplyRequired else { return }
+        guard !isSavingYabaiConfig else { return }
+        isApplyingStagedAppRules = true
+        windowBehaviorPolicyDraft.neverTileApps = canonicalizeAppRuleList(stagedNeverTileApps)
+        windowBehaviorPolicyDraft.alwaysTileApps = canonicalizeAppRuleList(stagedAlwaysTileApps)
+        recomputeYabaiConfigDiffPreview()
+        saveWindowBehaviorPolicy(reason: .manual)
     }
 
     func toggleWindowBadgeOverlay() {
@@ -731,21 +822,6 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
         refreshWindowBadges()
         lastActionMessage = showWindowOutlineOverlay ? "Window outline overlay enabled." : "Window outline overlay disabled."
-        lastErrorMessage = nil
-    }
-
-    func toggleRaiseOnFloatToggle() {
-        raiseOnFloatToggleEnabled.toggle()
-        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
-        lastActionMessage = raiseOnFloatToggleEnabled ? "Raise on float toggle enabled." : "Raise on float toggle disabled."
-        lastErrorMessage = nil
-    }
-
-    func setRaiseOnFloatToggleEnabled(_ enabled: Bool) {
-        guard raiseOnFloatToggleEnabled != enabled else { return }
-        raiseOnFloatToggleEnabled = enabled
-        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
-        lastActionMessage = raiseOnFloatToggleEnabled ? "Raise on float toggle enabled." : "Raise on float toggle disabled."
         lastErrorMessage = nil
     }
 
@@ -853,6 +929,112 @@ final class AppModel: ObservableObject {
                 self.lastErrorMessage = "Could not switch to Desktop \(index)."
                 self.lastActionMessage = nil
             }
+        }
+    }
+
+    func desktopTilingEnabled(spaceIndex: Int) -> Bool? {
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else { return nil }
+        guard let layout = snapshot.spaces.first(where: { $0.index == spaceIndex })?.layout?.lowercased() else { return nil }
+        if layout == "float" { return false }
+        if layout == "bsp" || layout == "stack" { return true }
+        return nil
+    }
+
+    func desktopTilingDisabledReason(spaceIndex: Int) -> String? {
+        guard canRunYabaiRuntimeCommands else {
+            return yabaiRuntimeControlDisabledReason ?? "Desktop controls are unavailable."
+        }
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
+            return "Desktop layout data is unavailable right now."
+        }
+        guard snapshot.spaces.contains(where: { $0.index == spaceIndex }) else {
+            return "Desktop \(spaceIndex) is not currently available."
+        }
+        return nil
+    }
+
+    func setDesktopTilingEnabled(spaceIndex: Int, enabled: Bool) {
+        if let reason = desktopTilingDisabledReason(spaceIndex: spaceIndex) {
+            lastErrorMessage = reason
+            lastActionMessage = nil
+            return
+        }
+        if let current = desktopTilingEnabled(spaceIndex: spaceIndex), current == enabled {
+            lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling is already on." : "Desktop \(spaceIndex) tiling is already off."
+            lastErrorMessage = nil
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let targetLayout = enabled ? "bsp" : "float"
+            let result = await self.doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
+            )
+            await MainActor.run {
+                self.appendCommandLog(from: result)
+                if result.isSuccess {
+                    self.lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling enabled." : "Desktop \(spaceIndex) tiling disabled."
+                    self.lastErrorMessage = nil
+                } else {
+                    self.lastErrorMessage = enabled
+                        ? "Failed to enable tiling on Desktop \(spaceIndex)."
+                        : "Failed to disable tiling on Desktop \(spaceIndex)."
+                    self.lastActionMessage = nil
+                }
+            }
+            guard result.isSuccess else { return }
+            await self.refreshLiveState()
+            await self.refreshDoctor()
+        }
+    }
+
+    func setAllDesktopTilingEnabled(enabled: Bool) {
+        guard canRunYabaiRuntimeCommands else {
+            lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Desktop controls are unavailable."
+            lastActionMessage = nil
+            return
+        }
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
+            lastErrorMessage = "Desktop layout data is unavailable right now."
+            lastActionMessage = nil
+            return
+        }
+        let targetSpaces = snapshot.spaces.map(\.index).sorted()
+        guard !targetSpaces.isEmpty else {
+            lastErrorMessage = "No desktops available."
+            lastActionMessage = nil
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let targetLayout = enabled ? "bsp" : "float"
+            var successCount = 0
+            for spaceIndex in targetSpaces {
+                let result = await self.doctorService.runSupportCommand(
+                    ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
+                )
+                await MainActor.run {
+                    self.appendCommandLog(from: result)
+                }
+                if result.isSuccess {
+                    successCount += 1
+                }
+            }
+            await MainActor.run {
+                if successCount == targetSpaces.count {
+                    self.lastActionMessage = enabled ? "Enabled tiling on all desktops." : "Disabled tiling on all desktops."
+                    self.lastErrorMessage = nil
+                } else {
+                    self.lastActionMessage = enabled
+                        ? "Enabled tiling on \(successCount)/\(targetSpaces.count) desktops."
+                        : "Disabled tiling on \(successCount)/\(targetSpaces.count) desktops."
+                    self.lastErrorMessage = "Some desktops could not be updated."
+                }
+            }
+            await self.refreshLiveState()
+            await self.refreshDoctor()
         }
     }
 
@@ -1657,6 +1839,17 @@ final class AppModel: ObservableObject {
 
     private func shortcutExplanation(combo: String, command: String, category: String) -> String {
         let c = command.lowercased()
+        let normalized = normalizedFeatureMatchCommand(c)
+
+        if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
+            return "One-time action: raises all floating windows on the current desktop."
+        }
+        if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
+            return "Toggles keep-on-top for the focused app when floating."
+        }
+        if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
+            return "Brings TilePilot to the front."
+        }
 
         if c.contains("grid-tiling-floating.sh") {
             return "Applies grid tiling on the current desktop and keeps those windows floating."
@@ -2011,8 +2204,8 @@ final class AppModel: ObservableObject {
 
     func restartSkhdBestEffort() {
         runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0),
-            successMessage: "Requested skhd service restart."
+            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0),
+            successMessage: "Requested skhd config reload."
         )
     }
 
@@ -2457,6 +2650,14 @@ final class AppModel: ObservableObject {
         windowBehaviorPolicyDraft != originalWindowBehaviorPolicy
     }
 
+    var isAppRuleListApplyRequired: Bool {
+        let stagedNeverKeys = Set(stagedNeverTileApps.map(normalizedAppRuleKey))
+        let stagedAlwaysKeys = Set(stagedAlwaysTileApps.map(normalizedAppRuleKey))
+        let savedNeverKeys = Set(windowBehaviorPolicyDraft.neverTileApps.map(normalizedAppRuleKey))
+        let savedAlwaysKeys = Set(windowBehaviorPolicyDraft.alwaysTileApps.map(normalizedAppRuleKey))
+        return stagedNeverKeys != savedNeverKeys || stagedAlwaysKeys != savedAlwaysKeys
+    }
+
     var availableAppNamesFromLiveState: [String] {
         let names = Set((liveStateSnapshot?.windows ?? []).map(\.app).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
         return names.sorted()
@@ -2466,6 +2667,8 @@ final class AppModel: ObservableObject {
         let names = Set(availableAppNamesFromLiveState)
             .union(windowBehaviorPolicyDraft.neverTileApps)
             .union(windowBehaviorPolicyDraft.alwaysTileApps)
+            .union(stagedNeverTileApps)
+            .union(stagedAlwaysTileApps)
         return names.sorted()
     }
 
@@ -2826,6 +3029,14 @@ final class AppModel: ObservableObject {
         let isExperimental: Bool
     }
 
+    private func tilePilotFeatureURL(_ featureID: FeatureControlID) -> String {
+        "tilepilot://feature/\(featureID.rawValue)"
+    }
+
+    private func tilePilotFeatureCommand(_ featureID: FeatureControlID) -> String {
+        "/usr/bin/open -g \"\(tilePilotFeatureURL(featureID))\""
+    }
+
     private var featureDefinitions: [FeatureDefinition] {
         [
             FeatureDefinition(
@@ -2853,6 +3064,51 @@ final class AppModel: ObservableObject {
                 commandMatchers: ["/.config/yabai/scripts/enable-tiling-all-visible.sh"],
                 matchAllCommandMatchers: false,
                 preferredCommand: "~/.config/yabai/scripts/enable-tiling-all-visible.sh",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.bring-floating-front",
+                group: .tilingLayout,
+                title: "Bring Floating Windows to Front",
+                description: "One-time action: raises all floating windows on the current desktop.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: [
+                    tilePilotFeatureURL("screen.bring-floating-front"),
+                    "tilepilot:/feature/screen.bring-floating-front",
+                ],
+                matchAllCommandMatchers: false,
+                preferredCommand: "/usr/bin/open -g \"tilepilot://feature/screen.bring-floating-front\"",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.current-desktop-tiling-on",
+                group: .tilingLayout,
+                title: "Current Desktop → Tiling On",
+                description: "Turns tiling on for the current desktop.",
+                backend: .shortcutCommand,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: ["yabai -m space --layout bsp"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m space --layout bsp",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "screen.current-desktop-tiling-off",
+                group: .tilingLayout,
+                title: "Current Desktop → Tiling Off",
+                description: "Turns tiling off for the current desktop (floating layout).",
+                backend: .shortcutCommand,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: ["yabai -m space --layout float"],
+                matchAllCommandMatchers: false,
+                preferredCommand: "yabai -m space --layout float",
                 actionID: nil,
                 isExperimental: false
             ),
@@ -2916,7 +3172,7 @@ final class AppModel: ObservableObject {
                 id: "action.layout-stack",
                 group: .tilingLayout,
                 title: "Stack Layout",
-                description: "Sets the current desktop to stack layout.",
+                description: "Sets stack layout on the current desktop.",
                 backend: .tilePilotAction,
                 capabilityGate: .yabaiRuntime,
                 defaultCombo: "shift + alt - v",
@@ -2930,7 +3186,7 @@ final class AppModel: ObservableObject {
                 id: "screen.rotate-layout",
                 group: .tilingLayout,
                 title: "Rotate Layout",
-                description: "Rotates the current desktop layout by 90 degrees.",
+                description: "Rotates layout by 90 degrees on the current desktop.",
                 backend: .shortcutCommand,
                 capabilityGate: .yabaiRuntime,
                 defaultCombo: "shift + alt - r",
@@ -2943,7 +3199,7 @@ final class AppModel: ObservableObject {
             FeatureDefinition(
                 id: "action.toggle-float",
                 group: .tilingLayout,
-                title: "Toggle Floating/Tiled",
+                title: "This Window → Toggle Floating/Tiled",
                 description: "Toggles the focused window between floating and tiled.",
                 backend: .tilePilotAction,
                 capabilityGate: .yabaiRuntime,
@@ -2955,6 +3211,24 @@ final class AppModel: ObservableObject {
                 isExperimental: false
             ),
             FeatureDefinition(
+                id: "app.open-tilepilot",
+                group: .apps,
+                title: "Open TilePilot",
+                description: "Brings TilePilot to the front so you can access the mini-map fast.",
+                backend: .shortcutCommand,
+                capabilityGate: .none,
+                defaultCombo: "ctrl + shift + alt - return",
+                commandMatchers: [
+                    "open -a tilepilot",
+                    "open -a \"tilepilot\"",
+                    "/contents/macos/tilepilot",
+                ],
+                matchAllCommandMatchers: false,
+                preferredCommand: "/usr/bin/open -a \"TilePilot\"",
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
                 id: "app.keep-on-top-when-floating",
                 group: .apps,
                 title: "Keep App on Top (When Floating)",
@@ -2962,9 +3236,9 @@ final class AppModel: ObservableObject {
                 backend: .tilePilotAction,
                 capabilityGate: .yabaiRuntime,
                 defaultCombo: nil,
-                commandMatchers: [],
+                commandMatchers: [tilePilotFeatureURL("app.keep-on-top-when-floating")],
                 matchAllCommandMatchers: false,
-                preferredCommand: nil,
+                preferredCommand: tilePilotFeatureCommand("app.keep-on-top-when-floating"),
                 actionID: nil,
                 isExperimental: false
             ),
@@ -3028,7 +3302,7 @@ final class AppModel: ObservableObject {
     }
 
     private func featureDefinition(for entry: ShortcutEntry) -> FeatureDefinition? {
-        let command = entry.command.lowercased()
+        let command = normalizedFeatureMatchCommand(entry.command.lowercased())
         return featureDefinitions.first { definition in
             guard !definition.commandMatchers.isEmpty else { return false }
             if definition.matchAllCommandMatchers {
@@ -3036,6 +3310,17 @@ final class AppModel: ObservableObject {
             }
             return definition.commandMatchers.contains(where: { command.contains($0) })
         }
+    }
+
+    private func normalizedFeatureMatchCommand(_ raw: String) -> String {
+        var command = raw
+            .replacingOccurrences(of: #"^\s*/usr/bin/env\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s*env\s+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        command = command.replacingOccurrences(of: #"/usr/bin/open"#, with: "open", options: .regularExpression)
+        command = command.replacingOccurrences(of: "tilepilot:/feature/", with: "tilepilot://feature/")
+        command = command.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return command
     }
 
     private func featureDefinition(forActionID actionID: TilePilotActionID) -> FeatureDefinition? {
@@ -3144,9 +3429,12 @@ final class AppModel: ObservableObject {
             switch featureID.rawValue {
             case "screen.set-floating-all-visible": return 10
             case "screen.set-tiled-all-visible": return 20
+            case "screen.bring-floating-front": return 25
             case "screen.grid-floating": return 30
             case "screen.grid-auto-tiled": return 40
             case "screen.balance-current-desktop": return 50
+            case "screen.current-desktop-tiling-on": return 55
+            case "screen.current-desktop-tiling-off": return 56
             case "screen.layout-bsp-balance": return 60
             case "action.layout-stack": return 70
             case "screen.rotate-layout": return 80
@@ -3158,6 +3446,8 @@ final class AppModel: ObservableObject {
         let title = row.title.lowercased()
         if command.contains("yabai -m space --rotate") || title.contains("rotate layout") { return 80 }
         if command.contains("yabai -m space --layout stack") || title.contains("stack layout") { return 70 }
+        if command.contains("yabai -m space --layout float") || title.contains("desktop → tiling off") { return 56 }
+        if command.contains("yabai -m space --layout bsp"), !command.contains("space --balance") { return 55 }
         if command.contains("yabai -m space --layout bsp") || title.contains("tile layout + balance") { return 60 }
         if command.contains("yabai -m space --balance") || title.contains("balance tiles") { return 50 }
         return 500
@@ -3557,6 +3847,10 @@ final class AppModel: ObservableObject {
             toggleKeepFrontWhenFloating(for: appName)
             return
         }
+        if featureID.rawValue == "screen.bring-floating-front" {
+            bringFloatingWindowsToFrontCurrentDesktop()
+            return
+        }
         if let entry = row.shortcutEntry {
             runShortcut(entry)
             return
@@ -3606,6 +3900,61 @@ final class AppModel: ObservableObject {
         let command = NSString(string: preferredCommand).expandingTildeInPath
         upsertManagedFeatureShortcut(featureID: featureID, combo: combo, command: command)
         saveManagedConfigSection()
+    }
+
+    func assignShortcut(combo: String, to entry: ShortcutEntry) {
+        let normalizedTarget = normalizedShortcutCombo(combo)
+        guard !normalizedTarget.isEmpty else {
+            lastErrorMessage = "Shortcut cannot be empty."
+            lastActionMessage = nil
+            return
+        }
+
+        if let conflict = shortcutEntries.first(where: {
+            normalizedShortcutCombo($0.combo) == normalizedTarget && $0.stableKey != entry.stableKey
+        }) {
+            let conflictName = featureDefinition(for: conflict)?.title ?? shortcutTitle(conflict)
+            let suggestions = suggestShortcutAlternatives(for: combo)
+            let suggestionText = suggestions.isEmpty ? "" : " Try: \(suggestions.joined(separator: ", "))."
+            lastErrorMessage = "Shortcut already used by \(conflictName).\(suggestionText)"
+            lastActionMessage = nil
+            return
+        }
+
+        let expandedPath = NSString(string: entry.sourceFile).expandingTildeInPath
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let document = try await self.configFilesService.loadDocument(path: expandedPath)
+                var lines = document.content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+                let lineIndex = max(0, entry.sourceLine - 1)
+                guard lineIndex < lines.count else {
+                    await MainActor.run {
+                        self.lastErrorMessage = "Could not update shortcut: source line \(entry.sourceLine) is out of range."
+                        self.lastActionMessage = nil
+                    }
+                    return
+                }
+
+                let commandPart = self.shortcutCommandSegment(from: lines[lineIndex], fallback: entry.command)
+                lines[lineIndex] = "\(combo) : \(commandPart)"
+                var rewritten = lines.joined(separator: "\n")
+                if document.content.hasSuffix("\n") {
+                    rewritten += "\n"
+                }
+                _ = try await self.configFilesService.saveFile(path: expandedPath, content: rewritten)
+                await MainActor.run {
+                    self.lastActionMessage = "Shortcut updated for \(self.shortcutTitle(entry))."
+                    self.lastErrorMessage = nil
+                }
+                await self.refreshShortcuts()
+            } catch {
+                await MainActor.run {
+                    self.lastErrorMessage = "Failed to update shortcut: \(error.localizedDescription)"
+                    self.lastActionMessage = nil
+                }
+            }
+        }
     }
 
     func removeShortcut(for featureID: FeatureControlID) {
@@ -3658,6 +4007,12 @@ final class AppModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func shortcutCommandSegment(from line: String, fallback: String) -> String {
+        guard let colonIndex = line.firstIndex(of: ":") else { return fallback }
+        let raw = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+        return raw.isEmpty ? fallback : raw
+    }
+
     private func upsertManagedFeatureShortcut(featureID: FeatureControlID, combo: String, command: String) {
         let marker = managedFeatureMarkerPrefix + featureID.rawValue
         let shortcutLine = "\(combo) : \(command)"
@@ -3702,35 +4057,19 @@ final class AppModel: ObservableObject {
     }
 
     func addNeverTileApp(_ name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if !windowBehaviorPolicyDraft.neverTileApps.contains(trimmed) {
-            windowBehaviorPolicyDraft.neverTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.neverTileApps.sort()
-        }
-        windowBehaviorPolicyDraft.alwaysTileApps.removeAll { $0 == trimmed }
-        recomputeYabaiConfigDiffPreview()
+        addStagedNeverTileApp(name)
     }
 
     func removeNeverTileApp(_ name: String) {
-        windowBehaviorPolicyDraft.neverTileApps.removeAll { $0 == name }
-        recomputeYabaiConfigDiffPreview()
+        removeStagedNeverTileApp(name)
     }
 
     func addAlwaysTileApp(_ name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if !windowBehaviorPolicyDraft.alwaysTileApps.contains(trimmed) {
-            windowBehaviorPolicyDraft.alwaysTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.alwaysTileApps.sort()
-        }
-        windowBehaviorPolicyDraft.neverTileApps.removeAll { $0 == trimmed }
-        recomputeYabaiConfigDiffPreview()
+        addStagedAlwaysTileApp(name)
     }
 
     func removeAlwaysTileApp(_ name: String) {
-        windowBehaviorPolicyDraft.alwaysTileApps.removeAll { $0 == name }
-        recomputeYabaiConfigDiffPreview()
+        removeStagedAlwaysTileApp(name)
     }
 
     func appTilingBehavior(for appName: String) -> AppTilingBehavior {
@@ -3785,24 +4124,29 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func setAppTilingBehavior(_ behavior: AppTilingBehavior, for appName: String) {
+    func setAppTilingBehavior(_ behavior: AppTilingBehavior, for appName: String, autosave: Bool = true) {
         let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let key = normalizedAppRuleKey(trimmed)
+        guard !key.isEmpty else { return }
 
-        windowBehaviorPolicyDraft.neverTileApps.removeAll { $0 == trimmed }
-        windowBehaviorPolicyDraft.alwaysTileApps.removeAll { $0 == trimmed }
+        windowBehaviorPolicyDraft.neverTileApps = windowBehaviorPolicyDraft.neverTileApps.filter { normalizedAppRuleKey($0) != key }
+        windowBehaviorPolicyDraft.alwaysTileApps = windowBehaviorPolicyDraft.alwaysTileApps.filter { normalizedAppRuleKey($0) != key }
 
         switch behavior {
         case .useDefault:
             break
         case .neverTile:
             windowBehaviorPolicyDraft.neverTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.neverTileApps = Array(Set(windowBehaviorPolicyDraft.neverTileApps)).sorted()
+            windowBehaviorPolicyDraft.neverTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.neverTileApps)
         case .alwaysTile:
             windowBehaviorPolicyDraft.alwaysTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.alwaysTileApps = Array(Set(windowBehaviorPolicyDraft.alwaysTileApps)).sorted()
+            windowBehaviorPolicyDraft.alwaysTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.alwaysTileApps)
         }
         recomputeYabaiConfigDiffPreview()
+        if autosave {
+            scheduleDebouncedWindowBehaviorSave(reason: "app-behavior")
+        }
     }
 
     func toggleAppDefaultTilingBehavior(for appName: String) {
@@ -3820,8 +4164,16 @@ final class AppModel: ObservableObject {
             // Toggle against current global default shown in Overview.
             next = windowBehaviorPolicyDraft.manualTilingModeEnabled ? .alwaysTile : .neverTile
         }
-        setAppTilingBehavior(next, for: trimmed)
+        setAppTilingBehavior(next, for: trimmed, autosave: false)
         saveWindowBehaviorPolicy()
+    }
+
+    func alwaysTileConflictDesktopIndex(for appName: String) -> Int? {
+        guard appTilingBehavior(for: appName) == .alwaysTile else { return nil }
+        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else { return nil }
+        guard let activeSpace = activeSpaceIndex(in: snapshot) else { return nil }
+        guard desktopTilingEnabled(spaceIndex: activeSpace) == false else { return nil }
+        return activeSpace
     }
 
     var isManagedConfigDraftDirty: Bool {
@@ -4117,6 +4469,7 @@ final class AppModel: ObservableObject {
         if !(preserveDraftIfDirty && wasDirty) {
             windowBehaviorPolicyDraft = state.policy
         }
+        syncStagedAppRuleListsFromDraft(preservePendingChanges: true)
         recomputeYabaiConfigDiffPreview()
     }
 
@@ -4133,6 +4486,69 @@ final class AppModel: ObservableObject {
             original: originalYabaiManagedConfigSection,
             proposed: proposed
         )
+    }
+
+    private func scheduleDebouncedWindowBehaviorSave(reason _: String) {
+        windowBehaviorAutoSaveTask?.cancel()
+        windowBehaviorAutoSaveTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.windowBehaviorAutoSaveDelayNanoseconds)
+            } catch {
+                return
+            }
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard self.isWindowBehaviorDraftDirty else { return }
+                if self.isSavingYabaiConfig || self.isRestoringYabaiConfig {
+                    self.scheduleDebouncedWindowBehaviorSave(reason: "retry-after-busy")
+                    return
+                }
+                self.saveWindowBehaviorPolicy(reason: .autosave)
+            }
+        }
+    }
+
+    private func syncStagedAppRuleListsFromDraft(preservePendingChanges: Bool) {
+        let shouldPreserve = preservePendingChanges && hasInitializedStagedAppRuleLists && isAppRuleListApplyRequired
+        guard !shouldPreserve else { return }
+        stagedNeverTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.neverTileApps)
+        stagedAlwaysTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.alwaysTileApps)
+        hasInitializedStagedAppRuleLists = true
+    }
+
+    private func canonicalizeAppRuleList(_ values: [String]) -> [String] {
+        var byNormalizedKey: [String: String] = [:]
+        for raw in values {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = normalizedAppRuleKey(trimmed)
+            guard !key.isEmpty else { continue }
+            if byNormalizedKey[key] == nil {
+                byNormalizedKey[key] = trimmed
+            }
+        }
+        return byNormalizedKey.values.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private func addingAppName(_ name: String, to values: [String]) -> [String] {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return canonicalizeAppRuleList(values) }
+        let key = normalizedAppRuleKey(trimmed)
+        guard !key.isEmpty else { return canonicalizeAppRuleList(values) }
+        if values.contains(where: { normalizedAppRuleKey($0) == key }) {
+            return canonicalizeAppRuleList(values)
+        }
+        return canonicalizeAppRuleList(values + [trimmed])
+    }
+
+    private func removeAppName(_ name: String, from values: [String]) -> [String] {
+        let key = normalizedAppRuleKey(name)
+        guard !key.isEmpty else { return canonicalizeAppRuleList(values) }
+        let filtered = values.filter { normalizedAppRuleKey($0) != key }
+        return canonicalizeAppRuleList(filtered)
     }
 
     private func persistAppForegroundPolicies() {
@@ -4326,22 +4742,37 @@ final class AppModel: ObservableObject {
         if !allNeverTiled.isEmpty {
             await floatOpenWindowsForApps(allNeverTiled)
         }
+        let alwaysTileConflict = firstAlwaysTileDesktopConflict(for: Set(current.alwaysTileApps))
 
         await MainActor.run {
+            let baseMessage: String?
             if current.manualTilingModeEnabled {
                 if !ruleApplyFailed && !configApplyFailed {
-                    self.lastActionMessage = "Manual Tiling Mode enabled. Existing windows stay as-is; new windows should stop auto-tiling."
-                    self.lastErrorMessage = nil
+                    baseMessage = "Manual Tiling Mode enabled. Existing windows stay as-is; new windows should stop auto-tiling."
                 } else if self.lastErrorMessage == nil {
                     self.lastErrorMessage = "Saved settings, but some live yabai rules did not apply. Restart yabai if behavior looks wrong."
+                    baseMessage = nil
+                } else {
+                    baseMessage = nil
                 }
             } else {
                 if !ruleApplyFailed && !configApplyFailed {
-                    self.lastActionMessage = "Window behavior updated."
-                    self.lastErrorMessage = nil
+                    baseMessage = "Window behavior updated."
                 } else if self.lastErrorMessage == nil {
                     self.lastErrorMessage = "Saved settings, but some runtime updates did not apply. Restart yabai if behavior looks wrong."
+                    baseMessage = nil
+                } else {
+                    baseMessage = nil
                 }
+            }
+
+            if let baseMessage {
+                if let conflict = alwaysTileConflict {
+                    self.lastActionMessage = "\(baseMessage) Desktop tiling is off on Desktop \(conflict.desktop); enable it to tile \(conflict.app) there."
+                } else {
+                    self.lastActionMessage = baseMessage
+                }
+                self.lastErrorMessage = nil
             }
         }
         await refreshLiveState()
@@ -4364,6 +4795,22 @@ final class AppModel: ObservableObject {
                 await bringWindowToFront(windowID: window.id)
             }
         }
+    }
+
+    private func firstAlwaysTileDesktopConflict(for appNames: Set<String>) -> (app: String, desktop: Int)? {
+        let names = Set(appNames.map { normalizedAppRuleKey($0) }.filter { !$0.isEmpty })
+        guard !names.isEmpty else { return nil }
+        guard let snapshot = liveStateSnapshot else { return nil }
+
+        for window in snapshot.windows where !window.isHidden && !window.isMinimized {
+            let appKey = normalizedAppRuleKey(window.app)
+            guard names.contains(appKey) else { continue }
+            guard let layout = snapshot.spaces.first(where: { $0.index == window.space })?.layout?.lowercased() else { continue }
+            if layout == "float" {
+                return (app: window.app, desktop: window.space)
+            }
+        }
+        return nil
     }
 
     private enum FloatingBringReason {
@@ -4417,14 +4864,17 @@ final class AppModel: ObservableObject {
     private func candidateFloatingWindows(
         in snapshot: LiveStateSnapshot,
         activeSpace: Int?,
-        flaggedOnly: Bool
+        flaggedOnly: Bool,
+        requireRuntimeManageable: Bool = true
     ) -> [WindowState] {
         snapshot.windows.filter { window in
             guard window.floating else { return false }
             // Keep-on-top should also recover windows that are currently occluded.
             // Exclude only hidden/minimized windows.
             guard !window.isMinimized && !window.isHidden else { return false }
-            guard window.isRuntimeManageable else { return false }
+            if requireRuntimeManageable {
+                guard window.isRuntimeManageable else { return false }
+            }
             if let activeSpace, window.space != activeSpace { return false }
             if flaggedOnly && appForegroundPolicy(for: window.app) != .keepFrontWhenFloating {
                 return false
@@ -4437,6 +4887,18 @@ final class AppModel: ObservableObject {
             if lhsArea != rhsArea { return lhsArea > rhsArea }
             return lhs.id < rhs.id
         }
+    }
+
+    private func raiseWindowUsingAccessibilityOnly(windowID: Int, bypassCooldown: Bool) -> Bool {
+        let now = Date()
+        if !bypassCooldown,
+           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
+           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
+            return false
+        }
+        guard raiseWindowUsingAccessibility(windowID: windowID) else { return false }
+        lastRaisedAtByWindowID[windowID] = now
+        return true
     }
 
     private func bringFloatingWindowsToFrontCurrentDesktop(
@@ -4460,7 +4922,15 @@ final class AppModel: ObservableObject {
         }
 
         let activeSpace = activeSpaceIndex(in: snapshot)
-        let candidates = candidateFloatingWindows(in: snapshot, activeSpace: activeSpace, flaggedOnly: flaggedOnly)
+        let candidates = candidateFloatingWindows(
+            in: snapshot,
+            activeSpace: activeSpace,
+            flaggedOnly: flaggedOnly,
+            requireRuntimeManageable: false
+        )
+        let candidateIDs = Set(candidates.map(\.id))
+        keepOnTopOcclusionActiveByWindowID = keepOnTopOcclusionActiveByWindowID.filter { candidateIDs.contains($0.key) }
+        lastKeepOnTopAutoAttemptAtByWindowID = lastKeepOnTopAutoAttemptAtByWindowID.filter { candidateIDs.contains($0.key) }
 
         guard !candidates.isEmpty else {
             if reason == .manualAll {
@@ -4474,15 +4944,43 @@ final class AppModel: ObservableObject {
         }
 
         var raisedCount = 0
+        let useAccessibilityRaise = AXIsProcessTrusted()
+        let isAutomaticReason = (reason == .autoTransition || reason == .autoEnforce || reason == .floatToggle)
         for window in candidates {
-            // When SIP-based raise is unavailable, fallback focus may be required to effectively keep a
-            // window on top across apps. Guarded in raiseWindowOnly by active desktop matching.
-            let allowFocusFallback = true
-            if await raiseWindowOnly(
+            if isAutomaticReason {
+                // Automatic keep-on-top runs on occlusion transitions and throttled retries
+                // while still occluded (for apps where AXRaise is flaky/unsupported).
+                let isOccluded = isWindowLikelyOccluded(window)
+                let wasOccluded = keepOnTopOcclusionActiveByWindowID[window.id] ?? false
+                keepOnTopOcclusionActiveByWindowID[window.id] = isOccluded
+                if !isOccluded { continue }
+                if window.focused { continue }
+                if wasOccluded {
+                    let now = Date()
+                    if let lastAttempt = lastKeepOnTopAutoAttemptAtByWindowID[window.id],
+                       now.timeIntervalSince(lastAttempt) < keepOnTopAutoRetrySeconds {
+                        continue
+                    }
+                    lastKeepOnTopAutoAttemptAtByWindowID[window.id] = now
+                } else {
+                    lastKeepOnTopAutoAttemptAtByWindowID[window.id] = Date()
+                }
+            }
+
+            if useAccessibilityRaise {
+                let axRaised = raiseWindowUsingAccessibilityOnly(windowID: window.id, bypassCooldown: bypassCooldown)
+                let stillOccluded = isWindowLikelyOccluded(window)
+                if axRaised && !stillOccluded {
+                    raisedCount += 1
+                } else if await focusWindowForKeepOnTop(windowID: window.id, targetSpace: window.space, bypassCooldown: bypassCooldown) {
+                    raisedCount += 1
+                }
+                continue
+            }
+            if await focusWindowForKeepOnTop(
                 windowID: window.id,
                 targetSpace: window.space,
-                bypassCooldown: bypassCooldown,
-                allowFocusFallback: allowFocusFallback
+                bypassCooldown: bypassCooldown
             ) {
                 raisedCount += 1
             }
@@ -4500,6 +4998,31 @@ final class AppModel: ObservableObject {
         case .autoTransition, .floatToggle, .autoEnforce:
             break
         }
+    }
+
+    private func focusWindowForKeepOnTop(windowID: Int, targetSpace: Int?, bypassCooldown: Bool) async -> Bool {
+        let now = Date()
+        if !bypassCooldown,
+           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
+           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
+            return false
+        }
+
+        if let targetSpace,
+           let currentSpace = await queryCurrentFocusedSpaceIndex(),
+           currentSpace != targetSpace {
+            return false
+        }
+
+        let focus = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+        )
+        await MainActor.run {
+            self.appendCommandLog(from: focus)
+        }
+        guard focus.isSuccess else { return false }
+        lastRaisedAtByWindowID[windowID] = now
+        return true
     }
 
     private func raiseWindowOnly(
@@ -4523,6 +5046,19 @@ final class AppModel: ObservableObject {
         }
         if !raise.isSuccess {
             if raiseWindowUsingAccessibility(windowID: windowID) {
+                if allowFocusFallback,
+                   isWindowLikelyOccludedAfterRaise(windowID: windowID),
+                   let targetSpace,
+                   let currentSpace = await queryCurrentFocusedSpaceIndex(),
+                   currentSpace == targetSpace {
+                    let focus = await doctorService.runSupportCommand(
+                        ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+                    )
+                    await MainActor.run {
+                        self.appendCommandLog(from: focus)
+                    }
+                    guard focus.isSuccess else { return false }
+                }
                 lastRaisedAtByWindowID[windowID] = now
                 return true
             }
@@ -4547,6 +5083,90 @@ final class AppModel: ObservableObject {
         }
         lastRaisedAtByWindowID[windowID] = now
         return true
+    }
+
+    private func isWindowLikelyOccludedAfterRaise(windowID: Int) -> Bool {
+        guard let window = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else {
+            return false
+        }
+        return isWindowLikelyOccluded(window)
+    }
+
+    private func isWindowLikelyOccluded(_ window: WindowState) -> Bool {
+        // Use top-origin coordinates end-to-end: yabai window frames and CGWindow bounds
+        // are both in top-origin global space.
+        let targetRect = CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH)
+        guard targetRect.width > 1, targetRect.height > 1 else { return false }
+
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+              !windowInfo.isEmpty else {
+            return false
+        }
+
+        let appPID = ProcessInfo.processInfo.processIdentifier
+        let targetWindowNumber = UInt32(window.id)
+        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        var targetIndex: Int?
+        var targetBounds: CGRect?
+        var fallbackIndex: Int?
+        var fallbackBounds: CGRect?
+
+        for (index, info) in windowInfo.enumerated() {
+            guard (info[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
+            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
+            guard ownerPID == window.pid else { continue }
+            guard let bounds = cgWindowBounds(from: info) else { continue }
+            if !bounds.intersects(targetRect) { continue }
+            if let windowNumber = info[kCGWindowNumber as String] as? UInt32,
+               windowNumber == targetWindowNumber {
+                targetIndex = index
+                targetBounds = bounds
+                break
+            }
+            if !normalizedTitle.isEmpty {
+                let cgTitle = (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cgTitle.isEmpty && cgTitle != normalizedTitle {
+                    continue
+                }
+            }
+            if fallbackIndex == nil {
+                fallbackIndex = index
+                fallbackBounds = bounds
+            }
+        }
+
+        if targetIndex == nil {
+            targetIndex = fallbackIndex
+            targetBounds = fallbackBounds
+        }
+        guard let index = targetIndex, let targetBounds else { return false }
+        let targetArea = max(1.0, targetBounds.width * targetBounds.height)
+
+        for i in 0 ..< index {
+            let info = windowInfo[i]
+            guard (info[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
+            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
+            if ownerPID == appPID { continue }
+            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
+            let owner = (info[kCGWindowOwnerName as String] as? String ?? "").lowercased()
+            if owner == "tilepilot" { continue }
+            guard let bounds = cgWindowBounds(from: info) else { continue }
+            let overlap = bounds.intersection(targetBounds)
+            if overlap.isNull || overlap.width <= 1 || overlap.height <= 1 { continue }
+            let overlapRatio = (overlap.width * overlap.height) / targetArea
+            if overlapRatio > 0.12 {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func cgWindowBounds(from info: [String: Any]) -> CGRect? {
+        if let dict = info[kCGWindowBounds as String] as? NSDictionary,
+           let rect = CGRect(dictionaryRepresentation: dict) {
+            return rect
+        }
+        return nil
     }
 
     private func raiseWindowUsingAccessibility(windowID: Int) -> Bool {
@@ -4797,21 +5417,38 @@ final class AppModel: ObservableObject {
     }
 
     private func runBestEffortSkhdRestart(afterConfigChange: Bool) async {
-        let result = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+        let reloadResult = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
         )
+        var result = reloadResult
+        if !reloadResult.isSuccess {
+            result = await doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+            )
+        }
         await MainActor.run {
-            self.appendCommandLog(from: result)
-            if result.isSuccess {
+            self.appendCommandLog(from: reloadResult)
+            if !reloadResult.isSuccess {
+                self.appendCommandLog(from: result)
+            }
+
+            if reloadResult.isSuccess {
+                if afterConfigChange {
+                    self.lastActionMessage = "Config saved and skhd reloaded."
+                }
+                self.lastErrorMessage = nil
+            } else if result.isSuccess {
                 if afterConfigChange {
                     self.lastActionMessage = "Config saved and skhd restart requested."
                 }
                 self.lastErrorMessage = nil
             } else if afterConfigChange {
-                let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.lastActionMessage = "Config saved. skhd restart is best effort and may require manual restart."
+                let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let stderrRestart = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let stderr = [stderrReload, stderrRestart].filter { !$0.isEmpty }.joined(separator: " | ")
+                self.lastActionMessage = "Config saved. skhd reload/restart is best effort and may require manual restart."
                 if !stderr.isEmpty {
-                    self.lastErrorMessage = "skhd restart command failed: \(trimForUI(stderr))"
+                    self.lastErrorMessage = "skhd reload/restart failed: \(trimForUI(stderr))"
                 }
             }
         }
@@ -4819,19 +5456,33 @@ final class AppModel: ObservableObject {
     }
 
     private func runBestEffortSkhdRestartAfterRawFileSave() async {
-        let result = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+        let reloadResult = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
         )
+        var result = reloadResult
+        if !reloadResult.isSuccess {
+            result = await doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+            )
+        }
         await MainActor.run {
-            self.appendCommandLog(from: result)
-            if result.isSuccess {
+            self.appendCommandLog(from: reloadResult)
+            if !reloadResult.isSuccess {
+                self.appendCommandLog(from: result)
+            }
+            if reloadResult.isSuccess {
+                self.filesLastActionMessage = "Saved file and reloaded skhd."
+                self.filesLastErrorMessage = nil
+            } else if result.isSuccess {
                 self.filesLastActionMessage = "Saved file and requested skhd restart."
                 self.filesLastErrorMessage = nil
             } else {
-                let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.filesLastActionMessage = "Saved file. skhd restart is best effort and may require manual restart."
+                let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let stderrRestart = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let stderr = [stderrReload, stderrRestart].filter { !$0.isEmpty }.joined(separator: " | ")
+                self.filesLastActionMessage = "Saved file. skhd reload/restart is best effort and may require manual restart."
                 if !stderr.isEmpty {
-                    self.filesLastErrorMessage = "skhd restart failed: \(trimForUI(stderr))"
+                    self.filesLastErrorMessage = "skhd reload/restart failed: \(trimForUI(stderr))"
                 }
             }
         }
@@ -5139,6 +5790,17 @@ final class AppModel: ObservableObject {
 
     private func shortcutTitle(for entry: ShortcutEntry) -> String {
         let c = entry.command.lowercased()
+        let normalized = normalizedFeatureMatchCommand(c)
+
+        if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
+            return "Bring Floating Windows to Front"
+        }
+        if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
+            return "Keep App on Top (When Floating)"
+        }
+        if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
+            return "Open TilePilot"
+        }
 
         if c.contains("grid-tiling-floating.sh") {
             return "Grid Tiling (Floating)"
@@ -5189,6 +5851,10 @@ final class AppModel: ObservableObject {
     private func scriptPath(from command: String) -> String? {
         guard let firstTokenRaw = command.split(whereSeparator: \.isWhitespace).first else { return nil }
         let firstToken = String(firstTokenRaw).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        let loweredToken = firstToken.lowercased()
+        if loweredToken == "env" || loweredToken.hasSuffix("/env") || loweredToken == "open" || loweredToken.hasSuffix("/open") {
+            return nil
+        }
         guard firstToken.hasPrefix("/") || firstToken.hasPrefix("~/") || firstToken.hasPrefix("./") else { return nil }
 
         if firstToken.hasPrefix("./") {

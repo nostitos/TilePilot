@@ -1,0 +1,99 @@
+import Foundation
+
+enum ReleaseDefaultsApplyMode: String, Codable, Sendable {
+    case firstInstall
+    case manualReset
+}
+
+struct ReleaseDefaultsUserState: Codable, Sendable {
+    let pinnedFeatureControlIDs: [String]
+    let pinnedDirectionalGroupIDs: [String]
+    let shortcutsCustomOrderIDs: [String]
+    let showWindowBadgeOverlay: Bool
+    let showWindowOutlineOverlay: Bool
+    let raiseOnFloatToggleEnabled: Bool
+    let appForegroundPolicyByName: [String: AppForegroundPolicy]
+    let performanceSettings: PerformanceSettings
+
+    init(
+        pinnedFeatureControlIDs: [String],
+        pinnedDirectionalGroupIDs: [String],
+        shortcutsCustomOrderIDs: [String] = [],
+        showWindowBadgeOverlay: Bool,
+        showWindowOutlineOverlay: Bool,
+        raiseOnFloatToggleEnabled: Bool,
+        appForegroundPolicyByName: [String: AppForegroundPolicy],
+        performanceSettings: PerformanceSettings
+    ) {
+        self.pinnedFeatureControlIDs = pinnedFeatureControlIDs
+        self.pinnedDirectionalGroupIDs = pinnedDirectionalGroupIDs
+        self.shortcutsCustomOrderIDs = shortcutsCustomOrderIDs
+        self.showWindowBadgeOverlay = showWindowBadgeOverlay
+        self.showWindowOutlineOverlay = showWindowOutlineOverlay
+        self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
+        self.appForegroundPolicyByName = appForegroundPolicyByName
+        self.performanceSettings = performanceSettings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pinnedFeatureControlIDs
+        case pinnedDirectionalGroupIDs
+        case shortcutsCustomOrderIDs
+        case showWindowBadgeOverlay
+        case showWindowOutlineOverlay
+        case raiseOnFloatToggleEnabled
+        case appForegroundPolicyByName
+        case performanceSettings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pinnedFeatureControlIDs = try container.decode([String].self, forKey: .pinnedFeatureControlIDs)
+        pinnedDirectionalGroupIDs = try container.decode([String].self, forKey: .pinnedDirectionalGroupIDs)
+        shortcutsCustomOrderIDs = try container.decodeIfPresent([String].self, forKey: .shortcutsCustomOrderIDs) ?? []
+        showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
+        showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
+        raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
+        appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
+        performanceSettings = try container.decodeIfPresent(PerformanceSettings.self, forKey: .performanceSettings) ?? .balanced
+    }
+}
+
+struct ReleaseDefaultsConfigState: Codable, Sendable {
+    let managedSkhdSectionBody: String
+    let windowBehaviorPolicy: ManagedWindowBehaviorPolicy
+}
+
+struct ReleaseDefaultsProfile: Codable, Sendable {
+    let profileVersion: String
+    let userState: ReleaseDefaultsUserState
+    let configState: ReleaseDefaultsConfigState
+}
+
+enum ReleaseDefaultsStatus: Sendable, Equatable {
+    case upToDate(version: String)
+    case updateAvailable(currentVersion: String, lastAppliedVersion: String)
+    case neverApplied(currentVersion: String)
+
+    var summaryText: String {
+        switch self {
+        case .upToDate(let version):
+            return "Release defaults \(version) are applied."
+        case .updateAvailable(let currentVersion, let lastAppliedVersion):
+            return "New release defaults available (\(lastAppliedVersion) -> \(currentVersion))."
+        case .neverApplied(let currentVersion):
+            return "Release defaults \(currentVersion) have not been applied yet."
+        }
+    }
+
+    var currentVersion: String {
+        switch self {
+        case .upToDate(let version):
+            return version
+        case .updateAvailable(let currentVersion, _):
+            return currentVersion
+        case .neverApplied(let currentVersion):
+            return currentVersion
+        }
+    }
+}

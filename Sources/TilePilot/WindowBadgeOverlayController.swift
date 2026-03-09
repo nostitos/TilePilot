@@ -10,11 +10,21 @@ final class WindowBadgeOverlayController {
         override var canBecomeMain: Bool { false }
     }
 
+    private struct OverlayUpdateSignature: Equatable {
+        let showBadges: Bool
+        let showOutlines: Bool
+        let refreshPolicy: OverlayRefreshPolicy
+        let badgeTargets: [WindowBadgeState]
+        let outlineTargets: [WindowBadgeState]
+    }
+
     private let model: AppModel
     private var cancellables: Set<AnyCancellable> = []
     private var badgePanels: [Int: BadgePanel] = [:]
     private var outlinePanels: [Int: BadgePanel] = [:]
     private var pendingBadges: [WindowBadgeState] = []
+    private var pendingSignature: OverlayUpdateSignature?
+    private var appliedSignature: OverlayUpdateSignature?
     private var scheduledUpdate: DispatchWorkItem?
 
     init(model: AppModel) {
@@ -49,23 +59,42 @@ final class WindowBadgeOverlayController {
 
     private func scheduleOverlayUpdate(with badges: [WindowBadgeState]) {
         pendingBadges = badges
+        let signature = makeSignature(from: badges)
+        if signature == pendingSignature || signature == appliedSignature {
+            return
+        }
+        pendingSignature = signature
         scheduledUpdate?.cancel()
 
         let work = DispatchWorkItem { [weak self] in
             self?.applyOverlayUpdate(self?.pendingBadges ?? [])
         }
         scheduledUpdate = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        let delay: TimeInterval
+        switch model.overlayRefreshPolicy {
+        case .full:
+            delay = 0.05
+        case .reduced:
+            delay = 0.40
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func applyOverlayUpdate(_ badges: [WindowBadgeState]) {
-        let targetIDs = Set(badges.map(\.windowID))
-        let badgeTargetStates = badgeTargets(from: badges)
-        let badgeTargetIDs = Set(badgeTargetStates.map(\.windowID))
+        let signature = makeSignature(from: badges)
+        if signature == appliedSignature {
+            return
+        }
+        pendingSignature = nil
+        appliedSignature = signature
+        model.incrementOverlayPanelUpdates()
+        let targetIDs = Set(signature.outlineTargets.map(\.windowID))
+        let badgeTargetIDs = Set(signature.badgeTargets.map(\.windowID))
+        model.setHasVisibleWindowBadgePanels(!targetIDs.isEmpty || !badgeTargetIDs.isEmpty)
 
-        if model.showWindowBadgeOverlay {
+        if signature.showBadges {
             removeStalePanels(from: &badgePanels, keepIDs: badgeTargetIDs)
-            for badge in badgeTargetStates {
+            for badge in signature.badgeTargets {
                 let panel = badgePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: false, level: .floating)
                 badgePanels[badge.windowID] = panel
                 updateBadgePanel(panel: panel, with: badge)
@@ -74,9 +103,9 @@ final class WindowBadgeOverlayController {
             removeAllPanels(from: &badgePanels)
         }
 
-        if model.showWindowOutlineOverlay {
+        if signature.showOutlines {
             removeStalePanels(from: &outlinePanels, keepIDs: targetIDs)
-            for badge in badges {
+            for badge in signature.outlineTargets {
                 let panel = outlinePanels[badge.windowID] ?? createPanel(ignoresMouseEvents: true, level: .normal)
                 outlinePanels[badge.windowID] = panel
                 updateOutlinePanel(panel: panel, with: badge)
@@ -84,6 +113,41 @@ final class WindowBadgeOverlayController {
         } else {
             removeAllPanels(from: &outlinePanels)
         }
+    }
+
+    private func makeSignature(from badges: [WindowBadgeState]) -> OverlayUpdateSignature {
+        let policy = model.overlayRefreshPolicy
+        return OverlayUpdateSignature(
+            showBadges: model.showWindowBadgeOverlay,
+            showOutlines: model.showWindowOutlineOverlay,
+            refreshPolicy: policy,
+            badgeTargets: model.showWindowBadgeOverlay ? normalized(badgeTargets(from: badges), for: policy) : [],
+            outlineTargets: model.showWindowOutlineOverlay ? normalized(badges, for: policy) : []
+        )
+    }
+
+    private func normalized(_ badges: [WindowBadgeState], for policy: OverlayRefreshPolicy) -> [WindowBadgeState] {
+        guard policy == .reduced else { return badges }
+        return badges.map { badge in
+            let quantum = 14.0
+            return WindowBadgeState(
+                windowID: badge.windowID,
+                pid: badge.pid,
+                app: badge.app,
+                title: badge.title,
+                isFloating: badge.isFloating,
+                isFocused: badge.isFocused,
+                isRuntimeManageable: badge.isRuntimeManageable,
+                frameX: rounded(badge.frameX, quantum: quantum),
+                frameY: rounded(badge.frameY, quantum: quantum),
+                frameW: rounded(badge.frameW, quantum: quantum),
+                frameH: rounded(badge.frameH, quantum: quantum)
+            )
+        }
+    }
+
+    private func rounded(_ value: Double, quantum: Double) -> Double {
+        (value / quantum).rounded() * quantum
     }
 
     private func badgeTargets(from badges: [WindowBadgeState]) -> [WindowBadgeState] {

@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.1-defaults.1"
+    static let currentProfileVersion = "v0.2.2-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -21,7 +21,8 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                 showWindowBadgeOverlay: true,
                 showWindowOutlineOverlay: false,
                 raiseOnFloatToggleEnabled: true,
-                appForegroundPolicyByName: [:]
+                appForegroundPolicyByName: [:],
+                performanceSettings: .balanced
             ),
             configState: ReleaseDefaultsConfigState(
                 managedSkhdSectionBody: defaultManagedSkhdSectionBody(),
@@ -77,7 +78,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
         # TILEPILOT_FEATURE screen.grid-floating
         ctrl + shift + alt - p : ~/.config/yabai/scripts/grid-tiling-floating.sh
         # TILEPILOT_FEATURE screen.grid-auto-tiled
-        ctrl + shift + alt - o : ~/.config/yabai/scripts/grid-tiling-auto-tiled.sh
+        ctrl + shift + alt - o : ~/.config/yabai/scripts/rebuild-balanced-tile-layout.sh
         # TILEPILOT_FEATURE screen.layout-bsp-balance
         ctrl + shift + alt - g : yabai -m space --layout bsp; yabai -m space --balance
         # TILEPILOT_FEATURE screen.balance-current-desktop

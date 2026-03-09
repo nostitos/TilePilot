@@ -35,12 +35,12 @@ Default behavior:
 Build a release app bundle and package a drag-and-drop DMG:
 
 ```bash
-scripts/build_release_dmg.sh --version v0.2.1
+scripts/build_release_dmg.sh --version v0.2.2
 ```
 
 Output artifact:
 
-- `dist/TilePilot-v0.2.1.dmg`
+- `dist/TilePilot-v0.2.2.dmg`
 
 The DMG uses:
 

@@ -38,18 +38,35 @@ struct TilePilotActionCard: Identifiable {
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum RuntimeBurstSource: CaseIterable {
+        case liveStateRefresh
+        case liveStatePublish
+        case unchangedPoll
+        case overviewCacheRebuild
+        case shortcutsCacheRebuild
+        case keepOnTopEnforcement
+        case overlayUpdate
+    }
+
     static let shared = AppModel()
     private static let pinnedShortcutsDefaultsKey = "TilePilot.pinnedShortcutKeys"
     private static let pinnedDirectionalGroupsDefaultsKey = "TilePilot.pinnedDirectionalGroupIDs"
     private static let pinnedFeatureControlsDefaultsKey = "TilePilot.pinnedFeatureControlIDs"
     private static let shortcutsCustomOrderDefaultsKey = "TilePilot.shortcutsCustomOrderIDs"
-    private static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
-    private static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
-    private static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
-    private static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
-    private static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
-    private static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
-    private static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
+    static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
+    static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
+    static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
+    static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
+    static let performancePresetDefaultsKey = "TilePilot.performancePreset"
+    static let performanceForegroundPollingSecondsDefaultsKey = "TilePilot.performanceForegroundPollingSeconds"
+    static let performanceBackgroundPollingSecondsDefaultsKey = "TilePilot.performanceBackgroundPollingSeconds"
+    static let performanceKeepOnTopSecondsDefaultsKey = "TilePilot.performanceKeepOnTopSeconds"
+    static let performanceMiniMapHoverTitlesEnabledDefaultsKey = "TilePilot.performanceMiniMapHoverTitlesEnabled"
+    static let performanceFastLiveRefreshEnabledDefaultsKey = "TilePilot.performanceFastLiveRefreshEnabled"
+    static let performanceKeepOnTopEnforcementEnabledDefaultsKey = "TilePilot.performanceKeepOnTopEnforcementEnabled"
+    static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
+    static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
+    static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
 
     private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
         guard let raw = UserDefaults.standard.dictionary(forKey: AppModel.appForegroundPolicyByNameDefaultsKey) as? [String: String] else {
@@ -66,44 +83,44 @@ final class AppModel: ObservableObject {
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
     @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
-    @Published private(set) var windowBadges: [WindowBadgeState] = []
-    @Published private(set) var hoveredWindowIDForBadges: Int?
+    @Published var windowBadges: [WindowBadgeState] = []
+    @Published var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
     @Published private(set) var requestedSystemPanelSection: SystemPanelSection?
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
-    @Published private(set) var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
-    @Published private(set) var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
-    @Published private(set) var pinnedFeatureControlIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedFeatureControlsDefaultsKey) ?? []
-    @Published private(set) var shortcutsCustomOrderIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.shortcutsCustomOrderDefaultsKey) ?? []
-    @Published private(set) var selectedShortcutStableKey: String?
+    @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
+    @Published var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
+    @Published var pinnedFeatureControlIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedFeatureControlsDefaultsKey) ?? []
+    @Published var shortcutsCustomOrderIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.shortcutsCustomOrderDefaultsKey) ?? []
+    @Published var selectedShortcutStableKey: String?
     @Published private(set) var requestedFileEditorTarget: EditorTarget?
-    @Published private(set) var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
+    @Published var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
     @Published var managedConfigDraft: String = ""
-    @Published private(set) var editableFiles: [EditableConfigFile] = []
-    @Published private(set) var selectedEditableFilePath: String?
-    @Published private(set) var selectedEditableFileBackups: [ConfigBackupInfo] = []
-    @Published private(set) var selectedEditableFileExists = false
-    @Published private(set) var selectedEditableFileKind: EditableFileKind = .other
+    @Published var editableFiles: [EditableConfigFile] = []
+    @Published var selectedEditableFilePath: String?
+    @Published var selectedEditableFileBackups: [ConfigBackupInfo] = []
+    @Published var selectedEditableFileExists = false
+    @Published var selectedEditableFileKind: EditableFileKind = .other
     @Published var editableFileDraft: String = ""
-    @Published private(set) var editableFileOriginal: String = ""
-    @Published private(set) var editableFileJumpTargetLine: Int?
-    @Published private(set) var isRefreshingEditableFiles = false
-    @Published private(set) var isLoadingEditableFile = false
-    @Published private(set) var isSavingEditableFile = false
-    @Published private(set) var isRestoringEditableFile = false
+    @Published var editableFileOriginal: String = ""
+    @Published var editableFileJumpTargetLine: Int?
+    @Published var isRefreshingEditableFiles = false
+    @Published var isLoadingEditableFile = false
+    @Published var isSavingEditableFile = false
+    @Published var isRestoringEditableFile = false
     @Published var filesLastErrorMessage: String?
     @Published var filesLastActionMessage: String?
-    @Published private(set) var commandLogs: [CommandLogEntry] = []
+    @Published var commandLogs: [CommandLogEntry] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var isRefreshingBootstrap = false
     @Published private(set) var isRefreshingLiveState = false
     @Published private(set) var isRefreshingShortcuts = false
-    @Published private(set) var isRefreshingConfig = false
-    @Published private(set) var isSavingConfig = false
-    @Published private(set) var isRestoringConfig = false
-    @Published private(set) var activeActionID: TilePilotActionID?
-    @Published private(set) var isLaunchingSetupInstaller = false
-    @Published private(set) var isLaunchingScriptingAdditionFix = false
+    @Published var isRefreshingConfig = false
+    @Published var isSavingConfig = false
+    @Published var isRestoringConfig = false
+    @Published var activeActionID: TilePilotActionID?
+    @Published var isLaunchingSetupInstaller = false
+    @Published var isLaunchingScriptingAdditionFix = false
     @Published private(set) var hasAcknowledgedInitialStatus = false
     @Published var actionsLastErrorMessage: String?
     @Published var actionsLastActionMessage: String?
@@ -114,27 +131,77 @@ final class AppModel: ObservableObject {
     @Published var lastScriptingAdditionRepairURL: URL?
     @Published private(set) var shortcutFilePath: String?
     @Published private(set) var shortcutParseIssues: [String] = []
-    @Published private(set) var configFilePath: String?
-    @Published private(set) var configBackups: [ConfigBackupInfo] = []
-    @Published private(set) var configFileExists = false
-    @Published private(set) var configHasManagedSection = false
-    @Published private(set) var configDiffPreviewText: String = "No changes."
-    @Published private(set) var yabaiConfigFilePath: String?
-    @Published private(set) var yabaiConfigBackups: [ConfigBackupInfo] = []
-    @Published private(set) var yabaiConfigFileExists = false
-    @Published private(set) var yabaiConfigHasManagedSection = false
-    @Published private(set) var yabaiConfigDiffPreviewText: String = "No changes."
-    @Published private(set) var isRefreshingYabaiConfig = false
-    @Published private(set) var isSavingYabaiConfig = false
-    @Published private(set) var isRestoringYabaiConfig = false
+    @Published var configFilePath: String?
+    @Published var configBackups: [ConfigBackupInfo] = []
+    @Published var configFileExists = false
+    @Published var configHasManagedSection = false
+    @Published var configDiffPreviewText: String = "No changes."
+    @Published var yabaiConfigFilePath: String?
+    @Published var yabaiConfigBackups: [ConfigBackupInfo] = []
+    @Published var yabaiConfigFileExists = false
+    @Published var yabaiConfigHasManagedSection = false
+    @Published var yabaiConfigDiffPreviewText: String = "No changes."
+    @Published var isRefreshingYabaiConfig = false
+    @Published var isSavingYabaiConfig = false
+    @Published var isRestoringYabaiConfig = false
     @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default
-    @Published private(set) var windowBehaviorAutosaveActionMessage: String?
-    @Published private(set) var windowBehaviorAutosaveErrorMessage: String?
+    @Published var windowBehaviorAutosaveActionMessage: String?
+    @Published var windowBehaviorAutosaveErrorMessage: String?
     @Published var stagedNeverTileApps: [String] = []
     @Published var stagedAlwaysTileApps: [String] = []
-    @Published private(set) var isApplyingStagedAppRules = false
+    @Published var isApplyingStagedAppRules = false
     @Published var raiseOnFloatToggleEnabled: Bool = true
-    @Published private(set) var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName()
+    @Published var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName()
+    @Published var performancePreset: PerformancePreset = {
+        let defaults = UserDefaults.standard
+        guard let raw = defaults.string(forKey: AppModel.performancePresetDefaultsKey),
+              let preset = PerformancePreset(rawValue: raw) else {
+            return .balanced
+        }
+        return preset
+    }()
+    @Published var performanceForegroundPollingSeconds: Double = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceForegroundPollingSecondsDefaultsKey) == nil {
+            return PerformanceSettings.balanced.foregroundPollingSeconds
+        }
+        return defaults.double(forKey: AppModel.performanceForegroundPollingSecondsDefaultsKey)
+    }()
+    @Published var performanceBackgroundPollingSeconds: Double = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceBackgroundPollingSecondsDefaultsKey) == nil {
+            return PerformanceSettings.balanced.backgroundPollingSeconds
+        }
+        return defaults.double(forKey: AppModel.performanceBackgroundPollingSecondsDefaultsKey)
+    }()
+    @Published var performanceKeepOnTopEnforcementSeconds: Double = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceKeepOnTopSecondsDefaultsKey) == nil {
+            return PerformanceSettings.balanced.keepOnTopEnforcementSeconds
+        }
+        return defaults.double(forKey: AppModel.performanceKeepOnTopSecondsDefaultsKey)
+    }()
+    @Published var miniMapHoverTitlesEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceMiniMapHoverTitlesEnabledDefaultsKey) == nil {
+            return PerformanceSettings.balanced.miniMapHoverTitlesEnabled
+        }
+        return defaults.bool(forKey: AppModel.performanceMiniMapHoverTitlesEnabledDefaultsKey)
+    }()
+    @Published var performanceFastLiveRefreshEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceFastLiveRefreshEnabledDefaultsKey) == nil {
+            return PerformanceSettings.balanced.fastLiveRefreshEnabled
+        }
+        return defaults.bool(forKey: AppModel.performanceFastLiveRefreshEnabledDefaultsKey)
+    }()
+    @Published var keepOnTopEnforcementEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceKeepOnTopEnforcementEnabledDefaultsKey) == nil {
+            return PerformanceSettings.balanced.keepOnTopEnforcementEnabled
+        }
+        return defaults.bool(forKey: AppModel.performanceKeepOnTopEnforcementEnabledDefaultsKey)
+    }()
     @Published var showWindowBadgeOverlay: Bool = {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: AppModel.showWindowBadgeOverlayDefaultsKey) == nil {
@@ -150,39 +217,58 @@ final class AppModel: ObservableObject {
         return defaults.bool(forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
     }()
 
-    private let doctorService = DoctorService()
-    private let bootstrapService = BootstrapService()
+    let doctorService = DoctorService()
+    let bootstrapService = BootstrapService()
     private let yabaiStateService = YabaiStateService()
     private let skhdShortcutService = SkhdShortcutService()
-    private let configService = ConfigService()
-    private let yabaiRulesConfigService = YabaiRulesConfigService()
-    private let configFilesService = ConfigFilesService()
-    private let releaseDefaultsService = ReleaseDefaultsService()
+    let configService = ConfigService()
+    let yabaiRulesConfigService = YabaiRulesConfigService()
+    let configFilesService = ConfigFilesService()
+    let releaseDefaultsService = ReleaseDefaultsService()
+    private let keepOnTopCoordinator = KeepOnTopCoordinator()
+    private(set) var overviewDisplayPreviews: [OverviewDisplayPreview] = []
+    private(set) var overviewDisplaySections: [OverviewDisplaySection] = []
+    private(set) var cachedUnifiedControlRows: [UnifiedControlRow] = []
+    private(set) var cachedFeatureControlRows: [FeatureControlRow] = []
+    private(set) var cachedFeatureControlRowByShortcutStableKey: [String: FeatureControlRow] = [:]
+    private(set) var cachedFeatureControlRowByFeatureID: [String: FeatureControlRow] = [:]
+    private(set) var cachedShortcutTitleByStableKey: [String: String] = [:]
+    private(set) var cachedShortcutSecondaryByStableKey: [String: String?] = [:]
+    private(set) var cachedShortcutComboWordsByStableKey: [String: String] = [:]
+    private(set) var cachedShortcutComboSymbolsSpacedByStableKey: [String: String] = [:]
+    private(set) var cachedFlatShortcutsOrderRankByID: [String: Int] = [:]
+    private(set) var cachedPinnedFeatureControlRows: [FeatureControlRow] = []
+    private(set) var cachedPinnedShortcutEntries: [ShortcutEntry] = []
+    private(set) var cachedPinnedDirectionalGroupBindings: [(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])] = []
+    private(set) var cachedPinnedShortcutContextItems: [PinnedShortcutContextItem] = []
+    @Published var runtimeDiagnostics = RuntimeDiagnostics()
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
-    private var keepOnTopEnforcementTask: Task<Void, Never>?
+    private var lastLiveStateContentSignature: String?
+    var latestLiveStateSnapshot: LiveStateSnapshot?
+    private var overviewCachesDirty = true
+    private var shortcutPresentationCachesDirty = true
+    private var runtimeBurstSamples: [RuntimeBurstSource: [Date]] = [:]
+    var runtimeDiagnosticsStorage = RuntimeDiagnostics()
+    var lastRuntimeDiagnosticsPublishAt: Date?
     private var degradedModeActive = false
     private var consecutiveMismatchSamples = 0
     private var consecutiveHealthySamples = 0
     private let degradedEnterThreshold = 3
     private let degradedExitThreshold = 5
-    private var originalManagedConfigSection: String = ""
-    private var loadedFullConfigContent: String = ""
-    private var originalWindowBehaviorPolicy = ManagedWindowBehaviorPolicy.default
-    private var originalYabaiManagedConfigSection: String = ""
-    private var scriptHeaderDescriptionCache: [String: String?] = [:]
-    private var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
+    var originalManagedConfigSection: String = ""
+    var loadedFullConfigContent: String = ""
+    var originalWindowBehaviorPolicy = ManagedWindowBehaviorPolicy.default
+    var originalYabaiManagedConfigSection: String = ""
+    var scriptHeaderDescriptionCache: [String: String?] = [:]
+    var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
     private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
-    private var lastRaisedAtByWindowID: [Int: Date] = [:]
-    private let raiseCooldownSeconds: TimeInterval = 1.2
-    private let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
-    private var hasAttemptedReleaseDefaultsInitialization = false
-    private var windowBehaviorAutoSaveTask: Task<Void, Never>?
-    private let windowBehaviorAutoSaveDelayNanoseconds: UInt64 = 400_000_000
-    private var hasInitializedStagedAppRuleLists = false
-    private var keepOnTopOcclusionActiveByWindowID: [Int: Bool] = [:]
-    private var lastKeepOnTopAutoAttemptAtByWindowID: [Int: Date] = [:]
-    private let keepOnTopAutoRetrySeconds: TimeInterval = 2.0
+    let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
+    var hasAttemptedReleaseDefaultsInitialization = false
+    var windowBehaviorAutoSaveTask: Task<Void, Never>?
+    let windowBehaviorAutoSaveDelayNanoseconds: UInt64 = 400_000_000
+    var hasInitializedStagedAppRuleLists = false
+    var currentVisibleTab: TilePilotTab = .now
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
@@ -208,18 +294,6 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(interval))
                 if Task.isCancelled { break }
                 await self.refreshLiveState()
-            }
-        }
-
-        guard keepOnTopEnforcementTask == nil else { return }
-        keepOnTopEnforcementTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(900))
-                if Task.isCancelled { break }
-                guard self.appForegroundPolicyByName.values.contains(.keepFrontWhenFloating) else { continue }
-                guard let snapshot = self.liveStateSnapshot else { continue }
-                await self.enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
             }
         }
 
@@ -253,8 +327,6 @@ final class AppModel: ObservableObject {
         autoRefreshTask = nil
         statePollingTask?.cancel()
         statePollingTask = nil
-        keepOnTopEnforcementTask?.cancel()
-        keepOnTopEnforcementTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
     }
@@ -267,6 +339,9 @@ final class AppModel: ObservableObject {
         let result = await doctorService.runDoctor()
         doctorSnapshot = result.snapshot
         prependCommandLogs(result.commandLogs)
+        // Pinned menus depend on feature disabled/enabled state from doctorSnapshot
+        // even when the Shortcuts tab has never been opened.
+        rebuildShortcutPresentationCaches()
         lastErrorMessage = nil
         lastActionMessage = nil
     }
@@ -326,157 +401,11 @@ final class AppModel: ObservableObject {
         return true
     }
 
-    var releaseDefaultsResetButtonTitle: String {
-        "Reset to Release Defaults (\(releaseDefaultsStatus.currentVersion))"
-    }
-
-    func ensureReleaseDefaultsInitializedIfNeeded() async {
-        updateReleaseDefaultsStatus()
-        guard !hasAttemptedReleaseDefaultsInitialization else { return }
-        hasAttemptedReleaseDefaultsInitialization = true
-
-        let profile = releaseDefaultsService.currentProfile()
-        do {
-            try releaseDefaultsService.writeProfileSnapshotToDisk(profile)
-        } catch {
-            // Snapshot file is informational. Keep runtime defaults flow alive.
-        }
-
-        let defaults = UserDefaults.standard
-        let initialized = defaults.bool(forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
-        if !initialized {
-            let hasLegacyFootprint = await detectLegacySettingsFootprint()
-            if hasLegacyFootprint {
-                defaults.set(true, forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
-                defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
-                updateReleaseDefaultsStatus(currentProfile: profile)
-                return
-            }
-            _ = await applyReleaseDefaultsProfile(profile, mode: .firstInstall)
-            updateReleaseDefaultsStatus(currentProfile: profile)
-            return
-        }
-
-        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
-        updateReleaseDefaultsStatus(currentProfile: profile)
-    }
-
-    func resetToReleaseDefaults() {
-        Task { [weak self] in
-            guard let self else { return }
-            let profile = self.releaseDefaultsService.currentProfile()
-            do {
-                try self.releaseDefaultsService.writeProfileSnapshotToDisk(profile)
-            } catch {
-                // Keep reset flow running even if snapshot write fails.
-            }
-            _ = await self.applyReleaseDefaultsProfile(profile, mode: .manualReset)
-            self.updateReleaseDefaultsStatus(currentProfile: profile)
-        }
-    }
-
-    private func detectLegacySettingsFootprint() async -> Bool {
-        if releaseDefaultsService.hasLegacyUserDefaultsFootprint() {
-            return true
-        }
-        if let state = try? await configService.loadConfigDocument(), state.hasManagedSection {
-            return true
-        }
-        if let state = try? await yabaiRulesConfigService.loadConfigDocument(), state.hasManagedSection {
-            return true
-        }
-        return false
-    }
-
-    private func applyReleaseDefaultsProfile(_ profile: ReleaseDefaultsProfile, mode: ReleaseDefaultsApplyMode) async -> Bool {
-        if isSavingConfig || isSavingYabaiConfig || isRestoringConfig || isRestoringYabaiConfig {
-            lastErrorMessage = "Please wait for current save/restore operations to finish."
-            lastActionMessage = nil
-            return false
-        }
-
-        let previousPolicy = (try? await yabaiRulesConfigService.loadConfigDocument())?.policy ?? originalWindowBehaviorPolicy
-
-        do {
-            _ = try await configService.saveManagedSection(body: profile.configState.managedSkhdSectionBody)
-        } catch {
-            lastErrorMessage = "Applying release defaults failed while saving skhdrc: \(error.localizedDescription)"
-            lastActionMessage = nil
-            return false
-        }
-
-        do {
-            _ = try await yabaiRulesConfigService.saveWindowBehaviorPolicy(profile.configState.windowBehaviorPolicy)
-        } catch {
-            lastErrorMessage = "Applying release defaults failed while saving yabairc: \(error.localizedDescription)"
-            lastActionMessage = nil
-            return false
-        }
-
-        applyReleaseDefaultsUserState(profile.userState)
-
-        let defaults = UserDefaults.standard
-        defaults.set(true, forKey: AppModel.releaseDefaultsInitializedDefaultsKey)
-        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsAppliedVersionDefaultsKey)
-        defaults.set(profile.profileVersion, forKey: AppModel.releaseDefaultsSeenVersionDefaultsKey)
-
-        await runBestEffortSkhdRestart(afterConfigChange: false)
-        if canRunYabaiRuntimeCommands {
-            await applyWindowBehaviorRuntime(previous: previousPolicy, current: profile.configState.windowBehaviorPolicy)
-        } else {
-            await refreshWindowBehaviorConfig()
-        }
-        await refreshConfig()
-        await refreshShortcuts()
-        await refreshLiveState()
-        await refreshDoctor()
-        await refreshBootstrapSetup()
-
-        switch mode {
-        case .firstInstall:
-            lastActionMessage = "Applied release defaults \(profile.profileVersion) on first launch."
-        case .manualReset:
-            lastActionMessage = "Applied release defaults \(profile.profileVersion)."
-        }
-        lastErrorMessage = nil
-        return true
-    }
-
-    private func applyReleaseDefaultsUserState(_ state: ReleaseDefaultsUserState) {
-        pinnedFeatureControlIDs = Array(NSOrderedSet(array: state.pinnedFeatureControlIDs)) as? [String] ?? state.pinnedFeatureControlIDs
-        pinnedDirectionalGroupIDs = Array(NSOrderedSet(array: state.pinnedDirectionalGroupIDs)) as? [String] ?? state.pinnedDirectionalGroupIDs
-        shortcutsCustomOrderIDs = Array(NSOrderedSet(array: state.shortcutsCustomOrderIDs)) as? [String] ?? state.shortcutsCustomOrderIDs
-        pinnedShortcutKeys = []
-        persistPinnedFeatureControlIDs()
-        persistPinnedDirectionalGroupIDs()
-        persistPinnedShortcutKeys()
-        persistShortcutsCustomOrderIDs()
-
-        showWindowBadgeOverlay = state.showWindowBadgeOverlay
-        UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
-        showWindowOutlineOverlay = state.showWindowOutlineOverlay
-        UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
-        raiseOnFloatToggleEnabled = true
-        UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
-
-        appForegroundPolicyByName = state.appForegroundPolicyByName
-        persistAppForegroundPolicies()
-        reconcileShortcutsCustomOrderIDsToCurrentItems()
-        refreshWindowBadges()
-    }
-
-    private func updateReleaseDefaultsStatus(currentProfile: ReleaseDefaultsProfile? = nil) {
-        let profile = currentProfile ?? releaseDefaultsService.currentProfile()
-        let defaults = UserDefaults.standard
-        if let applied = defaults.string(forKey: AppModel.releaseDefaultsAppliedVersionDefaultsKey) {
-            if applied == profile.profileVersion {
-                releaseDefaultsStatus = .upToDate(version: profile.profileVersion)
-            } else {
-                releaseDefaultsStatus = .updateAvailable(currentVersion: profile.profileVersion, lastAppliedVersion: applied)
-            }
-        } else {
-            releaseDefaultsStatus = .neverApplied(currentVersion: profile.profileVersion)
-        }
+    func publishLiveStateSnapshotIfNeeded(_ snapshot: LiveStateSnapshot? = nil, force: Bool = false) {
+        let target = snapshot ?? latestLiveStateSnapshot
+        guard force || hasVisibleTilePilotWindow else { return }
+        guard liveStateSnapshot != target else { return }
+        liveStateSnapshot = target
     }
 
     func refreshLiveState() async {
@@ -484,13 +413,29 @@ final class AppModel: ObservableObject {
         isRefreshingLiveState = true
         defer { isRefreshingLiveState = false }
 
-        let previousSnapshot = liveStateSnapshot
+        recordRuntimeBurst(.liveStateRefresh)
+        mutateRuntimeDiagnostics { $0.liveStateRefreshCount += 1 }
+        let previousSnapshot = latestLiveStateSnapshot ?? liveStateSnapshot
         let poll = await yabaiStateService.pollLiveState()
         applyDegradedModeCounters(yabaiWindowTotal: poll.yabaiWindowTotal, fallbackWindowTotal: poll.fallbackWindowTotal)
 
         let snapshot = makeLiveStateSnapshot(from: poll)
-        liveStateSnapshot = snapshot
-        refreshWindowBadges()
+        latestLiveStateSnapshot = snapshot
+        let contentSignature = liveStateContentSignature(for: snapshot)
+        if lastLiveStateContentSignature == contentSignature {
+            recordRuntimeBurst(.unchangedPoll)
+            mutateRuntimeDiagnostics { $0.liveStateUnchangedPollCount += 1 }
+            updateRuntimeDiagnosticsMode(for: snapshot)
+            await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
+            return
+        }
+        lastLiveStateContentSignature = contentSignature
+        recordRuntimeBurst(.liveStatePublish)
+        mutateRuntimeDiagnostics { $0.liveStatePublishedCount += 1 }
+        updateOverviewCachesForCurrentVisibility(with: snapshot)
+        publishLiveStateSnapshotIfNeeded(snapshot)
+        refreshWindowBadgesIfNeeded()
+        updateRuntimeDiagnosticsMode(for: snapshot)
         await applyForegroundPolicyTransitions(previous: previousSnapshot, current: snapshot)
         await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
     }
@@ -513,814 +458,22 @@ final class AppModel: ObservableObject {
         shortcutParseIssues = result.issues
         migrateLegacyPinnedShortcutsToFeaturePins()
         reconcileShortcutsCustomOrderIDsToCurrentItems()
+        // Menu-bar and badge context menus depend on these rows even before the
+        // Shortcuts tab is opened, so keep the model cache warm on load.
+        rebuildShortcutPresentationCaches()
         await refreshEditableFiles()
     }
 
-    func refreshConfig() async {
-        guard !isRefreshingConfig else { return }
-        isRefreshingConfig = true
-        defer { isRefreshingConfig = false }
-
-        do {
-            let state = try await configService.loadConfigDocument()
-            applyConfigDocumentState(state, preserveUserDraftIfDirty: false)
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = "Failed to load config: \(error.localizedDescription)"
-            lastActionMessage = nil
-        }
-    }
-
-    func refreshWindowBehaviorConfig() async {
-        guard !isRefreshingYabaiConfig else { return }
-        isRefreshingYabaiConfig = true
-        defer { isRefreshingYabaiConfig = false }
-        do {
-            let state = try await yabaiRulesConfigService.loadConfigDocument()
-            applyYabaiConfigDocumentState(state)
-        } catch {
-            lastErrorMessage = "Failed to load yabairc settings: \(error.localizedDescription)"
-            lastActionMessage = nil
-        }
-    }
-
-    func resetManagedConfigDraft() {
-        managedConfigDraft = originalManagedConfigSection
-        recomputeConfigDiffPreview()
-        lastActionMessage = "Reverted draft to the last loaded managed section."
-        lastErrorMessage = nil
-    }
-
-    func saveManagedConfigSection() {
-        guard !isSavingConfig else { return }
-        isSavingConfig = true
-        let draft = managedConfigDraft
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isSavingConfig = false } }
-            do {
-                let result = try await self.configService.saveManagedSection(body: draft)
-                let reloaded = try await self.configService.loadConfigDocument()
-                await MainActor.run {
-                    self.applyConfigDocumentState(reloaded, preserveUserDraftIfDirty: false)
-                    let mode = result.wasInsert ? "Inserted" : "Updated"
-                    self.lastActionMessage = "\(mode) TilePilot managed section in skhdrc."
-                    self.lastErrorMessage = nil
-                }
-
-                await self.refreshShortcuts()
-                await self.runBestEffortSkhdRestart(afterConfigChange: true)
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Config save failed: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func restoreLatestConfigBackup() {
-        guard let backup = configBackups.first else {
-            lastErrorMessage = "No backups available."
-            lastActionMessage = nil
-            return
-        }
-        restoreConfigBackup(backup)
-    }
-
-    func restoreConfigBackup(_ backup: ConfigBackupInfo) {
-        guard !isRestoringConfig else { return }
-        isRestoringConfig = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isRestoringConfig = false } }
-            do {
-                _ = try await self.configService.restoreBackup(path: backup.path)
-                let reloaded = try await self.configService.loadConfigDocument()
-                await MainActor.run {
-                    self.applyConfigDocumentState(reloaded, preserveUserDraftIfDirty: false)
-                    self.lastActionMessage = "Restored backup: \(URL(fileURLWithPath: backup.path).lastPathComponent)"
-                    self.lastErrorMessage = nil
-                }
-
-                await self.refreshShortcuts()
-                await self.runBestEffortSkhdRestart(afterConfigChange: true)
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Restore failed: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func resetWindowBehaviorDraft() {
-        windowBehaviorAutoSaveTask?.cancel()
-        windowBehaviorAutoSaveTask = nil
-        windowBehaviorPolicyDraft = originalWindowBehaviorPolicy
-        syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
-        recomputeYabaiConfigDiffPreview()
-        lastActionMessage = "Reverted Window Behavior draft."
-        lastErrorMessage = nil
-    }
-
-    func saveWindowBehaviorPolicy() {
-        saveWindowBehaviorPolicy(reason: .manual)
-    }
-
-    private enum WindowBehaviorSaveReason {
-        case manual
-        case autosave
-    }
-
-    private func saveWindowBehaviorPolicy(reason: WindowBehaviorSaveReason) {
-        guard !isSavingYabaiConfig else { return }
-        guard isWindowBehaviorDraftDirty else {
-            if isApplyingStagedAppRules {
-                isApplyingStagedAppRules = false
-                syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
-            }
-            return
-        }
-        isSavingYabaiConfig = true
-        let draft = windowBehaviorPolicyDraft
-        let previousPolicy = originalWindowBehaviorPolicy
-        let wasApplyingStagedRules = isApplyingStagedAppRules
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isSavingYabaiConfig = false } }
-            do {
-                _ = try await self.yabaiRulesConfigService.saveWindowBehaviorPolicy(draft)
-                let reloaded = try await self.yabaiRulesConfigService.loadConfigDocument()
-                await MainActor.run {
-                    self.applyYabaiConfigDocumentState(reloaded, preserveDraftIfDirty: false)
-                    if wasApplyingStagedRules {
-                        self.lastActionMessage = "App rule list changes applied."
-                        self.windowBehaviorAutosaveActionMessage = nil
-                        self.windowBehaviorAutosaveErrorMessage = nil
-                    } else if reason == .manual {
-                        self.lastActionMessage = "Window behavior saved to yabairc."
-                        self.windowBehaviorAutosaveActionMessage = nil
-                        self.windowBehaviorAutosaveErrorMessage = nil
-                    } else {
-                        self.lastActionMessage = nil
-                        self.windowBehaviorAutosaveActionMessage = "Behavior changes saved."
-                        self.windowBehaviorAutosaveErrorMessage = nil
-                    }
-                    self.lastErrorMessage = nil
-                    if wasApplyingStagedRules {
-                        self.isApplyingStagedAppRules = false
-                        self.syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
-                    }
-                }
-                await self.applyWindowBehaviorRuntime(previous: previousPolicy, current: draft)
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Saving yabairc settings failed: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                    if reason == .autosave, !wasApplyingStagedRules {
-                        self.windowBehaviorAutosaveErrorMessage = "Could not save behavior changes. Try again."
-                        self.windowBehaviorAutosaveActionMessage = nil
-                    }
-                    if wasApplyingStagedRules {
-                        self.isApplyingStagedAppRules = false
-                    }
-                }
-            }
-        }
-    }
-
-    func restoreYabaiConfigBackup(_ backup: ConfigBackupInfo) {
-        guard !isRestoringYabaiConfig else { return }
-        isRestoringYabaiConfig = true
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isRestoringYabaiConfig = false } }
-            do {
-                _ = try await self.yabaiRulesConfigService.restoreBackup(path: backup.path)
-                let reloaded = try await self.yabaiRulesConfigService.loadConfigDocument()
-                await MainActor.run {
-                    self.applyYabaiConfigDocumentState(reloaded, preserveDraftIfDirty: false)
-                    self.lastActionMessage = "Restored yabairc backup: \(URL(fileURLWithPath: backup.path).lastPathComponent)"
-                    self.lastErrorMessage = nil
-                }
-                await self.applyWindowBehaviorRuntime(previous: self.originalWindowBehaviorPolicy, current: reloaded.policy)
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Restore yabairc backup failed: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func enableManualTilingMode() {
-        windowBehaviorPolicyDraft.manualTilingModeEnabled = true
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func disableManualTilingMode() {
-        windowBehaviorPolicyDraft.manualTilingModeEnabled = false
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func setHoverFocusMode(_ mode: HoverFocusMode) {
-        windowBehaviorPolicyDraft.hoverFocusMode = mode
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func setMouseFollowsFocusEnabled(_ enabled: Bool) {
-        windowBehaviorPolicyDraft.mouseFollowsFocusEnabled = enabled
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func updateManualTilingModeDraft(_ enabled: Bool) {
-        windowBehaviorPolicyDraft.manualTilingModeEnabled = enabled
-        recomputeYabaiConfigDiffPreview()
-        scheduleDebouncedWindowBehaviorSave(reason: "manual-tiling")
-    }
-
-    func updateHoverFocusModeDraft(_ mode: HoverFocusMode) {
-        windowBehaviorPolicyDraft.hoverFocusMode = mode
-        recomputeYabaiConfigDiffPreview()
-        scheduleDebouncedWindowBehaviorSave(reason: "hover-focus")
-    }
-
-    func updateMouseFollowsFocusDraft(_ enabled: Bool) {
-        windowBehaviorPolicyDraft.mouseFollowsFocusEnabled = enabled
-        recomputeYabaiConfigDiffPreview()
-        scheduleDebouncedWindowBehaviorSave(reason: "mouse-follows-focus")
-    }
-
-    func disableHoverFocus() {
-        windowBehaviorPolicyDraft.hoverFocusMode = .off
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func disableMouseFollowsFocus() {
-        windowBehaviorPolicyDraft.mouseFollowsFocusEnabled = false
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy()
-    }
-
-    func addStagedNeverTileApp(_ name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        stagedAlwaysTileApps = removeAppName(trimmed, from: stagedAlwaysTileApps)
-        stagedNeverTileApps = addingAppName(trimmed, to: stagedNeverTileApps)
-    }
-
-    func removeStagedNeverTileApp(_ name: String) {
-        stagedNeverTileApps = removeAppName(name, from: stagedNeverTileApps)
-    }
-
-    func addStagedAlwaysTileApp(_ name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        stagedNeverTileApps = removeAppName(trimmed, from: stagedNeverTileApps)
-        stagedAlwaysTileApps = addingAppName(trimmed, to: stagedAlwaysTileApps)
-    }
-
-    func removeStagedAlwaysTileApp(_ name: String) {
-        stagedAlwaysTileApps = removeAppName(name, from: stagedAlwaysTileApps)
-    }
-
-    func discardStagedAppRuleListChanges() {
-        syncStagedAppRuleListsFromDraft(preservePendingChanges: false)
-        lastActionMessage = "Discarded app rule list edits."
-        lastErrorMessage = nil
-    }
-
-    func applyStagedAppRuleListChanges() {
-        guard isAppRuleListApplyRequired else { return }
-        guard !isSavingYabaiConfig else { return }
-        isApplyingStagedAppRules = true
-        windowBehaviorPolicyDraft.neverTileApps = canonicalizeAppRuleList(stagedNeverTileApps)
-        windowBehaviorPolicyDraft.alwaysTileApps = canonicalizeAppRuleList(stagedAlwaysTileApps)
-        recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy(reason: .manual)
-    }
-
     func toggleWindowBadgeOverlay() {
-        showWindowBadgeOverlay.toggle()
-        UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
-        refreshWindowBadges()
+        setWindowBadgeOverlayEnabled(!showWindowBadgeOverlay)
         lastActionMessage = showWindowBadgeOverlay ? "Window badges enabled." : "Window badges disabled."
         lastErrorMessage = nil
     }
 
     func toggleWindowOutlineOverlay() {
-        showWindowOutlineOverlay.toggle()
-        UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
-        refreshWindowBadges()
+        setWindowOutlineOverlayEnabled(!showWindowOutlineOverlay)
         lastActionMessage = showWindowOutlineOverlay ? "Window outline overlay enabled." : "Window outline overlay disabled."
         lastErrorMessage = nil
-    }
-
-    func bringFloatingWindowsToFrontCurrentDesktop() {
-        Task { [weak self] in
-            guard let self else { return }
-            await self.bringFloatingWindowsToFrontCurrentDesktop(
-                flaggedOnly: false,
-                reason: .manualAll,
-                bypassCooldown: true
-            )
-        }
-    }
-
-    func bringFlaggedFloatingWindowsToFrontCurrentDesktop(reason: String = "manual") {
-        Task { [weak self] in
-            guard let self else { return }
-            let internalReason: FloatingBringReason = reason == "auto" ? .autoTransition : .manualFlagged
-            await self.bringFloatingWindowsToFrontCurrentDesktop(
-                flaggedOnly: true,
-                reason: internalReason,
-                bypassCooldown: internalReason != .autoTransition
-            )
-        }
-    }
-
-    func tileFocusedWindowNow() {
-        guard let focused = focusedWindowState else {
-            lastErrorMessage = "No focused window detected."
-            lastActionMessage = nil
-            return
-        }
-        setWindowFloating(windowID: focused.id, shouldFloat: false, bringToFrontOnFloat: true)
-    }
-
-    func floatFocusedWindowNow() {
-        guard let focused = focusedWindowState else {
-            lastErrorMessage = "No focused window detected."
-            lastActionMessage = nil
-            return
-        }
-        setWindowFloating(windowID: focused.id, shouldFloat: true, bringToFrontOnFloat: true)
-    }
-
-    func toggleFocusedWindowTiling() {
-        guard let focused = focusedWindowState else {
-            lastErrorMessage = "No focused window detected."
-            lastActionMessage = nil
-            return
-        }
-        toggleWindowFloating(windowID: focused.id, bringToFrontOnFloat: true)
-    }
-
-    func focusWindow(windowID: Int) {
-        guard let window = runtimeControllableWindow(windowID: windowID) else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            await self.bringWindowToFront(windowID: windowID)
-            await MainActor.run {
-                self.lastActionMessage = "Focused \(window.app)."
-                self.lastErrorMessage = nil
-            }
-            await self.refreshLiveState()
-        }
-    }
-
-    func focusDesktop(index: Int) {
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "space", "--focus", String(index)], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: result)
-            }
-            if result.isSuccess {
-                await MainActor.run {
-                    self.lastActionMessage = "Switched to Desktop \(index)."
-                    self.lastErrorMessage = nil
-                }
-                await self.refreshLiveState()
-                return
-            }
-
-            if await self.focusAnyWindowOnDesktop(index: index) {
-                await MainActor.run {
-                    self.lastActionMessage = "Switched to Desktop \(index)."
-                    self.lastErrorMessage = nil
-                }
-                await self.refreshLiveState()
-                return
-            }
-
-            if self.isScriptingAdditionDesktopFocusFailure(result),
-               self.triggerMissionControlDesktopShortcut(index: index) {
-                await MainActor.run {
-                    self.lastActionMessage = "Switched to Desktop \(index) using macOS shortcut fallback."
-                    self.lastErrorMessage = nil
-                }
-                await self.refreshLiveState()
-                return
-            }
-
-            await MainActor.run {
-                self.lastErrorMessage = "Could not switch to Desktop \(index)."
-                self.lastActionMessage = nil
-            }
-        }
-    }
-
-    func desktopTilingEnabled(spaceIndex: Int) -> Bool? {
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else { return nil }
-        guard let layout = snapshot.spaces.first(where: { $0.index == spaceIndex })?.layout?.lowercased() else { return nil }
-        if layout == "float" { return false }
-        if layout == "bsp" || layout == "stack" { return true }
-        return nil
-    }
-
-    func desktopTilingDisabledReason(spaceIndex: Int) -> String? {
-        guard canRunYabaiRuntimeCommands else {
-            return yabaiRuntimeControlDisabledReason ?? "Desktop controls are unavailable."
-        }
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
-            return "Desktop layout data is unavailable right now."
-        }
-        guard snapshot.spaces.contains(where: { $0.index == spaceIndex }) else {
-            return "Desktop \(spaceIndex) is not currently available."
-        }
-        return nil
-    }
-
-    func setDesktopTilingEnabled(spaceIndex: Int, enabled: Bool) {
-        if let reason = desktopTilingDisabledReason(spaceIndex: spaceIndex) {
-            lastErrorMessage = reason
-            lastActionMessage = nil
-            return
-        }
-        if let current = desktopTilingEnabled(spaceIndex: spaceIndex), current == enabled {
-            lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling is already on." : "Desktop \(spaceIndex) tiling is already off."
-            lastErrorMessage = nil
-            return
-        }
-
-        Task { [weak self] in
-            guard let self else { return }
-            let targetLayout = enabled ? "bsp" : "float"
-            let result = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: result)
-                if result.isSuccess {
-                    self.lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling enabled." : "Desktop \(spaceIndex) tiling disabled."
-                    self.lastErrorMessage = nil
-                } else {
-                    self.lastErrorMessage = enabled
-                        ? "Failed to enable tiling on Desktop \(spaceIndex)."
-                        : "Failed to disable tiling on Desktop \(spaceIndex)."
-                    self.lastActionMessage = nil
-                }
-            }
-            guard result.isSuccess else { return }
-            await self.refreshLiveState()
-            await self.refreshDoctor()
-        }
-    }
-
-    func setAllDesktopTilingEnabled(enabled: Bool) {
-        guard canRunYabaiRuntimeCommands else {
-            lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Desktop controls are unavailable."
-            lastActionMessage = nil
-            return
-        }
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
-            lastErrorMessage = "Desktop layout data is unavailable right now."
-            lastActionMessage = nil
-            return
-        }
-        let targetSpaces = snapshot.spaces.map(\.index).sorted()
-        guard !targetSpaces.isEmpty else {
-            lastErrorMessage = "No desktops available."
-            lastActionMessage = nil
-            return
-        }
-
-        Task { [weak self] in
-            guard let self else { return }
-            let targetLayout = enabled ? "bsp" : "float"
-            var successCount = 0
-            for spaceIndex in targetSpaces {
-                let result = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
-                )
-                await MainActor.run {
-                    self.appendCommandLog(from: result)
-                }
-                if result.isSuccess {
-                    successCount += 1
-                }
-            }
-            await MainActor.run {
-                if successCount == targetSpaces.count {
-                    self.lastActionMessage = enabled ? "Enabled tiling on all desktops." : "Disabled tiling on all desktops."
-                    self.lastErrorMessage = nil
-                } else {
-                    self.lastActionMessage = enabled
-                        ? "Enabled tiling on \(successCount)/\(targetSpaces.count) desktops."
-                        : "Disabled tiling on \(successCount)/\(targetSpaces.count) desktops."
-                    self.lastErrorMessage = "Some desktops could not be updated."
-                }
-            }
-            await self.refreshLiveState()
-            await self.refreshDoctor()
-        }
-    }
-
-    func toggleWindowFloating(windowID: Int, bringToFrontOnFloat: Bool = false) {
-        guard let window = runtimeControllableWindow(windowID: windowID) else { return }
-        setWindowFloating(windowID: windowID, shouldFloat: !window.floating, bringToFrontOnFloat: bringToFrontOnFloat)
-    }
-
-    func setWindowFloating(windowID: Int, shouldFloat: Bool, bringToFrontOnFloat: Bool = false) {
-        guard let window = runtimeControllableWindow(windowID: windowID) else { return }
-        if window.floating == shouldFloat {
-            lastActionMessage = shouldFloat ? "\(window.app) is already floating." : "\(window.app) is already tiled."
-            lastErrorMessage = nil
-            return
-        }
-
-        Task { [weak self] in
-            guard let self else { return }
-            let toggle = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(windowID), "--toggle", "float"], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: toggle)
-                if !toggle.isSuccess {
-                    self.lastErrorMessage = shouldFloat ? "Failed to set window to floating." : "Failed to set window to tiled."
-                    self.lastActionMessage = nil
-                }
-            }
-            guard toggle.isSuccess else { return }
-
-            let foregroundPolicyEnabled = self.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
-            if shouldFloat && (bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled) {
-                // Keep-on-top policy itself should not steal focus.
-                // Explicit user actions (focus/raise toggles) can still use focus fallback.
-                let shouldAllowFocusFallback = bringToFrontOnFloat || self.raiseOnFloatToggleEnabled
-                _ = await self.raiseWindowOnly(
-                    windowID: windowID,
-                    targetSpace: window.space,
-                    bypassCooldown: true,
-                    allowFocusFallback: shouldAllowFocusFallback
-                )
-            }
-            if shouldFloat && foregroundPolicyEnabled {
-                await self.bringFloatingWindowsToFrontCurrentDesktop(
-                    flaggedOnly: true,
-                    reason: .floatToggle,
-                    bypassCooldown: false
-                )
-            }
-
-            await MainActor.run {
-                self.lastActionMessage = shouldFloat ? "Window set to floating." : "Window set to tiled."
-                self.lastErrorMessage = nil
-            }
-            await self.refreshLiveState()
-        }
-    }
-
-    func openWindowBehaviorSettings() {
-        requestOpenTilePilotTab(.windowBehavior)
-    }
-
-    func openShortcutsDashboard() {
-        acknowledgeInitialStatusIfNeeded()
-        requestOpenTilePilotTab(.shortcuts)
-        NSApp.activate(ignoringOtherApps: true)
-        if let mainWindow = NSApp.windows.first(where: { window in
-            window.styleMask.contains(.titled) && window.title == "TilePilot"
-        }) {
-            mainWindow.makeKeyAndOrderFront(nil)
-        }
-    }
-
-    func openShortcutSource(_ entry: ShortcutEntry) {
-        selectShortcut(entry)
-        requestOpenFile(path: entry.sourceFile, line: entry.sourceLine)
-    }
-
-    var canRunYabaiRuntimeCommands: Bool {
-        guard let snapshot = doctorSnapshot else { return false }
-        let map = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0.status) })
-        return map["yabai-binary"] == .available && map["yabai-daemon"] == .available
-    }
-
-    var canRunScriptingAdditionDesktopActions: Bool {
-        guard let snapshot = doctorSnapshot else { return false }
-        let map = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0.status) })
-        return map["scripting-addition"] == .available
-    }
-
-    func isScriptingAdditionDesktopShortcut(_ entry: ShortcutEntry) -> Bool {
-        entry.command.lowercased().contains("yabai -m window --space")
-    }
-
-    var yabaiRuntimeControlDisabledReason: String? {
-        guard let snapshot = doctorSnapshot else { return "Open System and run Recheck first." }
-        let map = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0) })
-        if map["yabai-binary"]?.status != .available {
-            return map["yabai-binary"]?.message ?? "yabai is not installed."
-        }
-        if map["yabai-daemon"]?.status != .available {
-            return map["yabai-daemon"]?.message ?? "yabai is not running."
-        }
-        return nil
-    }
-
-    func displayShortcutCombo(_ entry: ShortcutEntry) -> String {
-        let display = parseShortcutComboDisplay(entry.combo)
-        if display.symbols == display.words || display.symbols.isEmpty {
-            return display.words
-        }
-        return "\(display.symbols)  \(display.words)"
-    }
-
-    func displayShortcutComboWords(_ entry: ShortcutEntry) -> String {
-        parseShortcutComboDisplay(entry.combo).words
-    }
-
-    func displayShortcutComboSymbols(_ entry: ShortcutEntry) -> String {
-        parseShortcutComboDisplay(entry.combo).symbols
-    }
-
-    func displayShortcutComboSymbolsSpaced(_ entry: ShortcutEntry) -> String {
-        parseShortcutComboDisplay(entry.combo).symbolsSpaced
-    }
-
-    func displayShortcutComboSymbols(from combo: String) -> String {
-        parseShortcutComboDisplay(combo).symbols
-    }
-
-    func displayShortcutComboWords(from combo: String) -> String {
-        parseShortcutComboDisplay(combo).words
-    }
-
-    func displayShortcutPrimaryKey(_ entry: ShortcutEntry) -> String {
-        let trimmed = entry.combo.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "?" }
-        let separatorIndex = trimmed.lastIndex(of: "-")
-        let keyPartRaw = separatorIndex.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed
-        let keyTokens = keyPartRaw
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-            .filter { !$0.isEmpty }
-        let firstToken = (keyTokens.isEmpty ? [keyPartRaw.trimmingCharacters(in: .whitespacesAndNewlines)] : keyTokens).first?.lowercased() ?? ""
-        return displayPrimaryKeyToken(lower: firstToken)
-    }
-
-    var pinnedShortcutEntries: [ShortcutEntry] {
-        var byKey: [String: ShortcutEntry] = [:]
-        for entry in shortcutEntries {
-            byKey[entry.stableKey] = entry
-        }
-        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedShortcutKeys.enumerated().map { ($0.element, $0.offset) })
-        let orderRank = flatShortcutsOrderRankByID()
-        return pinnedShortcutKeys.compactMap { byKey[$0] }.sorted { lhs, rhs in
-            let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
-            let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
-            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
-            let lhsFallback = fallbackRank[lhs.stableKey] ?? Int.max
-            let rhsFallback = fallbackRank[rhs.stableKey] ?? Int.max
-            if lhsFallback != rhsFallback { return lhsFallback < rhsFallback }
-            return lhs.sourceLine < rhs.sourceLine
-        }
-    }
-
-    var pinnedDirectionalGroups: [DirectionalShortcutGroup] {
-        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedDirectionalGroupIDs.enumerated().map { ($0.element, $0.offset) })
-        let orderRank = flatShortcutsOrderRankByID()
-        return pinnedDirectionalGroupIDs
-            .compactMap(DirectionalShortcutGroup.init(rawValue:))
-            .sorted { lhs, rhs in
-                let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
-                let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
-                if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
-                let lhsFallback = fallbackRank[lhs.rawValue] ?? Int.max
-                let rhsFallback = fallbackRank[rhs.rawValue] ?? Int.max
-                return lhsFallback < rhsFallback
-            }
-    }
-
-    var pinnedDirectionalGroupBindings: [(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])] {
-        pinnedDirectionalGroups.map { group in
-            (group: group, bindings: directionalShortcutBindings(for: group))
-        }
-    }
-
-    var pinnedShortcutContextItems: [PinnedShortcutContextItem] {
-        let orderRank = flatShortcutsOrderRankByID()
-        var items: [PinnedShortcutContextItem] = []
-
-        items.append(contentsOf: pinnedFeatureControlRows.map(PinnedShortcutContextItem.feature))
-        items.append(contentsOf: pinnedDirectionalGroupBindings.map { PinnedShortcutContextItem.directional(group: $0.group, bindings: $0.bindings) })
-
-        let nonFeaturePinnedShortcuts = pinnedShortcutEntries.filter { entry in
-            if featureControlRow(forShortcutEntry: entry)?.featureID != nil {
-                return false
-            }
-            return !(isScriptingAdditionDesktopShortcut(entry) && !canRunScriptingAdditionDesktopActions)
-        }
-        items.append(contentsOf: nonFeaturePinnedShortcuts.map(PinnedShortcutContextItem.shortcut))
-
-        return items.sorted { lhs, rhs in
-            let lhsRank = orderRank[pinnedContextOrderID(lhs)] ?? Int.max
-            let rhsRank = orderRank[pinnedContextOrderID(rhs)] ?? Int.max
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            return pinnedContextOrderID(lhs) < pinnedContextOrderID(rhs)
-        }
-    }
-
-    func isShortcutPinned(_ entry: ShortcutEntry) -> Bool {
-        if let featureID = featureDefinition(for: entry)?.id {
-            return isFeaturePinned(featureID)
-        }
-        return pinnedShortcutKeys.contains(entry.stableKey)
-    }
-
-    func isDirectionalGroupPinned(_ group: DirectionalShortcutGroup) -> Bool {
-        pinnedDirectionalGroupIDs.contains(group.rawValue)
-    }
-
-    func isShortcutSelected(_ entry: ShortcutEntry) -> Bool {
-        selectedShortcutStableKey == entry.stableKey
-    }
-
-    func selectShortcut(_ entry: ShortcutEntry) {
-        selectedShortcutStableKey = entry.stableKey
-    }
-
-    func toggleShortcutPinned(_ entry: ShortcutEntry) {
-        selectShortcut(entry)
-        if let featureID = featureDefinition(for: entry)?.id {
-            toggleFeaturePinned(featureID)
-            return
-        }
-        if isShortcutPinned(entry) {
-            pinnedShortcutKeys.removeAll { $0 == entry.stableKey }
-            lastActionMessage = "Removed shortcut from right-click menu."
-        } else {
-            pinnedShortcutKeys.append(entry.stableKey)
-            pinnedShortcutKeys = Array(NSOrderedSet(array: pinnedShortcutKeys)) as? [String] ?? pinnedShortcutKeys
-            lastActionMessage = "Pinned shortcut to right-click menu."
-        }
-        persistPinnedShortcutKeys()
-        lastErrorMessage = nil
-    }
-
-    func toggleDirectionalGroupPinned(_ group: DirectionalShortcutGroup) {
-        if isDirectionalGroupPinned(group) {
-            pinnedDirectionalGroupIDs.removeAll { $0 == group.rawValue }
-            lastActionMessage = "Removed \(group.menuTitle) from right-click menu."
-        } else {
-            pinnedDirectionalGroupIDs.append(group.rawValue)
-            pinnedDirectionalGroupIDs = Array(NSOrderedSet(array: pinnedDirectionalGroupIDs)) as? [String] ?? pinnedDirectionalGroupIDs
-            lastActionMessage = "Pinned \(group.menuTitle) to right-click menu."
-        }
-        persistPinnedDirectionalGroupIDs()
-        lastErrorMessage = nil
-    }
-
-    func runShortcut(_ entry: ShortcutEntry) {
-        selectShortcut(entry)
-        runShortcutCommand(entry.command, shortcutLabel: "\(entry.combo) - \(shortcutExplanation(entry))")
-    }
-
-    func runPinnedShortcut(stableKey: String) {
-        guard let entry = shortcutEntries.first(where: { $0.stableKey == stableKey }) else {
-            lastErrorMessage = "Pinned shortcut is no longer in skhdrc. Open Shortcuts to refresh or unpin it."
-            lastActionMessage = nil
-            return
-        }
-        if let featureID = featureDefinition(for: entry)?.id {
-            runFeatureControl(featureID, source: .statusMenu)
-            return
-        }
-        runShortcut(entry)
-    }
-
-    func directionalShortcutBindings(for group: DirectionalShortcutGroup) -> [DirectionalShortcutBinding] {
-        shortcutEntries.compactMap { entry in
-            guard let binding = directionalShortcutBinding(for: entry), binding.group == group else { return nil }
-            return binding
-        }
-        .sorted { lhs, rhs in
-            if lhs.direction.sortRank != rhs.direction.sortRank { return lhs.direction.sortRank < rhs.direction.sortRank }
-            return lhs.entry.sourceLine < rhs.entry.sourceLine
-        }
     }
 
     func shortcutExplanation(_ entry: ShortcutEntry) -> String {
@@ -1328,10 +481,13 @@ final class AppModel: ObservableObject {
     }
 
     func shortcutTitle(_ entry: ShortcutEntry) -> String {
-        shortcutTitle(for: entry)
+        cachedShortcutTitleByStableKey[entry.stableKey] ?? shortcutTitle(for: entry)
     }
 
     func shortcutSecondaryText(_ entry: ShortcutEntry) -> String? {
+        if let cached = cachedShortcutSecondaryByStableKey[entry.stableKey] {
+            return cached
+        }
         let title = shortcutTitle(entry)
         let explanation = shortcutExplanation(entry)
         if normalizedShortcutCopy(title) == normalizedShortcutCopy(explanation) {
@@ -1341,217 +497,7 @@ final class AppModel: ObservableObject {
     }
 
     func actionButtonLabel(for actionID: TilePilotActionID) -> String {
-        actionMeta(for: actionID).buttonLabel
-    }
-
-    var editableFileLineCount: Int {
-        max(1, editableFileDraft.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count)
-    }
-
-    var selectedEditableFile: EditableConfigFile? {
-        guard let path = selectedEditableFilePath else { return nil }
-        return editableFiles.first(where: { $0.path == path }) ??
-            EditableConfigFile(
-                path: path,
-                displayName: URL(fileURLWithPath: path).lastPathComponent,
-                kind: selectedEditableFileKind,
-                exists: selectedEditableFileExists,
-                isDiscovered: true
-            )
-    }
-
-    var isEditableFileDraftDirty: Bool {
-        editableFileDraft != editableFileOriginal
-    }
-
-    func refreshEditableFiles() async {
-        guard !isRefreshingEditableFiles else { return }
-        isRefreshingEditableFiles = true
-        defer { isRefreshingEditableFiles = false }
-
-        let discovered = await configFilesService.discoverFiles(shortcuts: shortcutEntries)
-        editableFiles = discovered
-
-        if let target = consumeRequestedFileEditorTarget() {
-            await openEditableFile(path: target.path, line: target.line)
-            return
-        }
-
-        if let selected = selectedEditableFilePath, discovered.contains(where: { $0.path == selected }) {
-            if selectedEditableFilePath == nil || !isEditableFileDraftDirty {
-                await loadEditableFile(path: selected, line: nil)
-            }
-        } else if let first = discovered.first {
-            await loadEditableFile(path: first.path, line: nil)
-        }
-    }
-
-    func handlePendingFileEditorTargetIfNeeded() async {
-        guard let target = consumeRequestedFileEditorTarget() else { return }
-        await openEditableFile(path: target.path, line: target.line)
-    }
-
-    func openEditableFile(path: String, line: Int?) async {
-        if !editableFiles.contains(where: { $0.path == path }) {
-            let dynamic = EditableConfigFile(
-                path: path,
-                displayName: URL(fileURLWithPath: path).lastPathComponent,
-                kind: inferredEditableFileKind(for: path),
-                exists: FileManager.default.fileExists(atPath: path),
-                isDiscovered: true
-            )
-            editableFiles.append(dynamic)
-            editableFiles.sort { lhs, rhs in
-                editableFileSortRank(lhs) < editableFileSortRank(rhs) ||
-                (editableFileSortRank(lhs) == editableFileSortRank(rhs) && lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending)
-            }
-        }
-        await loadEditableFile(path: path, line: line)
-    }
-
-    func loadEditableFile(path: String, line: Int?) async {
-        guard !isLoadingEditableFile else { return }
-        isLoadingEditableFile = true
-        defer { isLoadingEditableFile = false }
-
-        do {
-            let state = try await configFilesService.loadDocument(path: path)
-            selectedEditableFilePath = state.file.path
-            selectedEditableFileBackups = state.backups
-            selectedEditableFileExists = state.file.exists
-            selectedEditableFileKind = state.file.kind
-            editableFileDraft = state.content
-            editableFileOriginal = state.content
-            editableFileJumpTargetLine = line
-            filesLastErrorMessage = nil
-            if let line {
-                filesLastActionMessage = "Editing \(state.file.displayName) at line \(line)."
-            }
-            editableFiles = editableFiles.map { $0.path == state.file.path ? state.file : $0 }
-        } catch {
-            filesLastErrorMessage = "Failed to load file: \(error.localizedDescription)"
-            filesLastActionMessage = nil
-        }
-    }
-
-    func updateEditableFileDraft(_ newValue: String) {
-        editableFileDraft = newValue
-    }
-
-    func consumeEditableFileJumpTargetLine() -> Int? {
-        defer { editableFileJumpTargetLine = nil }
-        return editableFileJumpTargetLine
-    }
-
-    func saveSelectedEditableFile() {
-        guard let path = selectedEditableFilePath, !isSavingEditableFile else { return }
-        isSavingEditableFile = true
-        let content = editableFileDraft
-        let kind = selectedEditableFileKind
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isSavingEditableFile = false } }
-            do {
-                let result = try await self.configFilesService.saveFile(path: path, content: content)
-                await MainActor.run {
-                    self.selectedEditableFileBackups = result.backups
-                    self.selectedEditableFileExists = true
-                    self.selectedEditableFileKind = result.file.kind
-                    self.editableFileOriginal = content
-                    self.editableFiles = self.editableFiles.map { $0.path == path ? result.file : $0 }
-                    self.filesLastActionMessage = "Saved \(result.file.displayName)."
-                    self.filesLastErrorMessage = nil
-                    if kind == .script {
-                        self.scriptHeaderDescriptionCache[path] = nil
-                    }
-                }
-
-                if kind == .skhdrc {
-                    await self.runBestEffortSkhdRestartAfterRawFileSave()
-                }
-                if kind == .skhdrc {
-                    await self.refreshShortcuts()
-                } else if kind == .yabairc {
-                    await self.refreshWindowBehaviorConfig()
-                    await self.refreshDoctor()
-                    await self.refreshLiveState()
-                }
-            } catch {
-                await MainActor.run {
-                    self.filesLastErrorMessage = "Save failed: \(error.localizedDescription)"
-                    self.filesLastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func revertSelectedEditableFileDraft() {
-        editableFileDraft = editableFileOriginal
-        filesLastActionMessage = "Discarded unsaved edits."
-        filesLastErrorMessage = nil
-    }
-
-    func restoreSelectedEditableFileBackup(_ backup: ConfigBackupInfo? = nil) {
-        guard let path = selectedEditableFilePath else { return }
-        guard !isRestoringEditableFile else { return }
-        guard let backupToRestore = backup ?? selectedEditableFileBackups.first else {
-            filesLastErrorMessage = "No backups available for this file."
-            filesLastActionMessage = nil
-            return
-        }
-
-        isRestoringEditableFile = true
-        let kind = selectedEditableFileKind
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isRestoringEditableFile = false } }
-            do {
-                _ = try await self.configFilesService.restoreBackup(filePath: path, backupPath: backupToRestore.path)
-                let reloaded = try await self.configFilesService.loadDocument(path: path)
-                await MainActor.run {
-                    self.selectedEditableFileBackups = reloaded.backups
-                    self.selectedEditableFileExists = reloaded.file.exists
-                    self.selectedEditableFileKind = reloaded.file.kind
-                    self.editableFileDraft = reloaded.content
-                    self.editableFileOriginal = reloaded.content
-                    self.editableFiles = self.editableFiles.map { $0.path == path ? reloaded.file : $0 }
-                    self.filesLastActionMessage = "Restored backup: \(URL(fileURLWithPath: backupToRestore.path).lastPathComponent)"
-                    self.filesLastErrorMessage = nil
-                    if kind == .script {
-                        self.scriptHeaderDescriptionCache[path] = nil
-                    }
-                }
-                if kind == .skhdrc {
-                    await self.runBestEffortSkhdRestartAfterRawFileSave()
-                    await self.refreshShortcuts()
-                } else if kind == .yabairc {
-                    await self.refreshWindowBehaviorConfig()
-                    await self.refreshDoctor()
-                    await self.refreshLiveState()
-                }
-            } catch {
-                await MainActor.run {
-                    self.filesLastErrorMessage = "Restore failed: \(error.localizedDescription)"
-                    self.filesLastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func revealSelectedEditableFileInFinder() {
-        guard let path = selectedEditableFilePath else { return }
-        configFilesService.revealInFinder(path: path)
-        filesLastActionMessage = "Revealed file in Finder."
-        filesLastErrorMessage = nil
-    }
-
-    func restartYabaiAfterRawFileEdit() {
-        guard selectedEditableFileKind == .yabairc else { return }
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--restart-service"], timeout: 2.0),
-            successMessage: "Requested yabai service restart."
-        )
+        TilePilotActionCatalog.meta(for: actionID).buttonLabel
     }
 
     func updateManagedConfigDraft(_ newValue: String) {
@@ -1559,36 +505,15 @@ final class AppModel: ObservableObject {
         recomputeConfigDiffPreview()
     }
 
-    func performTilePilotAction(_ actionID: TilePilotActionID) {
-        guard activeActionID == nil else { return }
-        let availability = actionAvailability(for: actionID)
-        guard availability.enabled else {
-            let message = availability.disabledReason ?? "This action is unavailable right now."
-            actionsLastErrorMessage = message
-            actionsLastActionMessage = nil
-            lastErrorMessage = message
-            lastActionMessage = nil
-            return
-        }
-
-        actionsLastErrorMessage = nil
-        actionsLastActionMessage = nil
-
-        Task { [weak self] in
-            guard let self else { return }
-            await self.runTilePilotAction(actionID)
-        }
-    }
-
-    private func persistPinnedShortcutKeys() {
+    func persistPinnedShortcutKeys() {
         UserDefaults.standard.set(pinnedShortcutKeys, forKey: AppModel.pinnedShortcutsDefaultsKey)
     }
 
-    private func persistPinnedDirectionalGroupIDs() {
+    func persistPinnedDirectionalGroupIDs() {
         UserDefaults.standard.set(pinnedDirectionalGroupIDs, forKey: AppModel.pinnedDirectionalGroupsDefaultsKey)
     }
 
-    private func persistPinnedFeatureControlIDs() {
+    func persistPinnedFeatureControlIDs() {
         UserDefaults.standard.set(pinnedFeatureControlIDs, forKey: AppModel.pinnedFeatureControlsDefaultsKey)
     }
 
@@ -1639,118 +564,7 @@ final class AppModel: ObservableObject {
         entry.command.lowercased().contains("space-relief.sh")
     }
 
-    private func parseShortcutComboDisplay(_ combo: String) -> (symbols: String, symbolsSpaced: String, words: String) {
-        let trimmed = combo.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return ("", "", combo) }
-
-        let separatorIndex = trimmed.lastIndex(of: "-")
-        let modifiersPart = separatorIndex.map { String(trimmed[..<$0]) } ?? ""
-        let keyPartRaw = separatorIndex.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed
-
-        let modifierTokens = modifiersPart
-            .split(separator: "+")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        let keyTokens = keyPartRaw
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-            .filter { !$0.isEmpty }
-
-        var modifierWords: [String] = []
-        var modifierSymbols: [String] = []
-        for token in modifierTokens {
-            let lower = token.lowercased()
-            switch lower {
-            case "alt":
-                modifierWords.append("Option")
-                modifierSymbols.append("⌥")
-            case "cmd":
-                modifierWords.append("Command")
-                modifierSymbols.append("⌘")
-            case "ctrl":
-                modifierWords.append("Control")
-                modifierSymbols.append("⌃")
-            case "shift":
-                modifierWords.append("Shift")
-                modifierSymbols.append("⇧")
-            case "fn":
-                modifierWords.append("Fn")
-                modifierSymbols.append("fn")
-            default:
-                modifierWords.append(token)
-                modifierSymbols.append(token)
-            }
-        }
-
-        let keyWordTokens = (keyTokens.isEmpty ? [keyPartRaw.trimmingCharacters(in: .whitespacesAndNewlines)] : keyTokens).filter { !$0.isEmpty }
-        let keyWords = keyWordTokens.map { displayKeyWord(lower: $0.lowercased(), original: $0) }
-        let keySymbols = keyWordTokens.map { displayKeySymbol(lower: $0.lowercased(), original: $0) }
-
-        let words = (modifierWords + keyWords).joined(separator: " + ")
-        let keySymbolPart = keySymbols.joined(separator: keySymbols.count > 1 ? " " : "")
-        let symbolTokens = modifierSymbols + (keySymbolPart.isEmpty ? [] : [keySymbolPart])
-        let symbols = symbolTokens.joined()
-        let symbolsSpaced = symbolTokens.joined(separator: " ")
-        return (symbols, symbolsSpaced, words.isEmpty ? combo : words)
-    }
-
-    private func displayKeyWord(lower: String, original: String) -> String {
-        switch lower {
-        case "return", "enter": return "Return"
-        case "escape", "esc": return "Escape"
-        case "space": return "Space"
-        case "tab": return "Tab"
-        case "left": return "Left Arrow"
-        case "right": return "Right Arrow"
-        case "up": return "Up Arrow"
-        case "down": return "Down Arrow"
-        case "grave", "backtick": return "` / ~"
-        case "0x32": return "` / ~"
-        default:
-            if original.count == 1 { return original.uppercased() }
-            return original
-        }
-    }
-
-    private func displayKeySymbol(lower: String, original: String) -> String {
-        switch lower {
-        case "return", "enter": return "↩"
-        case "escape", "esc": return "⎋"
-        case "space": return "␣"
-        case "tab": return "⇥"
-        case "left": return "←"
-        case "right": return "→"
-        case "up": return "↑"
-        case "down": return "↓"
-        case "grave", "backtick": return "~"
-        case "0x32": return "~"
-        default:
-            if original.count == 1 { return original.uppercased() }
-            return original
-        }
-    }
-
-    private func displayPrimaryKeyToken(lower: String) -> String {
-        switch lower {
-        case "0x32", "grave", "backtick":
-            return "~"
-        case "left":
-            return "←"
-        case "right":
-            return "→"
-        case "up":
-            return "↑"
-        case "down":
-            return "↓"
-        case "space":
-            return "Space"
-        default:
-            return lower.isEmpty ? "?" : lower.uppercased()
-        }
-    }
-
-    private func directionalShortcutBinding(for entry: ShortcutEntry) -> DirectionalShortcutBinding? {
+    func directionalShortcutBinding(for entry: ShortcutEntry) -> DirectionalShortcutBinding? {
         let c = entry.command.lowercased()
 
         if let direction = directionalCardinalDirection(
@@ -1802,850 +616,6 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    private func runShortcutCommand(_ commandText: String, shortcutLabel: String) {
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await self.doctorService.runSupportCommand(
-                ShellCommand("/bin/zsh", ["-lc", commandText], timeout: 3.0)
-            )
-            await MainActor.run {
-                let logEntry = CommandLogEntry(
-                    id: UUID(),
-                    command: "shortcut: \(shortcutLabel)",
-                    startedAt: result.startedAt,
-                    endedAt: result.endedAt,
-                    durationMs: result.durationMs,
-                    exitStatus: result.exitStatus,
-                    stdoutSnippet: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-                    stderrSnippet: result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-                    errorType: result.errorType
-                )
-                self.commandLogs = Array(([logEntry] + self.commandLogs).prefix(200))
-
-                if result.isSuccess {
-                    self.lastActionMessage = "Ran shortcut: \(shortcutLabel)"
-                    self.lastErrorMessage = nil
-                    Task {
-                        await self.refreshLiveState()
-                    }
-                } else {
-                    let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.lastErrorMessage = stderr.isEmpty ? "Shortcut command failed: \(shortcutLabel)" : "Shortcut failed: \(stderr)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    private func shortcutExplanation(combo: String, command: String, category: String) -> String {
-        let c = command.lowercased()
-        let normalized = normalizedFeatureMatchCommand(c)
-
-        if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
-            return "One-time action: raises all floating windows on the current desktop."
-        }
-        if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
-            return "Toggles keep-on-top for the focused app when floating."
-        }
-        if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
-            return "Brings TilePilot to the front."
-        }
-
-        if c.contains("grid-tiling-floating.sh") {
-            return "Applies grid tiling on the current desktop and keeps those windows floating."
-        }
-        if c.contains("grid-tiling-auto-tiled.sh") {
-            return "Applies grid tiling on the current desktop, then returns to real auto-tiling (BSP)."
-        }
-        if c.contains("grid-pack-toggle.sh") {
-            return "Legacy grid tiling toggle helper."
-        }
-
-        if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus") {
-            if let target = firstInteger(after: "--space", in: c) ?? firstInteger(after: "--focus", in: c) {
-                return "Moves the focused window to Desktop \(target), then switches to Desktop \(target)."
-            }
-            return "Moves the focused window to another desktop, then switches there."
-        }
-        if c.contains("yabai -m window --space") {
-            if let target = firstInteger(after: "--space", in: c) {
-                return "Moves the focused window to Desktop \(target)."
-            }
-            return "Moves the focused window to another desktop."
-        }
-        if c.contains("yabai -m space --focus"), let target = firstInteger(after: "--focus", in: c) {
-            return "Switches to Desktop \(target)."
-        }
-
-        if c.contains("yabai -m window --toggle float") {
-            return "Switches the focused window between tiled and floating."
-        }
-        if c.contains("yabai -m window --focus west") { return "Moves focus to the window on the left." }
-        if c.contains("yabai -m window --focus east") { return "Moves focus to the window on the right." }
-        if c.contains("yabai -m window --focus north") { return "Moves focus to the window above." }
-        if c.contains("yabai -m window --focus south") { return "Moves focus to the window below." }
-        if c.contains("yabai -m window --swap west") { return "Swaps the focused window with the window on the left." }
-        if c.contains("yabai -m window --swap east") { return "Swaps the focused window with the window on the right." }
-        if c.contains("yabai -m window --swap north") { return "Swaps the focused window with the window above." }
-        if c.contains("yabai -m window --swap south") { return "Swaps the focused window with the window below." }
-        if c.contains("yabai -m window --warp west") { return "Moves the focused window into the left tile position." }
-        if c.contains("yabai -m window --warp east") { return "Moves the focused window into the right tile position." }
-        if c.contains("yabai -m window --warp north") { return "Moves the focused window into the upper tile position." }
-        if c.contains("yabai -m window --warp south") { return "Moves the focused window into the lower tile position." }
-        if c.contains("yabai -m window --resize left:") { return "Resizes the focused window from the left edge (left)." }
-        if c.contains("yabai -m window --resize right:") { return "Resizes the focused window from the right edge (right)." }
-        if c.contains("yabai -m window --resize top:") { return "Resizes the focused window from the top edge (up)." }
-        if c.contains("yabai -m window --resize bottom:") { return "Resizes the focused window from the bottom edge (down)." }
-        if c.contains("yabai -m window --resize") { return "Resizes the focused window." }
-        if c.contains("yabai -m space --balance") { return "Balances the tiles on the current desktop." }
-        if c.contains("yabai -m space --rotate") {
-            if let degrees = firstInteger(after: "--rotate", in: c) {
-                return "Rotates the current desktop layout by \(degrees) degrees."
-            }
-            return "Rotates the current desktop layout."
-        }
-        if c.contains("yabai -m space --layout bsp") { return "Sets the current desktop layout to tiled splits." }
-        if c.contains("yabai -m space --layout stack") { return "Sets the current desktop layout to a stack." }
-        if c.contains("yabai -m space --focus prev") { return "Jumps to the previous desktop." }
-        if c.contains("yabai -m space --focus next") { return "Jumps to the next desktop." }
-        if c.contains("yabai -m space --focus") { return "Jumps to a specific desktop." }
-        if c.contains("yabai -m display --focus") { return "Moves focus to another display." }
-        if c.contains("yabai -m window --display") { return "Sends the focused window to another display." }
-        if c.contains("open -a ") || c.hasPrefix("open ") {
-            return "Opens an app or file."
-        }
-        if c.contains("osascript") {
-            return "Runs an AppleScript automation."
-        }
-        if c.contains("skhd -k") {
-            return "Triggers another keyboard sequence."
-        }
-        if let scriptDescription = scriptShortcutDescription(command: command) {
-            return scriptDescription
-        }
-
-        switch category {
-        case "Windows":
-            return "Runs a window shortcut from your skhd config."
-        case "Spaces":
-            return "Runs a desktop shortcut from your skhd config."
-        case "Displays":
-            return "Runs a display shortcut from your skhd config."
-        case "Apps":
-            return "Opens an app or file."
-        case "Macros":
-            return "Runs a helper macro from your skhd config."
-        default:
-            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return "No command is configured on this line." }
-            let snippet = trimmed.count > 72 ? String(trimmed.prefix(69)) + "..." : trimmed
-            return "Runs: \(snippet)"
-        }
-    }
-
-    private func scriptShortcutDescription(command: String) -> String? {
-        guard let path = scriptPath(from: command) else { return nil }
-        if let header = scriptDescriptionFromHeader(path: path) {
-            return header
-        }
-        return scriptFallbackDescription(from: path)
-    }
-
-    private func firstInteger(after flag: String, in text: String) -> Int? {
-        guard let range = text.range(of: flag) else { return nil }
-        let suffix = text[range.upperBound...]
-        let digits = suffix.firstMatch(of: /[^\d]*(\d+)/)?.1
-        if let digits {
-            return Int(String(digits))
-        }
-        return nil
-    }
-
-    func exportDiagnostics() {
-        guard let snapshot = doctorSnapshot else {
-            lastErrorMessage = "Run System Recheck before exporting diagnostics."
-            return
-        }
-
-        let report = DiagnosticsReport(
-            generatedAt: Date(),
-            systemProfile: snapshot.systemProfile,
-            health: snapshot,
-            capabilities: snapshot.capabilities,
-            recentCommands: Array(commandLogs.prefix(50))
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-
-        do {
-            let data = try encoder.encode(report)
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-            let stamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let url = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Desktop")
-                .appendingPathComponent("tilepilot-diagnostics-\(stamp).json")
-            try data.write(to: url, options: .atomic)
-            lastExportURL = url
-            lastErrorMessage = nil
-            lastActionMessage = "Diagnostics exported to \(url.lastPathComponent)"
-        } catch {
-            lastErrorMessage = "Diagnostics export failed: \(error.localizedDescription)"
-        }
-    }
-
-    func copyIssueReadySummary() {
-        guard let snapshot = doctorSnapshot else {
-            lastErrorMessage = "Run System Recheck before copying a status summary."
-            return
-        }
-
-        let failing = snapshot.capabilities
-            .filter { $0.status != .available }
-            .sorted { $0.status.severityRank > $1.status.severityRank }
-
-        var lines: [String] = []
-        lines.append("TilePilot Status Summary")
-        lines.append("Generated: \(snapshot.generatedAt.formatted(date: .abbreviated, time: .standard))")
-        lines.append("macOS: \(snapshot.systemProfile.macOSVersion)")
-        lines.append("Build: \(snapshot.systemProfile.macOSBuild ?? "unknown")")
-        lines.append("Arch: \(snapshot.systemProfile.arch)")
-        lines.append("yabai: \(snapshot.systemProfile.yabaiVersion ?? "not detected")")
-        lines.append("skhd: \(snapshot.systemProfile.skhdVersion ?? "not detected")")
-        lines.append("Health: \(snapshot.healthBadge.title)")
-        lines.append("")
-        lines.append("Capabilities:")
-        for item in failing.prefix(8) {
-            lines.append("- \(item.key): \(item.status.rawValue) (\(item.reasonCode ?? "no-reason"))")
-            lines.append("  \(item.message)")
-        }
-        if !snapshot.compatibilityWarnings.isEmpty {
-            lines.append("")
-            lines.append("Warnings:")
-            snapshot.compatibilityWarnings.forEach { lines.append("- \($0)") }
-        }
-
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
-        lastErrorMessage = nil
-        lastActionMessage = "Issue-ready summary copied to clipboard."
-    }
-
-    func runSetupInstallerInTerminal() {
-        guard !isLaunchingSetupInstaller else { return }
-        isLaunchingSetupInstaller = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isLaunchingSetupInstaller = false } }
-
-            do {
-                let scriptURL = try self.bootstrapService.prepareInstallerScript()
-                let openResult = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/open", ["-a", "Terminal", scriptURL.path], timeout: 3.0)
-                )
-
-                await MainActor.run {
-                    self.lastSetupInstallerURL = scriptURL
-                    self.appendCommandLog(from: openResult)
-                    if openResult.isSuccess {
-                        self.lastActionMessage = "Opened setup installer in Terminal."
-                        self.lastErrorMessage = nil
-                    } else {
-                        self.lastErrorMessage = "Failed to open installer in Terminal. Try opening \(scriptURL.path) manually."
-                        self.lastActionMessage = nil
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Failed to prepare setup installer: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func runScriptingAdditionRepairInTerminal() {
-        guard !isLaunchingScriptingAdditionFix else { return }
-        acknowledgeInitialStatusIfNeeded()
-        isLaunchingScriptingAdditionFix = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isLaunchingScriptingAdditionFix = false } }
-
-            do {
-                let scriptURL = try self.bootstrapService.prepareScriptingAdditionRepairScript()
-                let openResult = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/open", ["-a", "Terminal", scriptURL.path], timeout: 3.0)
-                )
-
-                await MainActor.run {
-                    self.lastScriptingAdditionRepairURL = scriptURL
-                    self.appendCommandLog(from: openResult)
-                    if openResult.isSuccess {
-                        self.lastActionMessage = "Opened scripting addition repair in Terminal."
-                        self.lastErrorMessage = nil
-                    } else {
-                        self.lastErrorMessage = "Failed to open scripting addition repair in Terminal. Try opening \(scriptURL.path) manually."
-                        self.lastActionMessage = nil
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Failed to prepare scripting addition repair script: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func openSystemSettings() {
-        openURLCandidates([
-            "x-apple.systempreferences:",
-        ])
-    }
-
-    func openAccessibilitySettings() {
-        openURLCandidates([
-            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            "x-apple.systempreferences:",
-        ])
-    }
-
-    func requestXcodeCLTInstallPrompt() {
-        acknowledgeInitialStatusIfNeeded()
-        runSupportCommand(
-            ShellCommand("/usr/bin/xcode-select", ["--install"], timeout: 2.0),
-            successMessage: "Requested Xcode Command Line Tools installer prompt."
-        )
-    }
-
-    func requestAccessibilityAccessPrompt() {
-        acknowledgeInitialStatusIfNeeded()
-        let alreadyTrusted = AXIsProcessTrusted()
-        if alreadyTrusted {
-            lastActionMessage = "Accessibility access is already granted."
-            lastErrorMessage = nil
-            return
-        }
-
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        lastActionMessage = "Requested Accessibility access prompt. If no prompt appears, open Accessibility Settings manually."
-        lastErrorMessage = nil
-
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.0))
-            await self?.refreshBootstrapSetup()
-            await self?.refreshDoctor()
-        }
-    }
-
-    func openMissionControlSettings() {
-        openURLCandidates([
-            "x-apple.systempreferences:com.apple.preference.expose",
-            "x-apple.systempreferences:",
-        ])
-    }
-
-    func openMissionControlKeyboardShortcuts() {
-        openURLCandidates([
-            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts=MissionControl",
-            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts/MissionControl",
-            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?KeyboardShortcuts",
-            "x-apple.systempreferences:com.apple.preference.keyboard?KeyboardShortcutsTab",
-            "x-apple.systempreferences:com.apple.preference.keyboard",
-            "x-apple.systempreferences:",
-        ])
-    }
-
-    func openLoginItemsSettings() {
-        openURLCandidates([
-            "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
-            "x-apple.systempreferences:com.apple.systempreferences.GeneralSettings",
-            "x-apple.systempreferences:",
-        ])
-    }
-
-    func enableStartAtLogon() {
-        acknowledgeInitialStatusIfNeeded()
-
-        let fm = FileManager.default
-        let launchAgentsDirectory = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        let plistURL = launchAgentsDirectory
-            .appendingPathComponent(BootstrapService.startAtLogonLaunchAgentFileName)
-
-        do {
-            try fm.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
-            let plist = startAtLogonLaunchAgentPlist()
-            try plist.write(to: plistURL, atomically: true, encoding: .utf8)
-            lastActionMessage = "Enabled start at logon."
-            lastErrorMessage = nil
-            Task { [weak self] in
-                await self?.refreshBootstrapSetup()
-            }
-        } catch {
-            lastErrorMessage = "Failed to enable start at logon: \(error.localizedDescription)"
-            lastActionMessage = nil
-        }
-    }
-
-    func restartYabaiBestEffort() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--restart-service"], timeout: 2.0),
-            successMessage: "Requested yabai service restart."
-        )
-    }
-
-    func restartSkhdBestEffort() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0),
-            successMessage: "Requested skhd config reload."
-        )
-    }
-
-    func startBrewServiceYabai() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--start-service"], timeout: 5.0),
-            successMessage: "Requested `yabai --start-service`."
-        )
-    }
-
-    func startBrewServiceSkhd() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--start-service"], timeout: 5.0),
-            successMessage: "Requested `skhd --start-service`."
-        )
-    }
-
-    private func runSupportCommand(_ command: ShellCommand, successMessage: String) {
-        guard !isRefreshing else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await self.doctorService.runSupportCommand(command)
-            await MainActor.run {
-                let logEntry = CommandLogEntry(
-                    id: UUID(),
-                    command: result.command,
-                    startedAt: result.startedAt,
-                    endedAt: result.endedAt,
-                    durationMs: result.durationMs,
-                    exitStatus: result.exitStatus,
-                    stdoutSnippet: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-                    stderrSnippet: result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-                    errorType: result.errorType
-                )
-                self.commandLogs = Array(([logEntry] + self.commandLogs).prefix(200))
-                if result.isSuccess {
-                    self.lastActionMessage = successMessage
-                    self.lastErrorMessage = nil
-                    Task {
-                        await self.refreshLiveState()
-                        await self.refreshDoctor()
-                        await self.refreshBootstrapSetup()
-                        await self.refreshWindowBehaviorConfig()
-                    }
-                } else {
-                    let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    if result.command.contains("yabai"), stderr.contains("could not connect") {
-                        self.lastErrorMessage = "yabai is not running. Start yabai, then try again."
-                    } else if result.command.contains("yabai"), (stderr.contains("no such file") || stderr.contains("not found")) {
-                        self.lastErrorMessage = "yabai is not installed or not available in PATH."
-                    } else {
-                        self.lastErrorMessage = "Command failed: \(result.command)"
-                    }
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    private func openURLCandidates(_ candidates: [String]) {
-        for candidate in candidates {
-            guard let url = URL(string: candidate) else { continue }
-            if NSWorkspace.shared.open(url) {
-                lastActionMessage = "Opened System Settings."
-                lastErrorMessage = nil
-                return
-            }
-        }
-        lastErrorMessage = "Unable to open System Settings."
-    }
-
-    private func startAtLogonLaunchAgentPlist() -> String {
-        let appPath = Bundle.main.bundlePath
-        let escapedAppPath = xmlEscaped(appPath)
-        return """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>\(BootstrapService.startAtLogonLaunchAgentLabel)</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>/usr/bin/open</string>
-                <string>-a</string>
-                <string>\(escapedAppPath)</string>
-            </array>
-            <key>RunAtLoad</key>
-            <true/>
-        </dict>
-        </plist>
-        """
-    }
-
-    private func xmlEscaped(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&apos;")
-    }
-
-    var healthBadgeSymbol: String {
-        doctorSnapshot?.healthBadge.symbolName ?? "questionmark.circle"
-    }
-
-    var menuBarHealthBadgeSymbol: String {
-        if shouldUseNeutralSetupMenuBar {
-            return "circle.dashed"
-        }
-        return menuBarVisualBadgeLevel?.symbolName ?? "questionmark.circle"
-    }
-
-    var healthBadgeTitle: String {
-        doctorSnapshot?.healthBadge.title ?? "Unknown"
-    }
-
-    var menuBarStatusLine: String {
-        if doctorSnapshot == nil {
-            return "Starting..."
-        }
-        if shouldSoftenInitialBlockedStatus {
-            guard let snapshot = doctorSnapshot else { return "Setup Needed" }
-            return "Setup Needed · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-        }
-        if shouldUseNeutralSetupMenuBar, let snapshot = doctorSnapshot {
-            let summary = primaryMenuBarSummary() ?? "Not Set Up Yet"
-            return "\(summary) · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-        }
-        if shouldDowngradeBlockedToSetupNeededInMenuBar, let snapshot = doctorSnapshot {
-            let summary = primaryMenuBarSummary() ?? "Setup Needed"
-            return "\(summary) · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-        }
-        guard let snapshot = doctorSnapshot else { return "Starting..." }
-        let summary = primaryMenuBarSummary() ?? snapshot.healthBadge.title
-        return "\(summary) · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-    }
-
-    var statusLine: String {
-        guard let snapshot = doctorSnapshot else { return "Setup check has not run yet" }
-        return "\(snapshot.healthBadge.title) · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-    }
-
-    var nowStatusLine: String {
-        guard let snapshot = liveStateSnapshot else { return "No live state yet" }
-        let source = snapshot.source.rawValue.capitalized
-        return "\(source) · \(snapshot.lastUpdatedAt.formatted(date: .omitted, time: .standard))"
-    }
-
-    var coreChecklistItems: [DoctorChecklistItem] {
-        checklistItems.filter(\.isCore)
-    }
-
-    var setupChecklistItems: [SetupCheckItem] {
-        bootstrapSnapshot?.items ?? []
-    }
-
-    var setupCoreItems: [SetupCheckItem] {
-        setupChecklistItems.filter { ["xcode-clt", "homebrew", "yabai-binary", "skhd-binary"].contains($0.id) }
-    }
-
-    var setupServiceItems: [SetupCheckItem] {
-        setupChecklistItems.filter {
-            [
-                "brew-tap-koekeishiya",
-                "brew-service-yabai",
-                "brew-service-skhd",
-                "start-at-logon",
-                "accessibility-permission",
-            ].contains($0.id)
-        }
-    }
-
-    var setupSummaryLine: String {
-        guard let snapshot = bootstrapSnapshot else { return "Setup scan has not run yet" }
-        let missingCount = snapshot.items.filter { $0.state == .missing }.count
-        let warningCount = snapshot.items.filter { $0.state == .warning }.count
-        if missingCount == 0 && warningCount == 0 {
-            return "Ready · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-        }
-        return "\(missingCount) missing · \(warningCount) warnings · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-    }
-
-    var systemCheckRows: [SystemCheckRow] {
-        let setupByID = Dictionary(uniqueKeysWithValues: setupChecklistItems.map { ($0.id, $0) })
-        let capabilityByKey = Dictionary(uniqueKeysWithValues: (doctorSnapshot?.capabilities ?? []).map { ($0.key, $0) })
-        let missionControlChecks = doctorSnapshot?.missionControlChecks ?? []
-
-        let xcode = setupByID["xcode-clt"]
-        let homebrew = setupByID["homebrew"]
-        let yabaiBinarySetup = setupByID["yabai-binary"]
-        let skhdBinarySetup = setupByID["skhd-binary"]
-        let yabaiServiceSetup = setupByID["brew-service-yabai"]
-        let skhdServiceSetup = setupByID["brew-service-skhd"]
-        let startAtLogonSetup = setupByID["start-at-logon"]
-        let accessibilitySetup = setupByID["accessibility-permission"]
-
-        let yabaiBinaryCap = capabilityByKey["yabai-binary"]
-        let skhdBinaryCap = capabilityByKey["skhd-binary"]
-        let yabaiDaemonCap = capabilityByKey["yabai-daemon"]
-        let skhdDaemonCap = capabilityByKey["skhd-daemon"]
-        let yabaiQueryCap = capabilityByKey["yabai-query"]
-        let accessibilityCap = capabilityByKey["accessibility"]
-        let scriptingAdditionCap = capabilityByKey["scripting-addition"]
-
-        var rows: [SystemCheckRow] = []
-
-        let xcodeStatus = mappedSystemStatus(from: xcode?.state) ?? .notice
-        rows.append(SystemCheckRow(
-            id: "xcode-clt",
-            title: "Xcode Command Line Tools",
-            detail: xcode?.detail ?? "Needed by Homebrew and terminal tooling on a fresh Mac.",
-            status: xcodeStatus,
-            actions: xcodeStatus == .good ? [.recheck] : [.installCLT, .recheck]
-        ))
-
-        let homebrewStatus = mappedSystemStatus(from: homebrew?.state) ?? .notice
-        rows.append(SystemCheckRow(
-            id: "homebrew",
-            title: "Homebrew",
-            detail: homebrew?.detail ?? "Package manager used to install yabai and skhd.",
-            status: homebrewStatus,
-            actions: homebrewStatus == .good ? [.recheck] : [.installDependencies, .recheck]
-        ))
-
-        let yabaiInstallStatus = mergedSystemStatus([
-            mappedSystemStatus(from: yabaiBinarySetup?.state),
-            mappedSystemStatus(from: yabaiBinaryCap?.status),
-        ])
-        rows.append(SystemCheckRow(
-            id: "yabai-installed",
-            title: "yabai Installed",
-            detail: firstDetail(yabaiBinaryCap?.message, yabaiBinarySetup?.detail, fallback: "Install yabai to enable desktop/window runtime controls."),
-            status: yabaiInstallStatus,
-            actions: yabaiInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
-        ))
-
-        let skhdInstallStatus = mergedSystemStatus([
-            mappedSystemStatus(from: skhdBinarySetup?.state),
-            mappedSystemStatus(from: skhdBinaryCap?.status),
-        ])
-        rows.append(SystemCheckRow(
-            id: "skhd-installed",
-            title: "skhd Installed",
-            detail: firstDetail(skhdBinaryCap?.message, skhdBinarySetup?.detail, fallback: "Optional, but recommended for keyboard shortcut workflows."),
-            status: skhdInstallStatus,
-            actions: skhdInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
-        ))
-
-        let yabaiRunningStatus = mergedSystemStatus([
-            mappedSystemStatus(from: yabaiServiceSetup?.state),
-            mappedSystemStatus(from: yabaiDaemonCap?.status),
-            mappedSystemStatus(from: yabaiQueryCap?.status),
-        ])
-        rows.append(SystemCheckRow(
-            id: "yabai-running",
-            title: "yabai Running",
-            detail: firstDetail(
-                yabaiQueryCap?.message,
-                yabaiDaemonCap?.message,
-                yabaiServiceSetup?.detail,
-                fallback: "Start yabai to control windows/desktops from TilePilot."
-            ),
-            status: yabaiRunningStatus,
-            actions: yabaiRunningStatus == .good ? [.recheck] : [.startYabai, .restartYabai, .recheck]
-        ))
-
-        let skhdRunningStatus = mergedSystemStatus([
-            mappedSystemStatus(from: skhdServiceSetup?.state),
-            mappedSystemStatus(from: skhdDaemonCap?.status),
-        ])
-        rows.append(SystemCheckRow(
-            id: "skhd-running",
-            title: "skhd Running",
-            detail: firstDetail(skhdDaemonCap?.message, skhdServiceSetup?.detail, fallback: "Start skhd for keyboard shortcuts."),
-            status: skhdRunningStatus,
-            actions: skhdRunningStatus == .good ? [.recheck] : [.startSkhd, .restartSkhd, .recheck]
-        ))
-
-        let startAtLogonStatus = mappedSystemStatus(from: startAtLogonSetup?.state) ?? .notice
-        rows.append(SystemCheckRow(
-            id: "start-at-logon",
-            title: "Start TilePilot at Logon",
-            detail: firstDetail(
-                startAtLogonSetup?.detail,
-                fallback: "Recommended so TilePilot appears in the menu bar after sign-in."
-            ),
-            status: startAtLogonStatus,
-            actions: startAtLogonStatus == .good
-                ? [.openLoginItemsSettings, .recheck]
-                : [.enableStartAtLogon, .openLoginItemsSettings, .recheck]
-        ))
-
-        let rawAccessibilityStatus = mergedSystemStatus([
-            mappedSystemStatus(from: accessibilitySetup?.state),
-            mappedSystemStatus(from: accessibilityCap?.status),
-        ])
-        let accessibilityStatus: SystemCheckStatus
-        switch rawAccessibilityStatus {
-        case .error: accessibilityStatus = .warning
-        default: accessibilityStatus = rawAccessibilityStatus
-        }
-        rows.append(SystemCheckRow(
-            id: "accessibility",
-            title: "Accessibility Permission (Optional)",
-            detail: firstDetail(
-                accessibilitySetup?.detail,
-                accessibilityCap?.message,
-                fallback: "Needed only for some TilePilot UI automations. Core app flows still work without it."
-            ),
-            status: accessibilityStatus,
-            actions: accessibilityStatus == .good ? [.recheck] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
-        ))
-
-        let missionWarningCount = missionControlChecks.filter { $0.status == .warning }.count
-        let missionUnknownCount = missionControlChecks.filter { $0.status == .unknown }.count
-        let missionStatus: SystemCheckStatus
-        if missionWarningCount > 0 {
-            missionStatus = .warning
-        } else if missionUnknownCount > 0 || missionControlChecks.isEmpty {
-            missionStatus = .notice
-        } else {
-            missionStatus = .good
-        }
-        let missionDetail: String
-        if missionWarningCount > 0 {
-            missionDetail = "\(missionWarningCount) Mission Control setting(s) need review for predictable desktop behavior."
-        } else if missionUnknownCount > 0 {
-            missionDetail = "Some Mission Control settings could not be verified."
-        } else if missionControlChecks.isEmpty {
-            missionDetail = "Run Recheck to verify Mission Control settings."
-        } else {
-            missionDetail = "Mission Control settings look compatible."
-        }
-        rows.append(SystemCheckRow(
-            id: "mission-control",
-            title: "Mission Control Settings",
-            detail: missionDetail,
-            status: missionStatus,
-            actions: missionStatus == .good
-                ? [.openMissionControlSettings, .recheck]
-                : [.openMissionControlSettings, .openMissionControlKeyboardShortcuts, .recheck]
-        ))
-
-        let saStatus = mappedSystemStatus(from: scriptingAdditionCap?.status) ?? .notice
-        let normalizedSAStatus: SystemCheckStatus = saStatus == .error ? .warning : saStatus
-        rows.append(SystemCheckRow(
-            id: "scripting-addition",
-            title: "Desktop Move Shortcuts (Advanced)",
-            detail: scriptingAdditionDetail(from: scriptingAdditionCap),
-            status: normalizedSAStatus,
-            actions: normalizedSAStatus == .good
-                ? [.openMissionControlKeyboardShortcuts, .recheck]
-                : [.fixScriptingAddition, .openMissionControlKeyboardShortcuts, .recheck]
-        ))
-
-        return rows.sorted { lhs, rhs in
-            // Keep the advanced scripting-addition item at the end of the essentials list.
-            let lhsIsAdvanced = lhs.id == "scripting-addition"
-            let rhsIsAdvanced = rhs.id == "scripting-addition"
-            if lhsIsAdvanced != rhsIsAdvanced {
-                return !lhsIsAdvanced
-            }
-            if lhs.status.severityRank != rhs.status.severityRank {
-                return lhs.status.severityRank > rhs.status.severityRank
-            }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-        }
-    }
-
-    var systemSummaryLine: String {
-        let errors = systemCheckRows.filter { $0.status == .error }.count
-        let warnings = systemCheckRows.filter { $0.status == .warning }.count
-        let notices = systemCheckRows.filter { $0.status == .notice }.count
-        if errors == 0 && warnings == 0 && notices == 0 {
-            return "Ready"
-        }
-        var parts: [String] = []
-        if errors > 0 { parts.append("\(errors) need action") }
-        if warnings > 0 { parts.append("\(warnings) recommended") }
-        if notices > 0 { parts.append("\(notices) informational") }
-        return parts.joined(separator: " · ")
-    }
-
-    var systemPrimaryActions: [SystemCheckAction] {
-        var actions: [SystemCheckAction] = []
-        for row in systemCheckRows where row.status != .good {
-            for action in row.actions where action != .recheck && !actions.contains(action) {
-                actions.append(action)
-                if actions.count >= 5 { return actions }
-            }
-        }
-        return actions
-    }
-
-    func performSystemCheckAction(_ action: SystemCheckAction) {
-        switch action {
-        case .installDependencies:
-            runSetupInstallerInTerminal()
-        case .installCLT:
-            requestXcodeCLTInstallPrompt()
-        case .startYabai:
-            startBrewServiceYabai()
-        case .startSkhd:
-            startBrewServiceSkhd()
-        case .enableStartAtLogon:
-            enableStartAtLogon()
-        case .openLoginItemsSettings:
-            openLoginItemsSettings()
-        case .openAccessibilitySettings:
-            openAccessibilitySettings()
-        case .requestAccessibilityAccess:
-            requestAccessibilityAccessPrompt()
-        case .fixScriptingAddition:
-            runScriptingAdditionRepairInTerminal()
-        case .openMissionControlSettings:
-            openMissionControlSettings()
-        case .openMissionControlKeyboardShortcuts:
-            openMissionControlKeyboardShortcuts()
-        case .restartYabai:
-            restartYabaiBestEffort()
-        case .restartSkhd:
-            restartSkhdBestEffort()
-        case .recheck:
-            Task { [weak self] in
-                guard let self else { return }
-                await self.refreshBootstrapSetup()
-                await self.refreshDoctor()
-            }
-        }
-    }
-
-    var windowBehaviorSummaryLine: String {
-        let mode = windowBehaviorPolicyDraft.manualTilingModeEnabled ? "Manual tiling ON" : "Manual tiling OFF"
-        let hover = "Hover focus: \(windowBehaviorPolicyDraft.hoverFocusMode.displayName)"
-        let cursor = "Cursor follows focus: \(windowBehaviorPolicyDraft.mouseFollowsFocusEnabled ? "On" : "Off")"
-        return "\(mode) · \(hover) · \(cursor)"
-    }
-
     var isWindowBehaviorDraftDirty: Bool {
         windowBehaviorPolicyDraft != originalWindowBehaviorPolicy
     }
@@ -2656,1404 +626,6 @@ final class AppModel: ObservableObject {
         let savedNeverKeys = Set(windowBehaviorPolicyDraft.neverTileApps.map(normalizedAppRuleKey))
         let savedAlwaysKeys = Set(windowBehaviorPolicyDraft.alwaysTileApps.map(normalizedAppRuleKey))
         return stagedNeverKeys != savedNeverKeys || stagedAlwaysKeys != savedAlwaysKeys
-    }
-
-    var availableAppNamesFromLiveState: [String] {
-        let names = Set((liveStateSnapshot?.windows ?? []).map(\.app).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-        return names.sorted()
-    }
-
-    var appNamesForBehaviorEditor: [String] {
-        let names = Set(availableAppNamesFromLiveState)
-            .union(windowBehaviorPolicyDraft.neverTileApps)
-            .union(windowBehaviorPolicyDraft.alwaysTileApps)
-            .union(stagedNeverTileApps)
-            .union(stagedAlwaysTileApps)
-        return names.sorted()
-    }
-
-    var focusedWindowState: WindowState? {
-        liveStateSnapshot?.windows.first(where: \.focused)
-    }
-
-    func isOverviewExcludedWindow(_ window: WindowState) -> Bool {
-        // Zoom surfaces a tiny helper/dialog window ("Window", ~66x20) near the top-left.
-        // It is not a practical user window and causes misleading counts/actions in Overview.
-        guard window.app == "zoom.us" else { return false }
-        guard !window.canResize else { return false }
-        let tiny = window.frameW <= 140 || window.frameH <= 60
-        guard tiny else { return false }
-        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalizedTitle.isEmpty || normalizedTitle == "window"
-    }
-
-    func buildOverviewPreviews(from snapshot: LiveStateSnapshot) -> [OverviewDisplayPreview] {
-        guard snapshot.source == .yabai, !snapshot.degraded else { return [] }
-
-        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
-            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-            return lhs.id < rhs.id
-        }
-        let windows = snapshot.windows.filter { window in
-            !isOverviewExcludedWindow(window) &&
-            !window.isMinimized &&
-            !window.isHidden
-        }
-        let windowsBySpace = Dictionary(grouping: windows, by: \.space)
-        let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
-
-        return sortedDisplays.compactMap { display in
-            guard display.frameW > 1, display.frameH > 1 else { return nil }
-            let desktops = (spacesByDisplay[display.id] ?? [])
-                .sorted { $0.index < $1.index }
-                .map { space in
-                    let normalizedWindows = (windowsBySpace[space.index] ?? [])
-                        .filter { $0.display == display.id }
-                        .compactMap { normalizeOverviewWindowPreview($0, in: display) }
-                        .sorted { lhs, rhs in
-                            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-                            return lhs.id < rhs.id
-                        }
-                    return OverviewDesktopPreview(
-                        id: "display-\(display.id)-desktop-\(space.index)",
-                        displayID: display.id,
-                        desktopIndex: space.index,
-                        focused: space.focused,
-                        visible: space.visible,
-                        windows: normalizedWindows
-                    )
-                }
-
-            return OverviewDisplayPreview(
-                id: display.id,
-                name: display.name,
-                focused: display.focused,
-                aspectRatio: max(display.frameW, 1) / max(display.frameH, 1),
-                frameW: display.frameW,
-                frameH: display.frameH,
-                desktops: desktops
-            )
-        }
-    }
-
-    var canControlFocusedWindow: Bool {
-        focusedWindowState != nil && doctorSnapshot != nil
-    }
-
-    func refreshWindowBadges() {
-        guard let snapshot = liveStateSnapshot else {
-            windowBadges = []
-            hoveredWindowIDForBadges = nil
-            return
-        }
-        guard snapshot.source == .yabai, !snapshot.degraded else {
-            windowBadges = []
-            hoveredWindowIDForBadges = nil
-            return
-        }
-
-        let sizeFiltered = snapshot.windows.filter { window in
-            guard !window.isMinimized && !window.isHidden else { return false }
-            if window.focused { return true }
-            return window.frameW > 40 && window.frameH > 24
-        }
-        guard !sizeFiltered.isEmpty else {
-            windowBadges = []
-            hoveredWindowIDForBadges = nil
-            return
-        }
-
-        let activeSpaceIndex: Int? =
-            sizeFiltered.first(where: \.focused)?.space
-            ?? snapshot.spaces.first(where: \.focused)?.index
-            ?? snapshot.spaces.first(where: \.visible)?.index
-        let activeSpaceCandidates: [WindowState]
-        if let activeSpaceIndex {
-            activeSpaceCandidates = sizeFiltered.filter { $0.space == activeSpaceIndex }
-        } else {
-            activeSpaceCandidates = sizeFiltered
-        }
-        guard !activeSpaceCandidates.isEmpty else {
-            windowBadges = []
-            hoveredWindowIDForBadges = nil
-            return
-        }
-
-        // Prefer truly visible windows, but keep a frontmost-app fallback when AX focus is unavailable
-        // (e.g. Chromium variants that report has-ax-reference=false).
-        var selectedWindows = activeSpaceCandidates.filter(\.isVisible)
-        let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
-        let frontmostCandidate = activeSpaceCandidates
-            .filter { $0.pid == frontmostPID }
-            .sorted { lhs, rhs in
-                let lhsArea = lhs.frameW * lhs.frameH
-                let rhsArea = rhs.frameW * rhs.frameH
-                if lhsArea != rhsArea { return lhsArea > rhsArea }
-                return lhs.id < rhs.id
-            }
-            .first
-
-        if let frontmostCandidate,
-           !selectedWindows.contains(where: { $0.id == frontmostCandidate.id }) {
-            selectedWindows.append(frontmostCandidate)
-        }
-
-        guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
-            windowBadges = []
-            hoveredWindowIDForBadges = nil
-            return
-        }
-        hoveredWindowIDForBadges = nil
-        let sortedSelected = selectedWindows.sorted { lhs, rhs in
-            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-            if lhs.app != rhs.app { return lhs.app.localizedCaseInsensitiveCompare(rhs.app) == .orderedAscending }
-            return lhs.id < rhs.id
-        }
-
-        let explicitFocused = sortedSelected.first(where: \.focused)
-        let effectiveFocusedID: Int? = {
-            if let frontmostCandidate {
-                if explicitFocused == nil { return frontmostCandidate.id }
-                if explicitFocused?.pid != frontmostCandidate.pid { return frontmostCandidate.id }
-            }
-            return explicitFocused?.id
-        }()
-
-        windowBadges = sortedSelected.map { window in
-            WindowBadgeState(
-                windowID: window.id,
-                pid: window.pid,
-                app: window.app,
-                title: window.title,
-                isFloating: window.floating,
-                isFocused: window.id == effectiveFocusedID,
-                isRuntimeManageable: window.isRuntimeManageable,
-                frameX: window.frameX,
-                frameY: window.frameY,
-                frameW: window.frameW,
-                frameH: window.frameH
-            )
-        }
-    }
-
-    func updateHoveredWindowForBadges(candidates: [WindowState]? = nil) {
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
-            hoveredWindowIDForBadges = nil
-            return
-        }
-        let windows = candidates ?? snapshot.windows.filter { $0.isVisible && !$0.isMinimized && !$0.isHidden }
-        guard !windows.isEmpty else {
-            hoveredWindowIDForBadges = nil
-            return
-        }
-
-        let mouse = NSEvent.mouseLocation
-        let screens = NSScreen.screens
-
-        let hovered = windows
-            .filter { containsMouse(mouse, in: $0, screens: screens) }
-            .sorted { lhs, rhs in
-                if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-                let lhsArea = lhs.frameW * lhs.frameH
-                let rhsArea = rhs.frameW * rhs.frameH
-                if lhsArea != rhsArea { return lhsArea < rhsArea }
-                return lhs.id < rhs.id
-            }
-            .first?
-            .id
-
-        hoveredWindowIDForBadges = hovered
-    }
-
-    var shouldShowWindowBehaviorRecommendation: Bool {
-        guard let snapshot = doctorSnapshot else { return false }
-        let capabilityByKey = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0.status) })
-        return capabilityByKey["yabai-binary"] == .available && !yabaiConfigHasManagedSection
-    }
-
-    var advancedChecklistItems: [DoctorChecklistItem] {
-        checklistItems.filter { !$0.isCore }
-    }
-
-    private var hasObservedScriptingAdditionRuntimeFailure: Bool {
-        commandLogs.prefix(100).contains { entry in
-            let haystack = (entry.stderrSnippet + " " + entry.stdoutSnippet).lowercased()
-            return haystack.contains("scripting-addition")
-        }
-    }
-
-    var actionCards: [TilePilotActionCard] {
-        TilePilotActionID.allCases
-            .filter { $0 != .browserReliefPlaceholder }
-            .map { actionID in
-            let meta = actionMeta(for: actionID)
-            let availability = actionAvailability(for: actionID)
-            return TilePilotActionCard(
-                id: actionID,
-                title: meta.title,
-                subtitle: meta.subtitle,
-                category: meta.category,
-                requiredCapabilities: meta.requiredCapabilities,
-                enabled: availability.enabled,
-                disabledReason: availability.disabledReason,
-            )
-        }
-    }
-
-    var quickActionCards: [TilePilotActionCard] {
-        actionCards.filter { ["Layouts", "Window"].contains($0.category) && $0.id != .browserReliefPlaceholder }
-    }
-
-    var unifiedControlRows: [UnifiedControlRow] {
-        var byIntent: [String: UnifiedControlRow] = [:]
-        var actionIDsBoundToShortcut: Set<TilePilotActionID> = []
-
-        for entry in shortcutEntries {
-            let intent = shortcutIntentKey(for: entry)
-            let group = unifiedGroup(for: entry)
-            let matchingAction = matchingActionID(forShortcutIntentKey: intent)
-            if let matchingAction {
-                actionIDsBoundToShortcut.insert(matchingAction)
-            }
-
-            let row = UnifiedControlRow(
-                id: "shortcut-\(entry.stableKey)",
-                group: group,
-                title: shortcutTitle(for: entry),
-                description: shortcutExplanation(entry),
-                shortcutEntry: entry,
-                actionID: matchingAction,
-                secondaryActionIDs: [],
-                isExperimental: group == .experimental,
-                disabledReason: matchingAction.flatMap { actionCard(for: $0)?.disabledReason },
-                intentKey: intent,
-                featureID: nil
-            )
-            byIntent[intent] = row
-        }
-
-        for card in actionCards {
-            let intent = actionIntentKey(for: card.id)
-            if var existing = byIntent[intent] {
-                if existing.actionID == nil {
-                    existing = UnifiedControlRow(
-                        id: existing.id,
-                        group: existing.group,
-                        title: existing.title,
-                        description: existing.description,
-                        shortcutEntry: existing.shortcutEntry,
-                        actionID: card.id,
-                        secondaryActionIDs: existing.secondaryActionIDs,
-                        isExperimental: existing.isExperimental,
-                        disabledReason: card.disabledReason,
-                        intentKey: existing.intentKey,
-                        featureID: existing.featureID
-                    )
-                    byIntent[intent] = existing
-                } else if existing.actionID != card.id {
-                    var secondary = existing.secondaryActionIDs
-                    secondary.append(card.id)
-                    var dedupedSecondary: [TilePilotActionID] = []
-                    for actionID in secondary where !dedupedSecondary.contains(actionID) {
-                        dedupedSecondary.append(actionID)
-                    }
-                    existing = UnifiedControlRow(
-                        id: existing.id,
-                        group: existing.group,
-                        title: existing.title,
-                        description: existing.description,
-                        shortcutEntry: existing.shortcutEntry,
-                        actionID: existing.actionID,
-                        secondaryActionIDs: dedupedSecondary,
-                        isExperimental: existing.isExperimental,
-                        disabledReason: existing.disabledReason ?? card.disabledReason,
-                        intentKey: existing.intentKey,
-                        featureID: existing.featureID
-                    )
-                    byIntent[intent] = existing
-                }
-                continue
-            }
-
-            if actionIDsBoundToShortcut.contains(card.id) {
-                continue
-            }
-
-            let group = unifiedGroup(forActionCategory: card.category)
-            byIntent[intent] = UnifiedControlRow(
-                id: "action-\(card.id.rawValue)",
-                group: group,
-                title: card.title,
-                description: card.subtitle,
-                shortcutEntry: nil,
-                actionID: card.id,
-                secondaryActionIDs: [],
-                isExperimental: group == .experimental,
-                disabledReason: card.disabledReason,
-                intentKey: intent,
-                featureID: nil
-            )
-        }
-
-        return byIntent.values.sorted { lhs, rhs in
-            if lhs.group.sortRank != rhs.group.sortRank { return lhs.group.sortRank < rhs.group.sortRank }
-            if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
-            return lhs.id < rhs.id
-        }
-    }
-
-    func filteredUnifiedControlRows(query: String) -> [UnifiedControlRow] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return unifiedControlRows }
-        return unifiedControlRows.filter { row in
-            row.title.lowercased().contains(q) ||
-                row.description.lowercased().contains(q) ||
-                row.shortcutEntry?.combo.lowercased().contains(q) == true ||
-                row.shortcutEntry?.command.lowercased().contains(q) == true ||
-                row.group.title.lowercased().contains(q)
-        }
-    }
-
-    private struct FeatureDefinition: Sendable {
-        let id: FeatureControlID
-        let group: UnifiedControlGroup
-        let title: String
-        let description: String
-        let backend: FeatureExecutionBackend
-        let capabilityGate: FeatureCapabilityGate
-        let defaultCombo: String?
-        let commandMatchers: [String]
-        let matchAllCommandMatchers: Bool
-        let preferredCommand: String?
-        let actionID: TilePilotActionID?
-        let isExperimental: Bool
-    }
-
-    private func tilePilotFeatureURL(_ featureID: FeatureControlID) -> String {
-        "tilepilot://feature/\(featureID.rawValue)"
-    }
-
-    private func tilePilotFeatureCommand(_ featureID: FeatureControlID) -> String {
-        "/usr/bin/open -g \"\(tilePilotFeatureURL(featureID))\""
-    }
-
-    private var featureDefinitions: [FeatureDefinition] {
-        [
-            FeatureDefinition(
-                id: "screen.set-floating-all-visible",
-                group: .tilingLayout,
-                title: "All Windows → Floating",
-                description: "Sets windows to floating. Applies to windows visible on the current desktop.",
-                backend: .scriptPath,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - d",
-                commandMatchers: ["/.config/yabai/scripts/disable-tiling-all-visible.sh"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "~/.config/yabai/scripts/disable-tiling-all-visible.sh",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.set-tiled-all-visible",
-                group: .tilingLayout,
-                title: "All Windows → Tiled",
-                description: "Sets windows to tiled. Applies to windows visible on the current desktop.",
-                backend: .scriptPath,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - e",
-                commandMatchers: ["/.config/yabai/scripts/enable-tiling-all-visible.sh"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "~/.config/yabai/scripts/enable-tiling-all-visible.sh",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.bring-floating-front",
-                group: .tilingLayout,
-                title: "Bring Floating Windows to Front",
-                description: "One-time action: raises all floating windows on the current desktop.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: nil,
-                commandMatchers: [
-                    tilePilotFeatureURL("screen.bring-floating-front"),
-                    "tilepilot:/feature/screen.bring-floating-front",
-                ],
-                matchAllCommandMatchers: false,
-                preferredCommand: "/usr/bin/open -g \"tilepilot://feature/screen.bring-floating-front\"",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.current-desktop-tiling-on",
-                group: .tilingLayout,
-                title: "Current Desktop → Tiling On",
-                description: "Turns tiling on for the current desktop.",
-                backend: .shortcutCommand,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: nil,
-                commandMatchers: ["yabai -m space --layout bsp"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m space --layout bsp",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.current-desktop-tiling-off",
-                group: .tilingLayout,
-                title: "Current Desktop → Tiling Off",
-                description: "Turns tiling off for the current desktop (floating layout).",
-                backend: .shortcutCommand,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: nil,
-                commandMatchers: ["yabai -m space --layout float"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m space --layout float",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.grid-floating",
-                group: .tilingLayout,
-                title: "Grid Tiling (Floating)",
-                description: "Packs visible windows into a grid and keeps them floating.",
-                backend: .scriptPath,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - p",
-                commandMatchers: ["/.config/yabai/scripts/grid-tiling-floating.sh", "/.config/yabai/scripts/grid-pack-toggle.sh"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "~/.config/yabai/scripts/grid-tiling-floating.sh",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.grid-auto-tiled",
-                group: .tilingLayout,
-                title: "Grid Tiling (Auto-Tiled)",
-                description: "Packs visible windows into a grid, then returns windows to tiled mode.",
-                backend: .scriptPath,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - o",
-                commandMatchers: ["/.config/yabai/scripts/grid-tiling-auto-tiled.sh"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "~/.config/yabai/scripts/grid-tiling-auto-tiled.sh",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.layout-bsp-balance",
-                group: .tilingLayout,
-                title: "Tile Layout + Balance",
-                description: "Switches current desktop to tile layout and rebalances.",
-                backend: .shortcutCommand,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - g",
-                commandMatchers: ["yabai -m space --layout bsp", "yabai -m space --balance"],
-                matchAllCommandMatchers: true,
-                preferredCommand: "yabai -m space --layout bsp; yabai -m space --balance",
-                actionID: .layoutBSPAndBalance,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.balance-current-desktop",
-                group: .tilingLayout,
-                title: "Balance Tiles",
-                description: "Rebalances tiled windows without changing layout mode.",
-                backend: .shortcutCommand,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "alt - 0",
-                commandMatchers: ["yabai -m space --balance"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m space --balance",
-                actionID: .balanceSpace,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.layout-stack",
-                group: .tilingLayout,
-                title: "Stack Layout",
-                description: "Sets stack layout on the current desktop.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "shift + alt - v",
-                commandMatchers: ["yabai -m space --layout stack"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m space --layout stack",
-                actionID: .layoutStack,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "screen.rotate-layout",
-                group: .tilingLayout,
-                title: "Rotate Layout",
-                description: "Rotates layout by 90 degrees on the current desktop.",
-                backend: .shortcutCommand,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "shift + alt - r",
-                commandMatchers: ["yabai -m space --rotate"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m space --rotate 90",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.toggle-float",
-                group: .tilingLayout,
-                title: "This Window → Toggle Floating/Tiled",
-                description: "Toggles the focused window between floating and tiled.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "ctrl + shift + alt - ~",
-                commandMatchers: ["yabai -m window --toggle float"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m window --toggle float",
-                actionID: .toggleFloat,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "app.open-tilepilot",
-                group: .apps,
-                title: "Open TilePilot",
-                description: "Brings TilePilot to the front so you can access the mini-map fast.",
-                backend: .shortcutCommand,
-                capabilityGate: .none,
-                defaultCombo: "ctrl + shift + alt - return",
-                commandMatchers: [
-                    "open -a tilepilot",
-                    "open -a \"tilepilot\"",
-                    "/contents/macos/tilepilot",
-                ],
-                matchAllCommandMatchers: false,
-                preferredCommand: "/usr/bin/open -a \"TilePilot\"",
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "app.keep-on-top-when-floating",
-                group: .apps,
-                title: "Keep App on Top (When Floating)",
-                description: "Toggles keep-on-top for the focused app (or the badge app from a window badge).",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: nil,
-                commandMatchers: [tilePilotFeatureURL("app.keep-on-top-when-floating")],
-                matchAllCommandMatchers: false,
-                preferredCommand: tilePilotFeatureCommand("app.keep-on-top-when-floating"),
-                actionID: nil,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.focus-left",
-                group: .focus,
-                title: "Focus Left",
-                description: "Moves focus to the window on the left.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "alt - j",
-                commandMatchers: ["yabai -m window --focus west"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m window --focus west",
-                actionID: .focusWest,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.focus-right",
-                group: .focus,
-                title: "Focus Right",
-                description: "Moves focus to the window on the right.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "alt - l",
-                commandMatchers: ["yabai -m window --focus east"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m window --focus east",
-                actionID: .focusEast,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.focus-up",
-                group: .focus,
-                title: "Focus Up",
-                description: "Moves focus to the window above.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "alt - i",
-                commandMatchers: ["yabai -m window --focus north"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m window --focus north",
-                actionID: .focusNorth,
-                isExperimental: false
-            ),
-            FeatureDefinition(
-                id: "action.focus-down",
-                group: .focus,
-                title: "Focus Down",
-                description: "Moves focus to the window below.",
-                backend: .tilePilotAction,
-                capabilityGate: .yabaiRuntime,
-                defaultCombo: "alt - k",
-                commandMatchers: ["yabai -m window --focus south"],
-                matchAllCommandMatchers: false,
-                preferredCommand: "yabai -m window --focus south",
-                actionID: .focusSouth,
-                isExperimental: false
-            ),
-        ]
-    }
-
-    private func featureDefinition(for entry: ShortcutEntry) -> FeatureDefinition? {
-        let command = normalizedFeatureMatchCommand(entry.command.lowercased())
-        return featureDefinitions.first { definition in
-            guard !definition.commandMatchers.isEmpty else { return false }
-            if definition.matchAllCommandMatchers {
-                return definition.commandMatchers.allSatisfy { command.contains($0) }
-            }
-            return definition.commandMatchers.contains(where: { command.contains($0) })
-        }
-    }
-
-    private func normalizedFeatureMatchCommand(_ raw: String) -> String {
-        var command = raw
-            .replacingOccurrences(of: #"^\s*/usr/bin/env\s+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"^\s*env\s+"#, with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        command = command.replacingOccurrences(of: #"/usr/bin/open"#, with: "open", options: .regularExpression)
-        command = command.replacingOccurrences(of: "tilepilot:/feature/", with: "tilepilot://feature/")
-        command = command.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return command
-    }
-
-    private func featureDefinition(forActionID actionID: TilePilotActionID) -> FeatureDefinition? {
-        featureDefinitions.first(where: { $0.actionID == actionID })
-    }
-
-    var featureControlRows: [FeatureControlRow] {
-        let baseRows = unifiedControlRows
-        var usedFeatureIDs: Set<FeatureControlID> = []
-        var result: [FeatureControlRow] = []
-        var featureRowsByID: [FeatureControlID: FeatureControlRow] = [:]
-        var seenNonFeatureSignatures: Set<String> = []
-
-        for row in baseRows {
-            let mappedDefinition = row.shortcutEntry.flatMap(featureDefinition(for:))
-                ?? row.actionID.flatMap(featureDefinition(forActionID:))
-            if let mappedDefinition {
-                usedFeatureIDs.insert(mappedDefinition.id)
-            }
-            let disabledReason = mappedDefinition.map { featureDisabledReason(for: $0.capabilityGate) } ?? row.disabledReason
-            let bindingState: FeatureShortcutBindingState
-            if let disabledReason {
-                bindingState = .disabled(reason: disabledReason)
-            } else if let entry = row.shortcutEntry {
-                bindingState = .assigned(combo: entry.combo)
-            } else {
-                bindingState = .missing(defaultCombo: mappedDefinition?.defaultCombo)
-            }
-            let candidate = FeatureControlRow(
-                id: mappedDefinition.map { "feature-\($0.id.rawValue)" } ?? row.id,
-                featureID: mappedDefinition?.id,
-                group: mappedDefinition?.group ?? row.group,
-                title: mappedDefinition?.title ?? row.title,
-                description: mappedDefinition?.description ?? row.description,
-                backend: mappedDefinition?.backend ?? (row.shortcutEntry == nil ? .tilePilotAction : .shortcutCommand),
-                capabilityGate: mappedDefinition?.capabilityGate ?? .none,
-                shortcutEntry: row.shortcutEntry,
-                actionID: mappedDefinition?.actionID ?? row.actionID,
-                preferredCommand: mappedDefinition?.preferredCommand,
-                assignedCombo: row.shortcutEntry?.combo,
-                defaultCombo: mappedDefinition?.defaultCombo,
-                bindingState: bindingState,
-                isExperimental: mappedDefinition?.isExperimental ?? row.isExperimental,
-                disabledReason: disabledReason
-            )
-            if let featureID = candidate.featureID {
-                if let existing = featureRowsByID[featureID] {
-                    featureRowsByID[featureID] = preferredFeatureRow(existing: existing, candidate: candidate)
-                } else {
-                    featureRowsByID[featureID] = candidate
-                }
-            } else {
-                let signature = nonFeatureRowSignature(candidate)
-                if seenNonFeatureSignatures.insert(signature).inserted {
-                    result.append(candidate)
-                }
-            }
-        }
-
-        result.append(contentsOf: featureRowsByID.values)
-
-        for definition in featureDefinitions where !usedFeatureIDs.contains(definition.id) {
-            let disabledReason = featureDisabledReason(for: definition.capabilityGate)
-            let bindingState: FeatureShortcutBindingState
-            if let disabledReason {
-                bindingState = .disabled(reason: disabledReason)
-            } else {
-                bindingState = .missing(defaultCombo: definition.defaultCombo)
-            }
-            result.append(
-                FeatureControlRow(
-                    id: "feature-\(definition.id.rawValue)",
-                    featureID: definition.id,
-                    group: definition.group,
-                    title: definition.title,
-                    description: definition.description,
-                    backend: definition.backend,
-                    capabilityGate: definition.capabilityGate,
-                    shortcutEntry: nil,
-                    actionID: definition.actionID,
-                    preferredCommand: definition.preferredCommand,
-                    assignedCombo: nil,
-                    defaultCombo: definition.defaultCombo,
-                    bindingState: bindingState,
-                    isExperimental: definition.isExperimental,
-                    disabledReason: disabledReason
-                )
-            )
-        }
-
-        return result.sorted { lhs, rhs in
-            if lhs.group.sortRank != rhs.group.sortRank { return lhs.group.sortRank < rhs.group.sortRank }
-            if lhs.group == .tilingLayout && rhs.group == .tilingLayout {
-                let lhsPriority = featureControlRowSortPriority(lhs)
-                let rhsPriority = featureControlRowSortPriority(rhs)
-                if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
-            }
-            if lhs.title != rhs.title { return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending }
-            return lhs.id < rhs.id
-        }
-    }
-
-    func featureControlRowSortPriority(_ row: FeatureControlRow) -> Int {
-        guard row.group == .tilingLayout else { return 1_000 }
-        if let featureID = row.featureID {
-            switch featureID.rawValue {
-            case "screen.set-floating-all-visible": return 10
-            case "screen.set-tiled-all-visible": return 20
-            case "screen.bring-floating-front": return 25
-            case "screen.grid-floating": return 30
-            case "screen.grid-auto-tiled": return 40
-            case "screen.balance-current-desktop": return 50
-            case "screen.current-desktop-tiling-on": return 55
-            case "screen.current-desktop-tiling-off": return 56
-            case "screen.layout-bsp-balance": return 60
-            case "action.layout-stack": return 70
-            case "screen.rotate-layout": return 80
-            default: return 500
-            }
-        }
-
-        let command = row.shortcutEntry?.command.lowercased() ?? row.preferredCommand?.lowercased() ?? ""
-        let title = row.title.lowercased()
-        if command.contains("yabai -m space --rotate") || title.contains("rotate layout") { return 80 }
-        if command.contains("yabai -m space --layout stack") || title.contains("stack layout") { return 70 }
-        if command.contains("yabai -m space --layout float") || title.contains("desktop → tiling off") { return 56 }
-        if command.contains("yabai -m space --layout bsp"), !command.contains("space --balance") { return 55 }
-        if command.contains("yabai -m space --layout bsp") || title.contains("tile layout + balance") { return 60 }
-        if command.contains("yabai -m space --balance") || title.contains("balance tiles") { return 50 }
-        return 500
-    }
-
-    func filteredFeatureControlRows(query: String) -> [FeatureControlRow] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return featureControlRows }
-        return featureControlRows.filter { row in
-            row.title.lowercased().contains(q) ||
-                row.description.lowercased().contains(q) ||
-                row.assignedCombo?.lowercased().contains(q) == true ||
-                row.shortcutEntry?.command.lowercased().contains(q) == true ||
-                row.group.title.lowercased().contains(q)
-        }
-    }
-
-    func flatShortcutsItems(query: String) -> [ShortcutsDisplayItem] {
-        let baseItems = buildFlatShortcutsItemsBaseOrder()
-        let orderedItems = applyShortcutsCustomOrder(baseItems)
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return orderedItems }
-        return orderedItems.filter { item in
-            switch item {
-            case .featureRow(let row):
-                return row.title.lowercased().contains(q) ||
-                    row.description.lowercased().contains(q) ||
-                    row.assignedCombo?.lowercased().contains(q) == true ||
-                    row.shortcutEntry?.combo.lowercased().contains(q) == true ||
-                    row.shortcutEntry?.command.lowercased().contains(q) == true
-            case .directionalFamily(let group, let bindings):
-                if directionalFamilyTitle(for: group).lowercased().contains(q) ||
-                    directionalFamilyDescription(for: group).lowercased().contains(q) {
-                    return true
-                }
-                return bindings.contains { binding in
-                    binding.entry.combo.lowercased().contains(q) ||
-                        binding.entry.command.lowercased().contains(q) ||
-                        shortcutExplanation(binding.entry).lowercased().contains(q) ||
-                        binding.direction.label.lowercased().contains(q)
-                }
-            case .desktopJumpFamily(let entries):
-                if "jump to desktop".contains(q) || "macos keyboard shortcuts".contains(q) {
-                    return true
-                }
-                return entries.contains { entry in
-                    entry.combo.lowercased().contains(q) ||
-                        entry.command.lowercased().contains(q) ||
-                        shortcutExplanation(entry).lowercased().contains(q)
-                }
-            case .desktopMoveFamily(let entries):
-                if "move window to desktop".contains(q) ||
-                    "advanced desktop move".contains(q) ||
-                    "scripting addition".contains(q) ||
-                    "sip".contains(q) {
-                    return true
-                }
-                return entries.contains { entry in
-                    entry.combo.lowercased().contains(q) ||
-                        entry.command.lowercased().contains(q) ||
-                        shortcutExplanation(entry).lowercased().contains(q)
-                }
-            }
-        }
-    }
-
-    func moveFlatShortcutsItems(fromOffsets: IndexSet, toOffset: Int) {
-        let orderedIDs = flatShortcutsItems(query: "").map(\.id)
-        guard !orderedIDs.isEmpty else { return }
-        var mutableIDs = orderedIDs
-        mutableIDs.move(fromOffsets: fromOffsets, toOffset: toOffset)
-        guard mutableIDs != shortcutsCustomOrderIDs else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            shortcutsCustomOrderIDs = mutableIDs
-        }
-        persistShortcutsCustomOrderIDs()
-    }
-
-    func moveFlatShortcutsItem(draggedID: String, before targetID: String) {
-        guard draggedID != targetID else { return }
-        var orderedIDs = flatShortcutsItems(query: "").map(\.id)
-        guard
-            let sourceIndex = orderedIDs.firstIndex(of: draggedID),
-            let targetIndex = orderedIDs.firstIndex(of: targetID)
-        else { return }
-
-        let movingID = orderedIDs.remove(at: sourceIndex)
-        let destinationIndex = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
-        orderedIDs.insert(movingID, at: destinationIndex)
-
-        guard orderedIDs != shortcutsCustomOrderIDs else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            shortcutsCustomOrderIDs = orderedIDs
-        }
-        persistShortcutsCustomOrderIDs()
-    }
-
-    func resetShortcutsCustomOrderToDefault() {
-        shortcutsCustomOrderIDs = []
-        persistShortcutsCustomOrderIDs()
-        reconcileShortcutsCustomOrderIDsToCurrentItems()
-    }
-
-    func applyShortcutsCustomOrderIDs(_ ids: [String]) {
-        let normalized = Array(NSOrderedSet(array: ids)) as? [String] ?? ids
-        guard normalized != shortcutsCustomOrderIDs else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            shortcutsCustomOrderIDs = normalized
-        }
-        persistShortcutsCustomOrderIDs()
-    }
-
-    func directionalFamilyTitle(for group: DirectionalShortcutGroup) -> String {
-        switch group {
-        case .focusWindow:
-            return "Change Focus"
-        case .moveWindow:
-            return "Move Window in Layout (Direction Keys)"
-        case .resizeWindow:
-            return "Resize Window"
-        case .swapWindow:
-            return "Swap Window (Direction Keys)"
-        }
-    }
-
-    func directionalFamilyDescription(for group: DirectionalShortcutGroup) -> String {
-        switch group {
-        case .focusWindow:
-            return "Use the I / J / K / L direction keys to move focus up, left, down, and right."
-        case .moveWindow:
-            return "Use the I / J / K / L direction keys to move the focused window to another tile position."
-        case .resizeWindow:
-            return "Use the I / J / K / L direction keys to resize the focused window up, left, down, and right."
-        case .swapWindow:
-            return "Use the I / J / K / L direction keys to swap with a neighboring window in a direction."
-        }
-    }
-
-    private func buildFlatShortcutsItemsBaseOrder() -> [ShortcutsDisplayItem] {
-        let rows = featureControlRows
-        let directionalGroups: [DirectionalShortcutGroup] = [.moveWindow, .swapWindow, .focusWindow, .resizeWindow]
-        let directionalBindingsByGroup = Dictionary(uniqueKeysWithValues: directionalGroups.map { group in
-            (group, directionalShortcutBindings(for: group))
-        })
-        var insertedDirectionalGroups: Set<DirectionalShortcutGroup> = []
-        var desktopJumpEntries: [ShortcutEntry] = []
-        var desktopMoveEntries: [ShortcutEntry] = []
-        var desktopJumpInsertIndex: Int?
-        var desktopMoveInsertIndex: Int?
-        var items: [ShortcutsDisplayItem] = []
-
-        for row in rows {
-            if let entry = row.shortcutEntry, desktopJumpTarget(from: entry.command) != nil {
-                if desktopJumpInsertIndex == nil {
-                    desktopJumpInsertIndex = items.count
-                }
-                desktopJumpEntries.append(entry)
-                continue
-            }
-            if let entry = row.shortcutEntry, isScriptingAdditionDesktopShortcut(entry) {
-                if desktopMoveInsertIndex == nil {
-                    desktopMoveInsertIndex = items.count
-                }
-                desktopMoveEntries.append(entry)
-                continue
-            }
-            guard let entry = row.shortcutEntry, let binding = directionalShortcutBinding(for: entry) else {
-                items.append(.featureRow(row))
-                continue
-            }
-            if insertedDirectionalGroups.contains(binding.group) {
-                continue
-            }
-            let bindings = directionalBindingsByGroup[binding.group] ?? []
-            guard !bindings.isEmpty else { continue }
-            items.append(.directionalFamily(group: binding.group, bindings: bindings))
-            insertedDirectionalGroups.insert(binding.group)
-        }
-
-        for group in directionalGroups where !insertedDirectionalGroups.contains(group) {
-            guard let bindings = directionalBindingsByGroup[group], !bindings.isEmpty else { continue }
-            items.append(.directionalFamily(group: group, bindings: bindings))
-        }
-
-        if !desktopJumpEntries.isEmpty {
-            let sortedDesktopJumpEntries = desktopJumpEntries.sorted { lhs, rhs in
-                let lhsDesktop = desktopJumpTarget(from: lhs.command) ?? Int.max
-                let rhsDesktop = desktopJumpTarget(from: rhs.command) ?? Int.max
-                if lhsDesktop != rhsDesktop { return lhsDesktop < rhsDesktop }
-                return lhs.sourceLine < rhs.sourceLine
-            }
-            let familyItem: ShortcutsDisplayItem = .desktopJumpFamily(entries: sortedDesktopJumpEntries)
-            if let insertIndex = desktopJumpInsertIndex, insertIndex <= items.count {
-                items.insert(familyItem, at: insertIndex)
-            } else {
-                items.insert(familyItem, at: 0)
-            }
-        }
-
-        if !desktopMoveEntries.isEmpty {
-            let sortedDesktopMoveEntries = desktopMoveEntries.sorted { lhs, rhs in
-                let lhsDesktop = firstInteger(after: "--space", in: lhs.command.lowercased()) ?? Int.max
-                let rhsDesktop = firstInteger(after: "--space", in: rhs.command.lowercased()) ?? Int.max
-                if lhsDesktop != rhsDesktop { return lhsDesktop < rhsDesktop }
-                return lhs.sourceLine < rhs.sourceLine
-            }
-            let familyItem: ShortcutsDisplayItem = .desktopMoveFamily(entries: sortedDesktopMoveEntries)
-            if let insertIndex = desktopMoveInsertIndex, insertIndex <= items.count {
-                items.insert(familyItem, at: insertIndex)
-            } else {
-                items.append(familyItem)
-            }
-        }
-
-        return items
-    }
-
-    private func applyShortcutsCustomOrder(_ items: [ShortcutsDisplayItem]) -> [ShortcutsDisplayItem] {
-        var byID: [String: ShortcutsDisplayItem] = [:]
-        for item in items {
-            byID[item.id] = item
-        }
-        var ordered: [ShortcutsDisplayItem] = []
-        var seen: Set<String> = []
-
-        for id in shortcutsCustomOrderIDs {
-            guard let item = byID[id], seen.insert(id).inserted else { continue }
-            ordered.append(item)
-        }
-        for item in items {
-            guard seen.insert(item.id).inserted else { continue }
-            ordered.append(item)
-        }
-        return ordered
-    }
-
-    private func reconcileShortcutsCustomOrderIDsToCurrentItems() {
-        let availableIDs = buildFlatShortcutsItemsBaseOrder().map(\.id)
-        let availableSet = Set(availableIDs)
-        var reconciled: [String] = []
-        var seen: Set<String> = []
-
-        for id in shortcutsCustomOrderIDs where availableSet.contains(id) {
-            guard seen.insert(id).inserted else { continue }
-            reconciled.append(id)
-        }
-        for id in availableIDs where !seen.contains(id) {
-            seen.insert(id)
-            reconciled.append(id)
-        }
-
-        if reconciled != shortcutsCustomOrderIDs {
-            shortcutsCustomOrderIDs = reconciled
-            persistShortcutsCustomOrderIDs()
-        }
-    }
-
-    private func flatOrderID(for row: FeatureControlRow) -> String {
-        if let featureID = row.featureID {
-            return "feature.\(featureID.rawValue)"
-        }
-        if let stableKey = row.shortcutEntry?.stableKey {
-            return "shortcut.\(stableKey)"
-        }
-        if let actionID = row.actionID {
-            return "action.\(actionID.rawValue)"
-        }
-        return "row.\(row.id)"
-    }
-
-    private func flatOrderID(for group: DirectionalShortcutGroup) -> String {
-        "directional.\(group.rawValue)"
-    }
-
-    private func flatOrderID(for entry: ShortcutEntry) -> String {
-        if let featureID = featureDefinition(for: entry)?.id {
-            return "feature.\(featureID.rawValue)"
-        }
-        return "shortcut.\(entry.stableKey)"
-    }
-
-    private func desktopJumpTarget(from command: String) -> Int? {
-        let c = command.lowercased()
-        guard !c.contains("yabai -m window --space") else { return nil }
-        guard let range = c.range(of: "yabai -m space --focus ") else { return nil }
-        let suffix = c[range.upperBound...]
-        let digits = suffix.prefix { $0.isNumber }
-        return Int(digits)
-    }
-
-    private func pinnedContextOrderID(_ item: PinnedShortcutContextItem) -> String {
-        switch item {
-        case .feature(let row):
-            return flatOrderID(for: row)
-        case .directional(let group, _):
-            return flatOrderID(for: group)
-        case .shortcut(let entry):
-            return flatOrderID(for: entry)
-        }
-    }
-
-    private func flatShortcutsOrderRankByID() -> [String: Int] {
-        let orderedIDs = flatShortcutsItems(query: "").map(\.id)
-        return Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
-    }
-
-    private func preferredFeatureRow(existing: FeatureControlRow, candidate: FeatureControlRow) -> FeatureControlRow {
-        if existing.shortcutEntry == nil, candidate.shortcutEntry != nil { return candidate }
-        if existing.shortcutEntry != nil, candidate.shortcutEntry == nil { return existing }
-        if existing.disabledReason != nil, candidate.disabledReason == nil { return candidate }
-        if existing.assignedCombo == nil, candidate.assignedCombo != nil { return candidate }
-        if let existingLine = existing.shortcutEntry?.sourceLine,
-           let candidateLine = candidate.shortcutEntry?.sourceLine,
-           candidateLine < existingLine {
-            return candidate
-        }
-        return existing
-    }
-
-    private func nonFeatureRowSignature(_ row: FeatureControlRow) -> String {
-        let combo = row.assignedCombo ?? ""
-        let action = row.actionID?.rawValue ?? ""
-        let command = row.shortcutEntry?.command ?? row.preferredCommand ?? ""
-        return "\(row.group.rawValue)|\(row.title)|\(combo)|\(action)|\(command)"
-    }
-
-    var pinnedFeatureControlRows: [FeatureControlRow] {
-        var byID: [String: FeatureControlRow] = [:]
-        for row in featureControlRows {
-            guard let id = row.featureID else { continue }
-            byID[id.rawValue] = row
-        }
-        let fallbackRank = Dictionary(uniqueKeysWithValues: pinnedFeatureControlIDs.enumerated().map { ($0.element, $0.offset) })
-        let orderRank = flatShortcutsOrderRankByID()
-        return pinnedFeatureControlIDs.compactMap { byID[$0] }.sorted { lhs, rhs in
-            let lhsOrder = orderRank[flatOrderID(for: lhs)] ?? Int.max
-            let rhsOrder = orderRank[flatOrderID(for: rhs)] ?? Int.max
-            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
-            let lhsFallback = lhs.featureID.flatMap { fallbackRank[$0.rawValue] } ?? Int.max
-            let rhsFallback = rhs.featureID.flatMap { fallbackRank[$0.rawValue] } ?? Int.max
-            if lhsFallback != rhsFallback { return lhsFallback < rhsFallback }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-        }
-    }
-
-    func featureControlRow(forShortcutEntry entry: ShortcutEntry) -> FeatureControlRow? {
-        featureControlRows.first { $0.shortcutEntry?.stableKey == entry.stableKey }
-    }
-
-    func featureControlRow(forID featureID: FeatureControlID) -> FeatureControlRow? {
-        featureControlRows.first { $0.featureID == featureID }
-    }
-
-    func isFeaturePinned(_ featureID: FeatureControlID) -> Bool {
-        pinnedFeatureControlIDs.contains(featureID.rawValue)
-    }
-
-    func toggleFeaturePinned(_ featureID: FeatureControlID) {
-        if isFeaturePinned(featureID) {
-            pinnedFeatureControlIDs.removeAll { $0 == featureID.rawValue }
-            lastActionMessage = "Removed feature from right-click menu."
-        } else {
-            pinnedFeatureControlIDs.append(featureID.rawValue)
-            pinnedFeatureControlIDs = Array(NSOrderedSet(array: pinnedFeatureControlIDs)) as? [String] ?? pinnedFeatureControlIDs
-            lastActionMessage = "Pinned feature to right-click menu."
-        }
-        persistPinnedFeatureControlIDs()
-        lastErrorMessage = nil
-    }
-
-    func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, appContext: String? = nil) {
-        guard let row = featureControlRow(forID: featureID) else {
-            lastErrorMessage = "Feature is no longer available."
-            lastActionMessage = nil
-            return
-        }
-        if let disabledReason = row.disabledReason {
-            lastErrorMessage = disabledReason
-            lastActionMessage = nil
-            return
-        }
-        if featureID.rawValue == "app.keep-on-top-when-floating" {
-            let selectedApp = appContext?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let focusedApp = focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
-            let candidateApps = [selectedApp ?? "", focusedApp ?? ""]
-            guard let appName = candidateApps.first(where: { !$0.isEmpty }) else {
-                lastErrorMessage = "No app available to apply keep-on-top."
-                lastActionMessage = nil
-                return
-            }
-            toggleKeepFrontWhenFloating(for: appName)
-            return
-        }
-        if featureID.rawValue == "screen.bring-floating-front" {
-            bringFloatingWindowsToFrontCurrentDesktop()
-            return
-        }
-        if let entry = row.shortcutEntry {
-            runShortcut(entry)
-            return
-        }
-        if let actionID = row.actionID {
-            performTilePilotAction(actionID)
-            return
-        }
-        if let command = row.preferredCommand {
-            runShortcutCommand(command, shortcutLabel: row.title)
-            return
-        }
-        lastErrorMessage = "No shortcut assigned yet. Use Set Shortcut in Shortcuts."
-        lastActionMessage = nil
-    }
-
-    func assignShortcut(combo: String, to featureID: FeatureControlID) {
-        guard let definition = featureDefinitions.first(where: { $0.id == featureID }) else {
-            lastErrorMessage = "Unknown feature."
-            lastActionMessage = nil
-            return
-        }
-        guard let preferredCommand = definition.preferredCommand else {
-            lastErrorMessage = "This feature has no assignable command yet."
-            lastActionMessage = nil
-            return
-        }
-        let normalizedTarget = normalizedShortcutCombo(combo)
-        guard !normalizedTarget.isEmpty else {
-            lastErrorMessage = "Shortcut cannot be empty."
-            lastActionMessage = nil
-            return
-        }
-
-        if let conflict = shortcutEntries.first(where: {
-            normalizedShortcutCombo($0.combo) == normalizedTarget &&
-                (featureDefinition(for: $0)?.id != featureID)
-        }) {
-            let conflictName = featureDefinition(for: conflict)?.title ?? shortcutTitle(conflict)
-            let suggestions = suggestShortcutAlternatives(for: combo)
-            let suggestionText = suggestions.isEmpty ? "" : " Try: \(suggestions.joined(separator: ", "))."
-            lastErrorMessage = "Shortcut already used by \(conflictName).\(suggestionText)"
-            lastActionMessage = nil
-            return
-        }
-
-        let command = NSString(string: preferredCommand).expandingTildeInPath
-        upsertManagedFeatureShortcut(featureID: featureID, combo: combo, command: command)
-        saveManagedConfigSection()
-    }
-
-    func assignShortcut(combo: String, to entry: ShortcutEntry) {
-        let normalizedTarget = normalizedShortcutCombo(combo)
-        guard !normalizedTarget.isEmpty else {
-            lastErrorMessage = "Shortcut cannot be empty."
-            lastActionMessage = nil
-            return
-        }
-
-        if let conflict = shortcutEntries.first(where: {
-            normalizedShortcutCombo($0.combo) == normalizedTarget && $0.stableKey != entry.stableKey
-        }) {
-            let conflictName = featureDefinition(for: conflict)?.title ?? shortcutTitle(conflict)
-            let suggestions = suggestShortcutAlternatives(for: combo)
-            let suggestionText = suggestions.isEmpty ? "" : " Try: \(suggestions.joined(separator: ", "))."
-            lastErrorMessage = "Shortcut already used by \(conflictName).\(suggestionText)"
-            lastActionMessage = nil
-            return
-        }
-
-        let expandedPath = NSString(string: entry.sourceFile).expandingTildeInPath
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let document = try await self.configFilesService.loadDocument(path: expandedPath)
-                var lines = document.content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-                let lineIndex = max(0, entry.sourceLine - 1)
-                guard lineIndex < lines.count else {
-                    await MainActor.run {
-                        self.lastErrorMessage = "Could not update shortcut: source line \(entry.sourceLine) is out of range."
-                        self.lastActionMessage = nil
-                    }
-                    return
-                }
-
-                let commandPart = self.shortcutCommandSegment(from: lines[lineIndex], fallback: entry.command)
-                lines[lineIndex] = "\(combo) : \(commandPart)"
-                var rewritten = lines.joined(separator: "\n")
-                if document.content.hasSuffix("\n") {
-                    rewritten += "\n"
-                }
-                _ = try await self.configFilesService.saveFile(path: expandedPath, content: rewritten)
-                await MainActor.run {
-                    self.lastActionMessage = "Shortcut updated for \(self.shortcutTitle(entry))."
-                    self.lastErrorMessage = nil
-                }
-                await self.refreshShortcuts()
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Failed to update shortcut: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
-    }
-
-    func removeShortcut(for featureID: FeatureControlID) {
-        removeManagedFeatureShortcut(featureID: featureID)
-        saveManagedConfigSection()
-    }
-
-    func suggestShortcutAlternatives(for combo: String) -> [String] {
-        let used = Set(shortcutEntries.map { normalizedShortcutCombo($0.combo) })
-        let pool = [
-            "ctrl + shift + alt - d",
-            "ctrl + shift + alt - e",
-            "ctrl + shift + alt - p",
-            "ctrl + shift + alt - o",
-            "ctrl + shift + alt - g",
-            "ctrl + shift + alt - f",
-            "ctrl + shift + alt - b",
-            "ctrl + shift + alt - n",
-            "ctrl + shift + alt - m",
-            "shift + alt - b",
-            "shift + alt - v",
-            "alt - 0",
-        ]
-        let normalizedCurrent = normalizedShortcutCombo(combo)
-        return pool.filter { candidate in
-            let normalizedCandidate = normalizedShortcutCombo(candidate)
-            return normalizedCandidate != normalizedCurrent && !used.contains(normalizedCandidate)
-        }
-        .prefix(4)
-        .map { $0 }
-    }
-
-    private func featureDisabledReason(for gate: FeatureCapabilityGate) -> String? {
-        switch gate {
-        case .none:
-            return nil
-        case .yabaiRuntime:
-            return canRunYabaiRuntimeCommands ? nil : (yabaiRuntimeControlDisabledReason ?? "yabai runtime controls are unavailable.")
-        case .scriptingAddition:
-            return canRunScriptingAdditionDesktopActions ? nil : "Requires scripting addition."
-        }
-    }
-
-    private func normalizedShortcutCombo(_ combo: String) -> String {
-        combo
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "\\s*\\+\\s*", with: " + ", options: .regularExpression)
-            .replacingOccurrences(of: "\\s*-\\s*", with: " - ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func shortcutCommandSegment(from line: String, fallback: String) -> String {
-        guard let colonIndex = line.firstIndex(of: ":") else { return fallback }
-        let raw = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
-        return raw.isEmpty ? fallback : raw
-    }
-
-    private func upsertManagedFeatureShortcut(featureID: FeatureControlID, combo: String, command: String) {
-        let marker = managedFeatureMarkerPrefix + featureID.rawValue
-        let shortcutLine = "\(combo) : \(command)"
-        var lines = managedConfigDraft.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-
-        if let markerIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == marker }) {
-            if markerIndex + 1 < lines.count, lines[markerIndex + 1].contains(":") {
-                lines[markerIndex + 1] = shortcutLine
-            } else {
-                lines.insert(shortcutLine, at: markerIndex + 1)
-            }
-        } else {
-            if !lines.isEmpty, !lines.last!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("")
-            }
-            lines.append(marker)
-            lines.append(shortcutLine)
-        }
-        managedConfigDraft = lines.joined(separator: "\n")
-        recomputeConfigDiffPreview()
-    }
-
-    private func removeManagedFeatureShortcut(featureID: FeatureControlID) {
-        let marker = managedFeatureMarkerPrefix + featureID.rawValue
-        var lines = managedConfigDraft.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        var index = 0
-        while index < lines.count {
-            if lines[index].trimmingCharacters(in: .whitespaces) == marker {
-                lines.remove(at: index)
-                if index < lines.count, lines[index].contains(":") {
-                    lines.remove(at: index)
-                }
-                if index < lines.count, lines[index].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    lines.remove(at: index)
-                }
-                continue
-            }
-            index += 1
-        }
-        managedConfigDraft = lines.joined(separator: "\n")
-        recomputeConfigDiffPreview()
     }
 
     func addNeverTileApp(_ name: String) {
@@ -4072,748 +644,11 @@ final class AppModel: ObservableObject {
         removeStagedAlwaysTileApp(name)
     }
 
-    func appTilingBehavior(for appName: String) -> AppTilingBehavior {
-        let key = normalizedAppRuleKey(appName)
-        if windowBehaviorPolicyDraft.neverTileApps.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return .neverTile
-        }
-        if windowBehaviorPolicyDraft.alwaysTileApps.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return .alwaysTile
-        }
-        return externalYabaiAppBehaviorByName[key] ?? .useDefault
+    func featureDefinition(forActionID actionID: TilePilotActionID) -> FeatureDefinition? {
+        featureDefinitions.first(where: { $0.actionID == actionID })
     }
 
-    func appForegroundPolicy(for appName: String) -> AppForegroundPolicy {
-        let key = normalizedAppRuleKey(appName)
-        if let exact = appForegroundPolicyByName[key] {
-            return exact
-        }
-        if let legacy = appForegroundPolicyByName[legacyTruncatedAppRuleKey(for: key)] {
-            return legacy
-        }
-        return .useDefault
-    }
-
-    func setAppForegroundPolicy(_ policy: AppForegroundPolicy, for appName: String) {
-        let key = normalizedAppRuleKey(appName)
-        guard !key.isEmpty else { return }
-        let legacyKey = legacyTruncatedAppRuleKey(for: key)
-        if policy == .useDefault {
-            appForegroundPolicyByName.removeValue(forKey: key)
-            appForegroundPolicyByName.removeValue(forKey: legacyKey)
-        } else {
-            appForegroundPolicyByName[key] = policy
-            appForegroundPolicyByName.removeValue(forKey: legacyKey)
-        }
-        persistAppForegroundPolicies()
-        let displayName = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if policy == .useDefault {
-            lastActionMessage = "Keep-on-top behavior for \(displayName) reset to default."
-        } else {
-            lastActionMessage = "\(displayName) will stay on top when floating."
-            bringFlaggedFloatingWindowsToFrontCurrentDesktop()
-        }
-        lastErrorMessage = nil
-    }
-
-    func toggleKeepFrontWhenFloating(for appName: String) {
-        let next: AppForegroundPolicy = appForegroundPolicy(for: appName) == .keepFrontWhenFloating ? .useDefault : .keepFrontWhenFloating
-        setAppForegroundPolicy(next, for: appName)
-        if next == .keepFrontWhenFloating {
-            bringFlaggedFloatingWindowsToFrontCurrentDesktop()
-        }
-    }
-
-    func setAppTilingBehavior(_ behavior: AppTilingBehavior, for appName: String, autosave: Bool = true) {
-        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let key = normalizedAppRuleKey(trimmed)
-        guard !key.isEmpty else { return }
-
-        windowBehaviorPolicyDraft.neverTileApps = windowBehaviorPolicyDraft.neverTileApps.filter { normalizedAppRuleKey($0) != key }
-        windowBehaviorPolicyDraft.alwaysTileApps = windowBehaviorPolicyDraft.alwaysTileApps.filter { normalizedAppRuleKey($0) != key }
-
-        switch behavior {
-        case .useDefault:
-            break
-        case .neverTile:
-            windowBehaviorPolicyDraft.neverTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.neverTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.neverTileApps)
-        case .alwaysTile:
-            windowBehaviorPolicyDraft.alwaysTileApps.append(trimmed)
-            windowBehaviorPolicyDraft.alwaysTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.alwaysTileApps)
-        }
-        recomputeYabaiConfigDiffPreview()
-        if autosave {
-            scheduleDebouncedWindowBehaviorSave(reason: "app-behavior")
-        }
-    }
-
-    func toggleAppDefaultTilingBehavior(for appName: String) {
-        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let currentDefault = appTilingBehavior(for: trimmed)
-        let next: AppTilingBehavior
-        switch currentDefault {
-        case .neverTile:
-            next = .alwaysTile
-        case .alwaysTile:
-            next = .neverTile
-        case .useDefault:
-            // Toggle against current global default shown in Overview.
-            next = windowBehaviorPolicyDraft.manualTilingModeEnabled ? .alwaysTile : .neverTile
-        }
-        setAppTilingBehavior(next, for: trimmed, autosave: false)
-        saveWindowBehaviorPolicy()
-    }
-
-    func alwaysTileConflictDesktopIndex(for appName: String) -> Int? {
-        guard appTilingBehavior(for: appName) == .alwaysTile else { return nil }
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else { return nil }
-        guard let activeSpace = activeSpaceIndex(in: snapshot) else { return nil }
-        guard desktopTilingEnabled(spaceIndex: activeSpace) == false else { return nil }
-        return activeSpace
-    }
-
-    var isManagedConfigDraftDirty: Bool {
-        managedConfigDraft != originalManagedConfigSection
-    }
-
-    private var checklistItems: [DoctorChecklistItem] {
-        guard let snapshot = doctorSnapshot else { return [] }
-        let capabilityByKey = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0) })
-        var items: [DoctorChecklistItem] = []
-
-        if let item = capabilityByKey["accessibility"] {
-            items.append(checklist(from: item, title: "TilePilot Accessibility (optional)", isCore: false))
-        }
-        if let item = capabilityByKey["yabai-binary"] {
-            items.append(checklist(from: item, title: "yabai installed", isCore: true))
-        }
-        if let item = capabilityByKey["yabai-daemon"] {
-            items.append(checklist(from: item, title: "yabai daemon running", isCore: true))
-        }
-        if let item = capabilityByKey["yabai-query"] {
-            items.append(checklist(from: item, title: "yabai query socket reachable", isCore: true))
-        }
-        if let item = capabilityByKey["skhd-binary"] {
-            items.append(checklist(from: item, title: "skhd installed", isCore: false))
-        }
-        if let item = capabilityByKey["skhd-daemon"] {
-            items.append(checklist(from: item, title: "skhd daemon running", isCore: false))
-        }
-        if let item = capabilityByKey["scripting-addition"] {
-            items.append(scriptingAdditionChecklist(from: item))
-        }
-
-        for check in snapshot.missionControlChecks {
-            let status: CapabilityStatus
-            switch check.status {
-            case .pass: status = .available
-            case .warning: status = .degraded
-            case .unknown: status = .unknown
-            }
-            items.append(
-                DoctorChecklistItem(
-                    title: "Mission Control: \(check.key)",
-                    isCore: true,
-                    status: status,
-                    detail: check.message,
-                    remediation: ["Expected \(check.expected), actual \(check.actual ?? "unknown")."]
-                )
-            )
-        }
-
-        return items
-    }
-
-    private func checklist(from capability: CapabilityState, title: String, isCore: Bool) -> DoctorChecklistItem {
-        DoctorChecklistItem(
-            title: title,
-            isCore: isCore,
-            status: capability.status,
-            detail: capability.message,
-            remediation: capability.remediationSteps
-        )
-    }
-
-    private func scriptingAdditionChecklist(from capability: CapabilityState) -> DoctorChecklistItem {
-        if hasObservedScriptingAdditionRuntimeFailure {
-            var remediation = capability.remediationSteps
-            if !remediation.contains(where: { $0.localizedCaseInsensitiveContains("repair") || $0.localizedCaseInsensitiveContains("install") }) {
-                remediation.insert("Use “Fix Scripting Addition” to reinstall/load yabai’s scripting addition in Terminal.", at: 0)
-            }
-            return DoctorChecklistItem(
-                title: "yabai desktop control (scripting addition)",
-                isCore: true,
-                status: .degraded,
-                detail: "Your yabai-based desktop shortcuts are failing because the scripting addition is unavailable. macOS can still handle desktop switching with Mission Control keyboard shortcuts.",
-                remediation: remediation
-            )
-        }
-
-        var detail = capability.message
-        if capability.status == .available {
-            detail = "yabai desktop switching and move-window shortcuts should be available."
-        } else if capability.status == .unknown {
-            detail = "Moving windows between desktops (and some desktop controls) may require the yabai scripting addition on this setup. Plain desktop switching can use macOS Mission Control shortcuts."
-        }
-
-        var remediation = capability.remediationSteps
-        if capability.status != .available {
-            remediation.insert("Use “Fix Scripting Addition” to reinstall/load yabai’s scripting addition in Terminal.", at: 0)
-        }
-
-        return DoctorChecklistItem(
-            title: "yabai desktop control (scripting addition)",
-            isCore: true,
-            status: capability.status,
-            detail: detail,
-            remediation: Array(NSOrderedSet(array: remediation)) as? [String] ?? remediation
-        )
-    }
-
-    private func mappedSystemStatus(from setupState: SetupCheckState?) -> SystemCheckStatus? {
-        guard let setupState else { return nil }
-        switch setupState {
-        case .installed:
-            return .good
-        case .unknown:
-            return .notice
-        case .warning:
-            return .warning
-        case .missing:
-            return .error
-        }
-    }
-
-    private func mappedSystemStatus(from capabilityStatus: CapabilityStatus?) -> SystemCheckStatus? {
-        guard let capabilityStatus else { return nil }
-        switch capabilityStatus {
-        case .available:
-            return .good
-        case .unknown:
-            return .notice
-        case .degraded:
-            return .warning
-        case .unsupported, .blocked:
-            return .error
-        }
-    }
-
-    private func mergedSystemStatus(_ statuses: [SystemCheckStatus?]) -> SystemCheckStatus {
-        statuses.compactMap { $0 }.max(by: { $0.severityRank < $1.severityRank }) ?? .notice
-    }
-
-    private func firstDetail(_ candidates: String?..., fallback: String) -> String {
-        for candidate in candidates {
-            guard let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { continue }
-            return trimmed
-        }
-        return fallback
-    }
-
-    private func scriptingAdditionDetail(from capability: CapabilityState?) -> String {
-        guard let capability else {
-            return "Not yet checked. Optional for advanced desktop/window move shortcuts."
-        }
-        if capability.status == .available {
-            return "Advanced desktop/window move shortcuts are available."
-        }
-        return "Optional advanced feature. Regular desktop switching can use macOS Mission Control shortcuts without scripting addition."
-    }
-
-    private func currentPollingIntervalSeconds() -> Double {
-        let anyVisibleNonSettingsWindow = NSApp.windows.contains { window in
-            window.isVisible && window.title == "TilePilot"
-        }
-        if showWindowBadgeOverlay || showWindowOutlineOverlay {
-            return anyVisibleNonSettingsWindow ? 0.8 : 1.8
-        }
-        return anyVisibleNonSettingsWindow ? 1.8 : 6.0
-    }
-
-    private var shouldSoftenInitialBlockedStatus: Bool {
-        guard let snapshot = doctorSnapshot else { return false }
-        return snapshot.healthBadge == .blocked && !hasAcknowledgedInitialStatus
-    }
-
-    var menuBarVisualBadgeLevel: HealthBadgeLevel? {
-        guard let snapshot = doctorSnapshot else { return nil }
-        if shouldUseNeutralSetupMenuBar {
-            return nil
-        }
-        if shouldSoftenInitialBlockedStatus {
-            return .warning
-        }
-        if shouldDowngradeBlockedToSetupNeededInMenuBar {
-            return .warning
-        }
-        return snapshot.healthBadge
-    }
-
-    private var shouldDowngradeBlockedToSetupNeededInMenuBar: Bool {
-        guard let snapshot = doctorSnapshot, snapshot.healthBadge == .blocked else { return false }
-
-        let blockedKeys = Set(snapshot.capabilities.filter { $0.status == .blocked }.map(\.key))
-        if blockedKeys.isEmpty {
-            return false
-        }
-
-        let commonSetupBlockedKeys: Set<String> = ["accessibility", "yabai-binary", "skhd-binary", "yabai-query"]
-        guard blockedKeys.isSubset(of: commonSetupBlockedKeys) else {
-            return false
-        }
-
-        if let bootstrapSnapshot {
-            let hasMissingInstallDeps = bootstrapSnapshot.items.contains {
-                ["homebrew", "yabai-binary", "skhd-binary"].contains($0.id) && $0.state == .missing
-            }
-            if hasMissingInstallDeps {
-                return true
-            }
-        }
-
-        return blockedKeys == Set(["accessibility"]) || blockedKeys == Set(["accessibility", "yabai-query"])
-    }
-
-    private var shouldUseNeutralSetupMenuBar: Bool {
-        if let bootstrapSnapshot {
-            let setupMissingIDs: Set<String> = ["xcode-clt", "homebrew", "yabai-binary", "skhd-binary"]
-            let hasSetupMissing = bootstrapSnapshot.items.contains { setupMissingIDs.contains($0.id) && $0.state == .missing }
-            if hasSetupMissing {
-                return true
-            }
-        }
-
-        guard let snapshot = doctorSnapshot else { return false }
-        let failing = snapshot.capabilities.filter { $0.status != .available }
-        if failing.isEmpty { return false }
-
-        let allSetupish = failing.allSatisfy { capability in
-            ["accessibility", "yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon", "yabai-query"].contains(capability.key)
-        }
-        return allSetupish && liveStateSnapshot == nil
-    }
-
-    private func primaryMenuBarSummary() -> String? {
-        if windowBehaviorPolicyDraft.mouseFollowsFocusEnabled {
-            return "Cursor follows focus is on"
-        }
-        if windowBehaviorPolicyDraft.hoverFocusMode != .off {
-            return "Hover focus is on"
-        }
-        if !windowBehaviorPolicyDraft.manualTilingModeEnabled, yabaiConfigHasManagedSection {
-            return "Manual tiling off"
-        }
-
-        if let bootstrap = bootstrapSnapshot {
-            let missing = Set(bootstrap.items.filter { $0.state == .missing }.map(\.id))
-            if missing.contains("homebrew") {
-                return "Install Homebrew"
-            }
-            if missing.contains("yabai-binary") || missing.contains("skhd-binary") {
-                return "Install Dependencies"
-            }
-        }
-
-        guard let snapshot = doctorSnapshot else { return nil }
-        let capabilityByKey = Dictionary(uniqueKeysWithValues: snapshot.capabilities.map { ($0.key, $0) })
-
-        if let yabaiBinary = capabilityByKey["yabai-binary"], yabaiBinary.status == .blocked {
-            return "Install yabai"
-        }
-        if let yabaiDaemon = capabilityByKey["yabai-daemon"], yabaiDaemon.status != .available {
-            return "Start yabai"
-        }
-        if let yabaiQuery = capabilityByKey["yabai-query"], yabaiQuery.status != .available {
-            return "yabai not responding"
-        }
-        if snapshot.missionControlChecks.contains(where: { $0.status == .warning }) {
-            return "Mission Control settings"
-        }
-        if let sa = capabilityByKey["scripting-addition"], sa.status == .degraded || hasObservedScriptingAdditionRuntimeFailure {
-            return "Fix Scripting Addition"
-        }
-        if let skhdBinary = capabilityByKey["skhd-binary"], skhdBinary.status == .blocked {
-            return "Install skhd (optional)"
-        }
-        return nil
-    }
-
-    private func applyConfigDocumentState(_ state: ConfigDocumentState, preserveUserDraftIfDirty: Bool) {
-        let wasDirty = isManagedConfigDraftDirty
-        configFilePath = state.filePath
-        configFileExists = state.fileExists
-        configHasManagedSection = state.hasManagedSection
-        configBackups = state.backups
-        loadedFullConfigContent = state.fullContent
-        originalManagedConfigSection = state.managedSectionBody
-
-        if !(preserveUserDraftIfDirty && wasDirty) {
-            managedConfigDraft = state.managedSectionBody
-        }
-        recomputeConfigDiffPreview()
-    }
-
-    private func applyYabaiConfigDocumentState(_ state: YabaiConfigDocumentState, preserveDraftIfDirty: Bool = true) {
-        yabaiConfigFilePath = state.filePath
-        yabaiConfigFileExists = state.fileExists
-        yabaiConfigHasManagedSection = state.hasManagedSection
-        yabaiConfigBackups = state.backups
-        externalYabaiAppBehaviorByName = parseExternalYabaiAppBehaviors(from: state.fullContent)
-        let wasDirty = isWindowBehaviorDraftDirty
-        originalWindowBehaviorPolicy = state.policy
-        originalYabaiManagedConfigSection = state.managedSectionBody
-        if !(preserveDraftIfDirty && wasDirty) {
-            windowBehaviorPolicyDraft = state.policy
-        }
-        syncStagedAppRuleListsFromDraft(preservePendingChanges: true)
-        recomputeYabaiConfigDiffPreview()
-    }
-
-    private func recomputeConfigDiffPreview() {
-        configDiffPreviewText = configService.buildManagedSectionDiff(
-            original: originalManagedConfigSection,
-            proposed: managedConfigDraft
-        )
-    }
-
-    private func recomputeYabaiConfigDiffPreview() {
-        let proposed = yabaiRulesConfigService.renderManagedBody(for: windowBehaviorPolicyDraft)
-        yabaiConfigDiffPreviewText = yabaiRulesConfigService.buildManagedSectionDiff(
-            original: originalYabaiManagedConfigSection,
-            proposed: proposed
-        )
-    }
-
-    private func scheduleDebouncedWindowBehaviorSave(reason _: String) {
-        windowBehaviorAutoSaveTask?.cancel()
-        windowBehaviorAutoSaveTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await Task.sleep(nanoseconds: self.windowBehaviorAutoSaveDelayNanoseconds)
-            } catch {
-                return
-            }
-            if Task.isCancelled { return }
-            await MainActor.run {
-                guard self.isWindowBehaviorDraftDirty else { return }
-                if self.isSavingYabaiConfig || self.isRestoringYabaiConfig {
-                    self.scheduleDebouncedWindowBehaviorSave(reason: "retry-after-busy")
-                    return
-                }
-                self.saveWindowBehaviorPolicy(reason: .autosave)
-            }
-        }
-    }
-
-    private func syncStagedAppRuleListsFromDraft(preservePendingChanges: Bool) {
-        let shouldPreserve = preservePendingChanges && hasInitializedStagedAppRuleLists && isAppRuleListApplyRequired
-        guard !shouldPreserve else { return }
-        stagedNeverTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.neverTileApps)
-        stagedAlwaysTileApps = canonicalizeAppRuleList(windowBehaviorPolicyDraft.alwaysTileApps)
-        hasInitializedStagedAppRuleLists = true
-    }
-
-    private func canonicalizeAppRuleList(_ values: [String]) -> [String] {
-        var byNormalizedKey: [String: String] = [:]
-        for raw in values {
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let key = normalizedAppRuleKey(trimmed)
-            guard !key.isEmpty else { continue }
-            if byNormalizedKey[key] == nil {
-                byNormalizedKey[key] = trimmed
-            }
-        }
-        return byNormalizedKey.values.sorted { lhs, rhs in
-            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-        }
-    }
-
-    private func addingAppName(_ name: String, to values: [String]) -> [String] {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return canonicalizeAppRuleList(values) }
-        let key = normalizedAppRuleKey(trimmed)
-        guard !key.isEmpty else { return canonicalizeAppRuleList(values) }
-        if values.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return canonicalizeAppRuleList(values)
-        }
-        return canonicalizeAppRuleList(values + [trimmed])
-    }
-
-    private func removeAppName(_ name: String, from values: [String]) -> [String] {
-        let key = normalizedAppRuleKey(name)
-        guard !key.isEmpty else { return canonicalizeAppRuleList(values) }
-        let filtered = values.filter { normalizedAppRuleKey($0) != key }
-        return canonicalizeAppRuleList(filtered)
-    }
-
-    private func persistAppForegroundPolicies() {
-        let raw = appForegroundPolicyByName.mapValues(\.rawValue)
-        UserDefaults.standard.set(raw, forKey: AppModel.appForegroundPolicyByNameDefaultsKey)
-    }
-
-    private func normalizedAppRuleKey(_ appName: String) -> String {
-        appName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: #"[\u200E\u200F\u202A-\u202E\u2066-\u2069]"#, with: "", options: .regularExpression)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .lowercased()
-    }
-
-    private func legacyTruncatedAppRuleKey(for normalizedKey: String) -> String {
-        guard normalizedKey.count > 1 else { return normalizedKey }
-        return String(normalizedKey.dropFirst())
-    }
-
-    private func parseExternalYabaiAppBehaviors(from fullContent: String) -> [String: AppTilingBehavior] {
-        var map: [String: AppTilingBehavior] = [:]
-        let begin = yabaiRulesConfigService.beginMarker
-        let end = yabaiRulesConfigService.endMarker
-        var inManagedBlock = false
-
-        for rawLine in fullContent.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line == begin {
-                inManagedBlock = true
-                continue
-            }
-            if line == end {
-                inManagedBlock = false
-                continue
-            }
-            if inManagedBlock || line.isEmpty || line.hasPrefix("#") { continue }
-            guard line.contains("rule --add") else { continue }
-
-            let behavior: AppTilingBehavior?
-            if line.contains("manage=off") {
-                behavior = .neverTile
-            } else if line.contains("manage=on") {
-                behavior = .alwaysTile
-            } else {
-                behavior = nil
-            }
-            guard let behavior else { continue }
-            guard let appPattern = parseAppPattern(fromRuleLine: line) else { continue }
-
-            for app in expandExternalAppPattern(appPattern) {
-                let key = normalizedAppRuleKey(app)
-                guard !key.isEmpty else { continue }
-                map[key] = behavior
-            }
-        }
-        return map
-    }
-
-    private func normalizeOverviewWindowPreview(_ window: WindowState, in display: DisplayState) -> OverviewWindowPreview? {
-        let displayW = max(display.frameW, 1)
-        let displayH = max(display.frameH, 1)
-
-        let x = (window.frameX - display.frameX) / displayW
-        let y = (window.frameY - display.frameY) / displayH
-        let w = window.frameW / displayW
-        let h = window.frameH / displayH
-
-        let left = max(0, min(1, x))
-        let top = max(0, min(1, y))
-        let right = max(0, min(1, x + w))
-        let bottom = max(0, min(1, y + h))
-
-        guard right > left, bottom > top else { return nil }
-
-        return OverviewWindowPreview(
-            id: window.id,
-            app: window.app,
-            title: window.title,
-            floating: window.floating,
-            runtimeManageable: window.isRuntimeManageable,
-            focused: window.focused,
-            visible: window.isVisible,
-            normalizedX: left,
-            normalizedY: top,
-            normalizedW: right - left,
-            normalizedH: bottom - top
-        )
-    }
-
-    private func parseAppPattern(fromRuleLine line: String) -> String? {
-        guard let range = line.range(of: #"app=""#) else { return nil }
-        let start = range.upperBound
-        guard let end = line[start...].firstIndex(of: "\"") else { return nil }
-        return String(line[start..<end])
-    }
-
-    private func expandExternalAppPattern(_ pattern: String) -> [String] {
-        let unescaped = pattern.replacingOccurrences(of: #"\"#, with: "")
-        if unescaped == ".*" { return [] }
-
-        if let exact = unwrapAnchoredExactPattern(unescaped) {
-            return [exact]
-        }
-
-        if let group = unwrapAnchoredAlternationPattern(unescaped) {
-            return group
-        }
-
-        if !looksRegexLike(unescaped) {
-            return [unescaped]
-        }
-        return []
-    }
-
-    private func unwrapAnchoredExactPattern(_ pattern: String) -> String? {
-        guard pattern.hasPrefix("^"), pattern.hasSuffix("$") else { return nil }
-        let core = String(pattern.dropFirst().dropLast())
-        guard !core.isEmpty, !looksRegexLike(core) else { return nil }
-        return core
-    }
-
-    private func unwrapAnchoredAlternationPattern(_ pattern: String) -> [String]? {
-        guard pattern.hasPrefix("^("), pattern.hasSuffix(")$") else { return nil }
-        let core = String(pattern.dropFirst(2).dropLast(2))
-        let parts = core.split(separator: "|").map(String.init)
-        guard !parts.isEmpty else { return nil }
-        var apps: [String] = []
-        for part in parts {
-            let name = part.replacingOccurrences(of: #"\"#, with: "")
-            guard !name.isEmpty, !looksRegexLike(name) else { return nil }
-            apps.append(name)
-        }
-        return apps
-    }
-
-    private func looksRegexLike(_ value: String) -> Bool {
-        let regexMeta = CharacterSet(charactersIn: "[](){}.*+?|^$")
-        return value.rangeOfCharacter(from: regexMeta) != nil
-    }
-
-    private func inferredEditableFileKind(for path: String) -> EditableFileKind {
-        let expanded = NSString(string: path).expandingTildeInPath
-        if expanded == NSString(string: "~/.config/yabai/yabairc").expandingTildeInPath { return .yabairc }
-        if expanded == NSString(string: "~/.config/skhd/skhdrc").expandingTildeInPath { return .skhdrc }
-        if URL(fileURLWithPath: expanded).pathExtension.lowercased() == "sh" { return .script }
-        return .other
-    }
-
-    private func editableFileSortRank(_ file: EditableConfigFile) -> Int {
-        switch file.kind {
-        case .yabairc: return 0
-        case .skhdrc: return 1
-        case .script: return 2
-        case .other: return 3
-        }
-    }
-
-    private func applyWindowBehaviorRuntime(previous: ManagedWindowBehaviorPolicy, current: ManagedWindowBehaviorPolicy) async {
-        var configApplyFailed = false
-        let configCommands: [ShellCommand] = [
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "config", "focus_follows_mouse", current.hoverFocusMode.rawValue], timeout: 1.5),
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "config", "mouse_follows_focus", current.mouseFollowsFocusEnabled ? "on" : "off"], timeout: 1.5),
-        ]
-        for command in configCommands {
-            let result = await doctorService.runSupportCommand(command)
-            if !result.isSuccess {
-                configApplyFailed = true
-            }
-            await MainActor.run {
-                self.appendCommandLog(from: result)
-                if !result.isSuccess {
-                    self.lastActionMessage = "Saved settings, but runtime apply may require restarting yabai."
-                }
-            }
-        }
-
-        let ruleCommands = yabaiRulesConfigService.runtimeRuleCommands(previous: previous, current: current)
-        var ruleApplyFailed = false
-        for command in ruleCommands {
-            let result = await doctorService.runSupportCommand(command)
-            await MainActor.run {
-                self.appendCommandLog(from: result)
-            }
-            if !result.isSuccess {
-                ruleApplyFailed = true
-            }
-        }
-
-        let allNeverTiled = Set(current.neverTileApps)
-        if !allNeverTiled.isEmpty {
-            await floatOpenWindowsForApps(allNeverTiled)
-        }
-        let alwaysTileConflict = firstAlwaysTileDesktopConflict(for: Set(current.alwaysTileApps))
-
-        await MainActor.run {
-            let baseMessage: String?
-            if current.manualTilingModeEnabled {
-                if !ruleApplyFailed && !configApplyFailed {
-                    baseMessage = "Manual Tiling Mode enabled. Existing windows stay as-is; new windows should stop auto-tiling."
-                } else if self.lastErrorMessage == nil {
-                    self.lastErrorMessage = "Saved settings, but some live yabai rules did not apply. Restart yabai if behavior looks wrong."
-                    baseMessage = nil
-                } else {
-                    baseMessage = nil
-                }
-            } else {
-                if !ruleApplyFailed && !configApplyFailed {
-                    baseMessage = "Window behavior updated."
-                } else if self.lastErrorMessage == nil {
-                    self.lastErrorMessage = "Saved settings, but some runtime updates did not apply. Restart yabai if behavior looks wrong."
-                    baseMessage = nil
-                } else {
-                    baseMessage = nil
-                }
-            }
-
-            if let baseMessage {
-                if let conflict = alwaysTileConflict {
-                    self.lastActionMessage = "\(baseMessage) Desktop tiling is off on Desktop \(conflict.desktop); enable it to tile \(conflict.app) there."
-                } else {
-                    self.lastActionMessage = baseMessage
-                }
-                self.lastErrorMessage = nil
-            }
-        }
-        await refreshLiveState()
-        await refreshDoctor()
-        await refreshWindowBehaviorConfig()
-    }
-
-    private func floatOpenWindowsForApps(_ appNames: Set<String>) async {
-        let names = Set(appNames.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
-        guard !names.isEmpty else { return }
-        let openWindows = liveStateSnapshot?.windows ?? []
-        for window in openWindows where names.contains(window.app) && !window.floating {
-            let result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(window.id), "--toggle", "float"], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: result)
-            }
-            if result.isSuccess {
-                await bringWindowToFront(windowID: window.id)
-            }
-        }
-    }
-
-    private func firstAlwaysTileDesktopConflict(for appNames: Set<String>) -> (app: String, desktop: Int)? {
-        let names = Set(appNames.map { normalizedAppRuleKey($0) }.filter { !$0.isEmpty })
-        guard !names.isEmpty else { return nil }
-        guard let snapshot = liveStateSnapshot else { return nil }
-
-        for window in snapshot.windows where !window.isHidden && !window.isMinimized {
-            let appKey = normalizedAppRuleKey(window.app)
-            guard names.contains(appKey) else { continue }
-            guard let layout = snapshot.spaces.first(where: { $0.index == window.space })?.layout?.lowercased() else { continue }
-            if layout == "float" {
-                return (app: window.app, desktop: window.space)
-            }
-        }
-        return nil
-    }
-
-    private enum FloatingBringReason {
+    enum FloatingBringReason {
         case manualAll
         case manualFlagged
         case autoTransition
@@ -4822,842 +657,60 @@ final class AppModel: ObservableObject {
     }
 
     private func applyForegroundPolicyTransitions(previous: LiveStateSnapshot?, current: LiveStateSnapshot) async {
-        let currentTransition = foregroundTransitionSnapshot(from: current)
-        guard currentTransition.isEligible else { return }
-
-        let previousTransition: (isEligible: Bool, activeSpace: Int?, visibleFlaggedFloatingWindowIDs: Set<Int>)
-        if let previous {
-            previousTransition = foregroundTransitionSnapshot(from: previous)
-        } else {
-            previousTransition = (true, nil, [])
-        }
-        guard previousTransition.isEligible else { return }
-
-        let activeDesktopChanged = previousTransition.activeSpace != currentTransition.activeSpace
-        let newlyVisibleFlagged = currentTransition.visibleFlaggedFloatingWindowIDs.subtracting(previousTransition.visibleFlaggedFloatingWindowIDs)
-        guard activeDesktopChanged || !newlyVisibleFlagged.isEmpty else { return }
-        await bringFloatingWindowsToFrontCurrentDesktop(flaggedOnly: true, reason: .autoTransition, bypassCooldown: false)
+        await keepOnTopCoordinator.applyForegroundPolicyTransitions(on: self, previous: previous, current: current)
     }
 
     private func enforceKeepOnTopPoliciesIfNeeded(for snapshot: LiveStateSnapshot) async {
-        guard snapshot.source == .yabai, !snapshot.degraded else { return }
-        let hasKeepOnTopPolicy = appForegroundPolicyByName.values.contains(.keepFrontWhenFloating)
-        guard hasKeepOnTopPolicy else { return }
-        await bringFloatingWindowsToFrontCurrentDesktop(flaggedOnly: true, reason: .autoEnforce, bypassCooldown: false)
+        guard keepOnTopEnforcementEnabled else { return }
+        guard hasActiveKeepOnTopWindows else { return }
+        recordRuntimeBurst(.keepOnTopEnforcement)
+        mutateRuntimeDiagnostics { $0.keepOnTopEnforcementPassCount += 1 }
+        await keepOnTopCoordinator.enforceKeepOnTopPoliciesIfNeeded(on: self, snapshot: snapshot)
     }
 
-    private func foregroundTransitionSnapshot(from snapshot: LiveStateSnapshot?) -> (isEligible: Bool, activeSpace: Int?, visibleFlaggedFloatingWindowIDs: Set<Int>) {
-        guard let snapshot, snapshot.source == .yabai, !snapshot.degraded else {
-            return (false, nil, [])
-        }
-        let activeSpace = activeSpaceIndex(in: snapshot)
-        let windows = candidateFloatingWindows(in: snapshot, activeSpace: activeSpace, flaggedOnly: true)
-        return (true, activeSpace, Set(windows.map(\.id)))
-    }
-
-    private func activeSpaceIndex(in snapshot: LiveStateSnapshot) -> Int? {
+    func activeSpaceIndex(in snapshot: LiveStateSnapshot) -> Int? {
         snapshot.windows.first(where: \.focused)?.space
             ?? snapshot.spaces.first(where: \.focused)?.index
             ?? snapshot.spaces.first(where: \.visible)?.index
     }
 
-    private func candidateFloatingWindows(
-        in snapshot: LiveStateSnapshot,
-        activeSpace: Int?,
-        flaggedOnly: Bool,
-        requireRuntimeManageable: Bool = true
-    ) -> [WindowState] {
-        snapshot.windows.filter { window in
-            guard window.floating else { return false }
-            // Keep-on-top should also recover windows that are currently occluded.
-            // Exclude only hidden/minimized windows.
-            guard !window.isMinimized && !window.isHidden else { return false }
-            if requireRuntimeManageable {
-                guard window.isRuntimeManageable else { return false }
-            }
-            if let activeSpace, window.space != activeSpace { return false }
-            if flaggedOnly && appForegroundPolicy(for: window.app) != .keepFrontWhenFloating {
-                return false
-            }
-            return true
-        }
-        .sorted { lhs, rhs in
-            let lhsArea = lhs.frameW * lhs.frameH
-            let rhsArea = rhs.frameW * rhs.frameH
-            if lhsArea != rhsArea { return lhsArea > rhsArea }
-            return lhs.id < rhs.id
-        }
-    }
-
-    private func raiseWindowUsingAccessibilityOnly(windowID: Int, bypassCooldown: Bool) -> Bool {
-        let now = Date()
-        if !bypassCooldown,
-           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
-           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
-            return false
-        }
-        guard raiseWindowUsingAccessibility(windowID: windowID) else { return false }
-        lastRaisedAtByWindowID[windowID] = now
-        return true
-    }
-
-    private func bringFloatingWindowsToFrontCurrentDesktop(
+    func bringFloatingWindowsToFrontCurrentDesktop(
         flaggedOnly: Bool,
         reason: FloatingBringReason,
         bypassCooldown: Bool
     ) async {
-        guard canRunYabaiRuntimeCommands else {
-            if reason == .manualAll || reason == .manualFlagged {
-                lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
-                lastActionMessage = nil
-            }
-            return
-        }
-        guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else {
-            if reason == .manualAll || reason == .manualFlagged {
-                lastErrorMessage = "Live window mapping is not precise right now."
-                lastActionMessage = nil
-            }
-            return
-        }
-
-        let activeSpace = activeSpaceIndex(in: snapshot)
-        let candidates = candidateFloatingWindows(
-            in: snapshot,
-            activeSpace: activeSpace,
+        await keepOnTopCoordinator.bringFloatingWindowsToFrontCurrentDesktop(
+            on: self,
             flaggedOnly: flaggedOnly,
-            requireRuntimeManageable: false
+            reason: reason,
+            bypassCooldown: bypassCooldown
         )
-        let candidateIDs = Set(candidates.map(\.id))
-        keepOnTopOcclusionActiveByWindowID = keepOnTopOcclusionActiveByWindowID.filter { candidateIDs.contains($0.key) }
-        lastKeepOnTopAutoAttemptAtByWindowID = lastKeepOnTopAutoAttemptAtByWindowID.filter { candidateIDs.contains($0.key) }
-
-        guard !candidates.isEmpty else {
-            if reason == .manualAll {
-                lastActionMessage = "No floating windows on the current desktop."
-                lastErrorMessage = nil
-            } else if reason == .manualFlagged {
-                lastActionMessage = "No flagged floating windows on the current desktop."
-                lastErrorMessage = nil
-            }
-            return
-        }
-
-        var raisedCount = 0
-        let useAccessibilityRaise = AXIsProcessTrusted()
-        let isAutomaticReason = (reason == .autoTransition || reason == .autoEnforce || reason == .floatToggle)
-        for window in candidates {
-            if isAutomaticReason {
-                // Automatic keep-on-top runs on occlusion transitions and throttled retries
-                // while still occluded (for apps where AXRaise is flaky/unsupported).
-                let isOccluded = isWindowLikelyOccluded(window)
-                let wasOccluded = keepOnTopOcclusionActiveByWindowID[window.id] ?? false
-                keepOnTopOcclusionActiveByWindowID[window.id] = isOccluded
-                if !isOccluded { continue }
-                if window.focused { continue }
-                if wasOccluded {
-                    let now = Date()
-                    if let lastAttempt = lastKeepOnTopAutoAttemptAtByWindowID[window.id],
-                       now.timeIntervalSince(lastAttempt) < keepOnTopAutoRetrySeconds {
-                        continue
-                    }
-                    lastKeepOnTopAutoAttemptAtByWindowID[window.id] = now
-                } else {
-                    lastKeepOnTopAutoAttemptAtByWindowID[window.id] = Date()
-                }
-            }
-
-            if useAccessibilityRaise {
-                let axRaised = raiseWindowUsingAccessibilityOnly(windowID: window.id, bypassCooldown: bypassCooldown)
-                let stillOccluded = isWindowLikelyOccluded(window)
-                if axRaised && !stillOccluded {
-                    raisedCount += 1
-                } else if await focusWindowForKeepOnTop(windowID: window.id, targetSpace: window.space, bypassCooldown: bypassCooldown) {
-                    raisedCount += 1
-                }
-                continue
-            }
-            if await focusWindowForKeepOnTop(
-                windowID: window.id,
-                targetSpace: window.space,
-                bypassCooldown: bypassCooldown
-            ) {
-                raisedCount += 1
-            }
-        }
-
-        switch reason {
-        case .manualAll:
-            let desktopLabel = activeSpace.map { "Desktop \($0)" } ?? "current desktop"
-            lastActionMessage = "Kept \(raisedCount) floating window(s) on top on \(desktopLabel)."
-            lastErrorMessage = nil
-        case .manualFlagged:
-            let desktopLabel = activeSpace.map { "Desktop \($0)" } ?? "current desktop"
-            lastActionMessage = "Kept \(raisedCount) flagged floating window(s) on top on \(desktopLabel)."
-            lastErrorMessage = nil
-        case .autoTransition, .floatToggle, .autoEnforce:
-            break
-        }
     }
 
-    private func focusWindowForKeepOnTop(windowID: Int, targetSpace: Int?, bypassCooldown: Bool) async -> Bool {
-        let now = Date()
-        if !bypassCooldown,
-           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
-           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
-            return false
-        }
-
-        if let targetSpace,
-           let currentSpace = await queryCurrentFocusedSpaceIndex(),
-           currentSpace != targetSpace {
-            return false
-        }
-
-        let focus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-        )
-        await MainActor.run {
-            self.appendCommandLog(from: focus)
-        }
-        guard focus.isSuccess else { return false }
-        lastRaisedAtByWindowID[windowID] = now
-        return true
-    }
-
-    private func raiseWindowOnly(
+    func raiseWindowOnly(
         windowID: Int,
         targetSpace: Int?,
         bypassCooldown: Bool = false,
         allowFocusFallback: Bool = false
     ) async -> Bool {
-        let now = Date()
-        if !bypassCooldown,
-           let lastRaisedAt = lastRaisedAtByWindowID[windowID],
-           now.timeIntervalSince(lastRaisedAt) < raiseCooldownSeconds {
-            return false
-        }
-
-        let raise = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(windowID), "--raise"], timeout: 1.5)
-        )
-        await MainActor.run {
-            self.appendCommandLog(from: raise)
-        }
-        if !raise.isSuccess {
-            if raiseWindowUsingAccessibility(windowID: windowID) {
-                if allowFocusFallback,
-                   isWindowLikelyOccludedAfterRaise(windowID: windowID),
-                   let targetSpace,
-                   let currentSpace = await queryCurrentFocusedSpaceIndex(),
-                   currentSpace == targetSpace {
-                    let focus = await doctorService.runSupportCommand(
-                        ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-                    )
-                    await MainActor.run {
-                        self.appendCommandLog(from: focus)
-                    }
-                    guard focus.isSuccess else { return false }
-                }
-                lastRaisedAtByWindowID[windowID] = now
-                return true
-            }
-            guard allowFocusFallback, isScriptingAdditionRaiseFailure(raise) else {
-                return false
-            }
-            if let targetSpace,
-               let currentSpace = await queryCurrentFocusedSpaceIndex(),
-               currentSpace != targetSpace {
-                // Never steal focus to another desktop.
-                return false
-            }
-            let focus = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: focus)
-            }
-            guard focus.isSuccess else { return false }
-            lastRaisedAtByWindowID[windowID] = now
-            return true
-        }
-        lastRaisedAtByWindowID[windowID] = now
-        return true
-    }
-
-    private func isWindowLikelyOccludedAfterRaise(windowID: Int) -> Bool {
-        guard let window = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else {
-            return false
-        }
-        return isWindowLikelyOccluded(window)
-    }
-
-    private func isWindowLikelyOccluded(_ window: WindowState) -> Bool {
-        // Use top-origin coordinates end-to-end: yabai window frames and CGWindow bounds
-        // are both in top-origin global space.
-        let targetRect = CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH)
-        guard targetRect.width > 1, targetRect.height > 1 else { return false }
-
-        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-              !windowInfo.isEmpty else {
-            return false
-        }
-
-        let appPID = ProcessInfo.processInfo.processIdentifier
-        let targetWindowNumber = UInt32(window.id)
-        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        var targetIndex: Int?
-        var targetBounds: CGRect?
-        var fallbackIndex: Int?
-        var fallbackBounds: CGRect?
-
-        for (index, info) in windowInfo.enumerated() {
-            guard (info[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
-            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
-            guard ownerPID == window.pid else { continue }
-            guard let bounds = cgWindowBounds(from: info) else { continue }
-            if !bounds.intersects(targetRect) { continue }
-            if let windowNumber = info[kCGWindowNumber as String] as? UInt32,
-               windowNumber == targetWindowNumber {
-                targetIndex = index
-                targetBounds = bounds
-                break
-            }
-            if !normalizedTitle.isEmpty {
-                let cgTitle = (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cgTitle.isEmpty && cgTitle != normalizedTitle {
-                    continue
-                }
-            }
-            if fallbackIndex == nil {
-                fallbackIndex = index
-                fallbackBounds = bounds
-            }
-        }
-
-        if targetIndex == nil {
-            targetIndex = fallbackIndex
-            targetBounds = fallbackBounds
-        }
-        guard let index = targetIndex, let targetBounds else { return false }
-        let targetArea = max(1.0, targetBounds.width * targetBounds.height)
-
-        for i in 0 ..< index {
-            let info = windowInfo[i]
-            guard (info[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
-            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
-            if ownerPID == appPID { continue }
-            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
-            let owner = (info[kCGWindowOwnerName as String] as? String ?? "").lowercased()
-            if owner == "tilepilot" { continue }
-            guard let bounds = cgWindowBounds(from: info) else { continue }
-            let overlap = bounds.intersection(targetBounds)
-            if overlap.isNull || overlap.width <= 1 || overlap.height <= 1 { continue }
-            let overlapRatio = (overlap.width * overlap.height) / targetArea
-            if overlapRatio > 0.12 {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func cgWindowBounds(from info: [String: Any]) -> CGRect? {
-        if let dict = info[kCGWindowBounds as String] as? NSDictionary,
-           let rect = CGRect(dictionaryRepresentation: dict) {
-            return rect
-        }
-        return nil
-    }
-
-    private func raiseWindowUsingAccessibility(windowID: Int) -> Bool {
-        guard AXIsProcessTrusted() else { return false }
-        guard let targetWindow = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else { return false }
-
-        let appElement = AXUIElementCreateApplication(pid_t(targetWindow.pid))
-        var windowsRef: CFTypeRef?
-        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
-        guard windowsResult == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty else {
-            return false
-        }
-
-        let selectedWindow: AXUIElement
-        if windows.count == 1 {
-            selectedWindow = windows[0]
-        } else {
-            let wantedTitle = targetWindow.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !wantedTitle.isEmpty,
-               let byTitle = windows.first(where: { axStringValue($0, kAXTitleAttribute as CFString) == wantedTitle }) {
-                selectedWindow = byTitle
-            } else if let focusedWindow = windows.first(where: { axBoolValue($0, kAXFocusedAttribute as CFString) == true }) {
-                selectedWindow = focusedWindow
-            } else {
-                selectedWindow = windows[0]
-            }
-        }
-
-        return AXUIElementPerformAction(selectedWindow, kAXRaiseAction as CFString) == .success
-    }
-
-    private func axStringValue(_ element: AXUIElement, _ attribute: CFString) -> String? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
-        guard result == .success else { return nil }
-        return value as? String
-    }
-
-    private func axBoolValue(_ element: AXUIElement, _ attribute: CFString) -> Bool? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
-        guard result == .success else { return nil }
-        if let number = value as? NSNumber {
-            return number.boolValue
-        }
-        return nil
-    }
-
-    private func bringWindowToFront(windowID: Int) async {
-        _ = await raiseWindowOnly(windowID: windowID, targetSpace: nil, bypassCooldown: true, allowFocusFallback: true)
-
-        let focus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-        )
-        await MainActor.run {
-            self.appendCommandLog(from: focus)
-        }
-    }
-
-    private func isScriptingAdditionRaiseFailure(_ result: CommandResult) -> Bool {
-        let text = "\(result.stderr)\n\(result.stdout)".lowercased()
-        return text.contains("scripting-addition")
-            || text.contains("scripting addition")
-    }
-
-    private func isScriptingAdditionDesktopFocusFailure(_ result: CommandResult) -> Bool {
-        let text = "\(result.stderr)\n\(result.stdout)".lowercased()
-        return (text.contains("cannot focus space") && text.contains("scripting-addition"))
-            || (text.contains("cannot focus space") && text.contains("scripting addition"))
-    }
-
-    private func focusAnyWindowOnDesktop(index: Int) async -> Bool {
-        let query = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--windows", "--space", String(index)], timeout: 1.2)
-        )
-        await MainActor.run {
-            appendCommandLog(from: query)
-        }
-        guard query.isSuccess,
-              let data = query.stdout.data(using: .utf8),
-              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              !rows.isEmpty else {
-            return false
-        }
-
-        // Prefer focusable windows that expose AX and movement hooks.
-        let sorted = rows.sorted { lhs, rhs in
-            let lhsAX = boolFromAny(lhs["has-ax-reference"]) == true
-            let rhsAX = boolFromAny(rhs["has-ax-reference"]) == true
-            if lhsAX != rhsAX { return lhsAX && !rhsAX }
-            let lhsMove = boolFromAny(lhs["can-move"]) == true
-            let rhsMove = boolFromAny(rhs["can-move"]) == true
-            if lhsMove != rhsMove { return lhsMove && !rhsMove }
-            let lhsID = intFromAny(lhs["id"]) ?? Int.max
-            let rhsID = intFromAny(rhs["id"]) ?? Int.max
-            return lhsID < rhsID
-        }
-
-        guard let targetID = sorted.compactMap({ intFromAny($0["id"]) }).first else {
-            return false
-        }
-
-        let focus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(targetID)], timeout: 1.2)
-        )
-        await MainActor.run {
-            appendCommandLog(from: focus)
-        }
-        return focus.isSuccess
-    }
-
-    private func triggerMissionControlDesktopShortcut(index: Int) -> Bool {
-        guard AXIsProcessTrusted() else { return false }
-        let binding = missionControlDesktopBinding(for: index)
-            ?? missionControlDefaultBinding(for: index)
-        guard let binding else { return false }
-        guard let source = CGEventSource(stateID: .combinedSessionState),
-              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: binding.keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: binding.keyCode, keyDown: false) else {
-            return false
-        }
-        keyDown.flags = binding.flags
-        keyUp.flags = binding.flags
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private struct MissionControlDesktopBinding {
-        let keyCode: CGKeyCode
-        let flags: CGEventFlags
-    }
-
-    private func missionControlDesktopBinding(for desktopIndex: Int) -> MissionControlDesktopBinding? {
-        guard (1...16).contains(desktopIndex) else { return nil }
-        let actionID = String(117 + desktopIndex) // 118 = Desktop 1, 119 = Desktop 2, ...
-
-        guard let domain = UserDefaults.standard.persistentDomain(forName: "com.apple.symbolichotkeys"),
-              let allHotKeys = domain["AppleSymbolicHotKeys"] as? [String: Any],
-              let entry = allHotKeys[actionID] as? [String: Any] else {
-            return nil
-        }
-
-        guard boolFromAny(entry["enabled"]) == true else { return nil }
-        guard let value = entry["value"] as? [String: Any],
-              let parameters = value["parameters"] as? [Any],
-              parameters.count >= 3,
-              let keyCodeInt = intFromAny(parameters[1]),
-              let modifierInt = intFromAny(parameters[2]),
-              keyCodeInt >= 0 else {
-            return nil
-        }
-
-        return MissionControlDesktopBinding(
-            keyCode: CGKeyCode(keyCodeInt),
-            flags: CGEventFlags(rawValue: UInt64(modifierInt))
+        await keepOnTopCoordinator.raiseWindowOnly(
+            on: self,
+            windowID: windowID,
+            targetSpace: targetSpace,
+            bypassCooldown: bypassCooldown,
+            allowFocusFallback: allowFocusFallback
         )
     }
 
-    private func missionControlDefaultBinding(for desktopIndex: Int) -> MissionControlDesktopBinding? {
-        let keyCode: Int
-        switch desktopIndex {
-        case 1: keyCode = 18
-        case 2: keyCode = 19
-        case 3: keyCode = 20
-        case 4: keyCode = 21
-        case 5: keyCode = 23
-        case 6: keyCode = 22
-        case 7: keyCode = 26
-        case 8: keyCode = 28
-        case 9: keyCode = 25
-        case 10: keyCode = 29
-        default: return nil
-        }
-        return MissionControlDesktopBinding(
-            keyCode: CGKeyCode(keyCode),
-            flags: .maskControl
-        )
+    func bringWindowToFront(windowID: Int) async {
+        await keepOnTopCoordinator.bringWindowToFront(on: self, windowID: windowID)
     }
 
-    private func boolFromAny(_ value: Any?) -> Bool? {
-        if let bool = value as? Bool { return bool }
-        if let number = value as? NSNumber { return number.boolValue }
-        return nil
-    }
-
-    private func intFromAny(_ value: Any?) -> Int? {
-        if let int = value as? Int { return int }
-        if let number = value as? NSNumber { return number.intValue }
-        return nil
-    }
-
-    private func queryCurrentFocusedSpaceIndex() async -> Int? {
-        let result = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--spaces", "--space"], timeout: 1.0)
-        )
-        await MainActor.run {
-            appendCommandLog(from: result)
-        }
-        guard result.isSuccess,
-              let data = result.stdout.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        if let index = object["index"] as? Int { return index }
-        if let number = object["index"] as? NSNumber { return number.intValue }
-        return nil
-    }
-
-    private func runtimeControllableWindow(windowID: Int) -> WindowState? {
-        guard canRunYabaiRuntimeCommands else {
-            lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
-            lastActionMessage = nil
-            return nil
-        }
-        guard let window = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else {
-            lastErrorMessage = "Window is no longer available."
-            lastActionMessage = nil
-            return nil
-        }
-        guard window.isRuntimeManageable else {
-            lastErrorMessage = "\(window.app) does not expose move/control hooks for this window right now, so TilePilot cannot tile/float it."
-            lastActionMessage = nil
-            return nil
-        }
-        return window
-    }
-
-    private func containsMouse(_ mouse: NSPoint, in window: WindowState, screens: [NSScreen]) -> Bool {
-        let rect = convertTopOriginRectToAppKit(CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH), screens: screens)
-        return rect.contains(mouse)
-    }
-
-    private func convertTopOriginRectToAppKit(_ rect: CGRect, screens: [NSScreen]) -> CGRect {
-        guard !screens.isEmpty else { return rect }
-        let referenceMaxY = screens.first(where: { screen in
-            abs(screen.frame.minX) < 0.5 && abs(screen.frame.minY) < 0.5
-        })?.frame.maxY
-            ?? NSScreen.main?.frame.maxY
-            ?? screens.map(\.frame.maxY).min()
-            ?? rect.maxY
-        return CGRect(
-            x: rect.origin.x,
-            y: referenceMaxY - rect.origin.y - rect.height,
-            width: rect.width,
-            height: rect.height
-        )
-    }
-
-    private func runBestEffortSkhdRestart(afterConfigChange: Bool) async {
-        let reloadResult = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
-        )
-        var result = reloadResult
-        if !reloadResult.isSuccess {
-            result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
-            )
-        }
-        await MainActor.run {
-            self.appendCommandLog(from: reloadResult)
-            if !reloadResult.isSuccess {
-                self.appendCommandLog(from: result)
-            }
-
-            if reloadResult.isSuccess {
-                if afterConfigChange {
-                    self.lastActionMessage = "Config saved and skhd reloaded."
-                }
-                self.lastErrorMessage = nil
-            } else if result.isSuccess {
-                if afterConfigChange {
-                    self.lastActionMessage = "Config saved and skhd restart requested."
-                }
-                self.lastErrorMessage = nil
-            } else if afterConfigChange {
-                let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                let stderrRestart = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                let stderr = [stderrReload, stderrRestart].filter { !$0.isEmpty }.joined(separator: " | ")
-                self.lastActionMessage = "Config saved. skhd reload/restart is best effort and may require manual restart."
-                if !stderr.isEmpty {
-                    self.lastErrorMessage = "skhd reload/restart failed: \(trimForUI(stderr))"
-                }
-            }
-        }
-        await refreshDoctor()
-    }
-
-    private func runBestEffortSkhdRestartAfterRawFileSave() async {
-        let reloadResult = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
-        )
-        var result = reloadResult
-        if !reloadResult.isSuccess {
-            result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
-            )
-        }
-        await MainActor.run {
-            self.appendCommandLog(from: reloadResult)
-            if !reloadResult.isSuccess {
-                self.appendCommandLog(from: result)
-            }
-            if reloadResult.isSuccess {
-                self.filesLastActionMessage = "Saved file and reloaded skhd."
-                self.filesLastErrorMessage = nil
-            } else if result.isSuccess {
-                self.filesLastActionMessage = "Saved file and requested skhd restart."
-                self.filesLastErrorMessage = nil
-            } else {
-                let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                let stderrRestart = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                let stderr = [stderrReload, stderrRestart].filter { !$0.isEmpty }.joined(separator: " | ")
-                self.filesLastActionMessage = "Saved file. skhd reload/restart is best effort and may require manual restart."
-                if !stderr.isEmpty {
-                    self.filesLastErrorMessage = "skhd reload/restart failed: \(trimForUI(stderr))"
-                }
-            }
-        }
-    }
-
-    private func runTilePilotAction(_ actionID: TilePilotActionID) async {
-        activeActionID = actionID
-        defer { activeActionID = nil }
-
-        let beforeSignature = liveStateSignature()
-        let commands = actionCommands(for: actionID)
-        guard !commands.isEmpty else {
-            actionsLastErrorMessage = "This action is not available yet."
-            actionsLastActionMessage = nil
-            lastErrorMessage = actionsLastErrorMessage
-            lastActionMessage = nil
-            return
-        }
-
-        for command in commands {
-            let result = await doctorService.runSupportCommand(command)
-            appendCommandLog(from: result)
-            if !result.isSuccess {
-                actionsLastErrorMessage = actionMeta(for: actionID).title + " didn’t work."
-                if !result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    actionsLastErrorMessage = actionFailureMessage(for: actionID, commandResult: result)
-                }
-                actionsLastActionMessage = nil
-                lastErrorMessage = actionsLastErrorMessage
-                lastActionMessage = nil
-                return
-            }
-        }
-
-        await refreshLiveState()
-
-        let afterSignature = liveStateSignature()
-        if beforeSignature != nil, beforeSignature == afterSignature {
-            actionsLastActionMessage = "\(actionMeta(for: actionID).title) ran, but nothing visibly changed."
-        } else {
-            actionsLastActionMessage = "\(actionMeta(for: actionID).title) completed."
-        }
-        actionsLastErrorMessage = nil
-        lastActionMessage = actionsLastActionMessage
-        lastErrorMessage = nil
-    }
-
-    private func appendCommandLog(from result: CommandResult) {
-        let logEntry = CommandLogEntry(
-            id: UUID(),
-            command: result.command,
-            startedAt: result.startedAt,
-            endedAt: result.endedAt,
-            durationMs: result.durationMs,
-            exitStatus: result.exitStatus,
-            stdoutSnippet: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-            stderrSnippet: result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160).description,
-            errorType: result.errorType
-        )
-        commandLogs = Array(([logEntry] + commandLogs).prefix(200))
-    }
-
-    private func prependCommandLogs(_ logs: [CommandLogEntry]) {
-        guard !logs.isEmpty else { return }
-        commandLogs = Array((logs + commandLogs).prefix(200))
-    }
-
-    private func liveStateSignature() -> String? {
-        guard let snapshot = liveStateSnapshot else { return nil }
-        let focusedWindow = snapshot.windows.first(where: \.focused)?.id ?? -1
-        let focusedSpace = snapshot.spaces.first(where: \.focused)?.index ?? -1
-        let layouts = snapshot.spaces.map { "\($0.index):\($0.layout ?? "?")" }.joined(separator: ",")
-        return [
-            snapshot.source.rawValue,
-            snapshot.degraded ? "1" : "0",
-            String(snapshot.yabaiWindowTotal ?? -1),
-            String(snapshot.fallbackWindowTotal ?? -1),
-            String(focusedWindow),
-            String(focusedSpace),
-            layouts,
-        ].joined(separator: "|")
-    }
-
-    private func actionCommands(for actionID: TilePilotActionID) -> [ShellCommand] {
-        switch actionID {
-        case .balanceSpace:
-            return [.init("/usr/bin/env", ["yabai", "-m", "space", "--balance"], timeout: 1.5)]
-        case .layoutBSPAndBalance:
-            return [
-                .init("/usr/bin/env", ["yabai", "-m", "space", "--layout", "bsp"], timeout: 1.5),
-                .init("/usr/bin/env", ["yabai", "-m", "space", "--balance"], timeout: 1.5),
-            ]
-        case .layoutStack:
-            return [.init("/usr/bin/env", ["yabai", "-m", "space", "--layout", "stack"], timeout: 1.5)]
-        case .toggleFloat:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--toggle", "float"], timeout: 1.5)]
-        case .focusWest:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "west"], timeout: 1.5)]
-        case .focusEast:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "east"], timeout: 1.5)]
-        case .focusNorth:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "north"], timeout: 1.5)]
-        case .focusSouth:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "south"], timeout: 1.5)]
-        case .browserReliefPlaceholder:
-            return []
-        }
-    }
-
-    private func actionAvailability(for actionID: TilePilotActionID) -> (enabled: Bool, disabledReason: String?) {
-        let meta = actionMeta(for: actionID)
-
-        if actionID == .browserReliefPlaceholder {
-            return (false, "This action is not available yet.")
-        }
-
-        guard let doctor = doctorSnapshot else {
-            return (false, "Open System and run Recheck first.")
-        }
-
-        let capabilityByKey = Dictionary(uniqueKeysWithValues: doctor.capabilities.map { ($0.key, $0) })
-        for key in meta.requiredCapabilities {
-            guard let capability = capabilityByKey[key] else {
-                return (false, "Run System Recheck, then try this action.")
-            }
-            if capability.status == .blocked || capability.status == .unsupported {
-                return (false, userFacingDisabledReason(forCapabilityKey: key, capability: capability))
-            }
-            if key == "yabai-query", capability.status != .available {
-                return (false, userFacingDisabledReason(forCapabilityKey: key, capability: capability))
-            }
-            if key == "yabai-daemon", capability.status != .available {
-                return (false, userFacingDisabledReason(forCapabilityKey: key, capability: capability))
-            }
-            if key == "yabai-binary", capability.status != .available {
-                return (false, userFacingDisabledReason(forCapabilityKey: key, capability: capability))
-            }
-        }
-
-        if meta.requiresLiveState {
-            guard let snapshot = liveStateSnapshot else {
-                return (false, "Overview is still loading. Try again in a moment.")
-            }
-            if snapshot.source == .stale {
-                return (false, "TilePilot lost the live window view. Open Overview and wait for it to recover.")
-            }
-        }
-
-        if meta.disableInDegradedMode {
-            if let snapshot = liveStateSnapshot, snapshot.degraded {
-                return (false, "This layout action is temporarily unavailable because TilePilot is using a reduced-precision view.")
-            }
-        }
-
-        if activeActionID != nil {
-            return (false, "Another action is already running.")
-        }
-
-        return (true, nil)
-    }
-
-    func actionCard(for actionID: TilePilotActionID) -> TilePilotActionCard? {
-        actionCards.first(where: { $0.id == actionID })
-    }
-
-    func actionCard(forShortcut entry: ShortcutEntry) -> TilePilotActionCard? {
-        guard let actionID = matchingActionID(forShortcutIntentKey: shortcutIntentKey(for: entry)) else { return nil }
-        return actionCard(for: actionID)
-    }
-
-    private func matchingActionID(forShortcutIntentKey intentKey: String) -> TilePilotActionID? {
+    func matchingActionID(forShortcutIntentKey intentKey: String) -> TilePilotActionID? {
         TilePilotActionID.allCases.first { actionIntentKey(for: $0) == intentKey }
     }
 
-    private func actionIntentKey(for actionID: TilePilotActionID) -> String {
+    func actionIntentKey(for actionID: TilePilotActionID) -> String {
         switch actionID {
         case .balanceSpace:
             return "space-balance"
@@ -5680,7 +733,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func shortcutIntentKey(for entry: ShortcutEntry) -> String {
+    func shortcutIntentKey(for entry: ShortcutEntry) -> String {
         let c = entry.command.lowercased()
 
         if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus"),
@@ -5729,7 +782,7 @@ final class AppModel: ObservableObject {
         return "shortcut-\(entry.stableKey)"
     }
 
-    private func unifiedGroup(for entry: ShortcutEntry) -> UnifiedControlGroup {
+    func unifiedGroup(for entry: ShortcutEntry) -> UnifiedControlGroup {
         let c = entry.command.lowercased()
 
         if c.contains("yabai -m window --space") {
@@ -5775,7 +828,7 @@ final class AppModel: ObservableObject {
         return .other
     }
 
-    private func unifiedGroup(forActionCategory category: String) -> UnifiedControlGroup {
+    func unifiedGroup(forActionCategory category: String) -> UnifiedControlGroup {
         switch category {
         case "Layouts":
             return .tilingLayout
@@ -5786,211 +839,6 @@ final class AppModel: ObservableObject {
         default:
             return .other
         }
-    }
-
-    private func shortcutTitle(for entry: ShortcutEntry) -> String {
-        let c = entry.command.lowercased()
-        let normalized = normalizedFeatureMatchCommand(c)
-
-        if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
-            return "Bring Floating Windows to Front"
-        }
-        if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
-            return "Keep App on Top (When Floating)"
-        }
-        if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
-            return "Open TilePilot"
-        }
-
-        if c.contains("grid-tiling-floating.sh") {
-            return "Grid Tiling (Floating)"
-        }
-        if c.contains("grid-tiling-auto-tiled.sh") {
-            return "Grid -> Auto-Tile (BSP)"
-        }
-        if c.contains("grid-pack-toggle.sh") {
-            return "Grid Tiling (Legacy Toggle)"
-        }
-        if c.contains("auto-layout-current-desktop.sh") || c.contains("readable-current-space.sh") {
-            return "Auto Layout (Current Desktop)"
-        }
-
-        if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus"),
-           let target = firstInteger(after: "--space", in: c) ?? firstInteger(after: "--focus", in: c) {
-            return "Move Window to Desktop \(target)"
-        }
-        if c.contains("yabai -m space --focus"),
-           let target = firstInteger(after: "--focus", in: c) {
-            return "Jump to Desktop \(target)"
-        }
-        if c.contains("yabai -m window --focus west") { return "Focus Left" }
-        if c.contains("yabai -m window --focus east") { return "Focus Right" }
-        if c.contains("yabai -m window --focus north") { return "Focus Up" }
-        if c.contains("yabai -m window --focus south") { return "Focus Down" }
-        if c.contains("yabai -m window --warp west") { return "Move Window Left" }
-        if c.contains("yabai -m window --warp east") { return "Move Window Right" }
-        if c.contains("yabai -m window --warp north") { return "Move Window Up" }
-        if c.contains("yabai -m window --warp south") { return "Move Window Down" }
-        if c.contains("yabai -m window --resize left:") { return "Resize Left" }
-        if c.contains("yabai -m window --resize right:") { return "Resize Right" }
-        if c.contains("yabai -m window --resize top:") { return "Resize Up" }
-        if c.contains("yabai -m window --resize bottom:") { return "Resize Down" }
-        if c.contains("yabai -m window --toggle float") { return "Toggle Float/Tile" }
-        if c.contains("yabai -m space --layout bsp"), c.contains("yabai -m space --balance") { return "Tile Layout + Balance" }
-        if c.contains("yabai -m space --layout stack") { return "Stack Layout" }
-        if c.contains("yabai -m space --balance") { return "Balance Tiles" }
-        if c.contains("yabai -m space --rotate") { return "Rotate Layout" }
-
-        if let scriptPath = scriptPath(from: entry.command) {
-            return scriptDisplayTitle(from: scriptPath)
-        }
-
-        return shortcutExplanation(entry)
-    }
-
-    private func scriptPath(from command: String) -> String? {
-        guard let firstTokenRaw = command.split(whereSeparator: \.isWhitespace).first else { return nil }
-        let firstToken = String(firstTokenRaw).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        let loweredToken = firstToken.lowercased()
-        if loweredToken == "env" || loweredToken.hasSuffix("/env") || loweredToken == "open" || loweredToken.hasSuffix("/open") {
-            return nil
-        }
-        guard firstToken.hasPrefix("/") || firstToken.hasPrefix("~/") || firstToken.hasPrefix("./") else { return nil }
-
-        if firstToken.hasPrefix("./") {
-            let baseURL = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".config")
-                .appendingPathComponent("skhd", isDirectory: true)
-            return URL(fileURLWithPath: firstToken, relativeTo: baseURL)
-                .standardizedFileURL
-                .path
-        }
-
-        return NSString(string: firstToken).expandingTildeInPath
-    }
-
-    private func scriptDisplayTitle(from path: String) -> String {
-        let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        let cleaned = base.replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression)
-        let tokens = cleaned
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-        guard !tokens.isEmpty else { return "Script Action" }
-        return tokens
-            .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
-            .joined(separator: " ")
-    }
-
-    private func scriptDescriptionFromHeader(path: String) -> String? {
-        if let cached = scriptHeaderDescriptionCache[path] {
-            return cached
-        }
-
-        let description: String?
-        if let content = try? String(contentsOfFile: path, encoding: .utf8) {
-            description = content
-                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-                .prefix(20)
-                .compactMap { rawLine -> String? in
-                    let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if line.isEmpty || line.hasPrefix("#!") || !line.hasPrefix("#") { return nil }
-                    let comment = String(line.dropFirst())
-                        .trimmingCharacters(in: CharacterSet(charactersIn: " .:-\t"))
-                    guard !comment.isEmpty else { return nil }
-                    if comment.hasSuffix(".") || comment.hasSuffix("!") || comment.hasSuffix("?") {
-                        return comment
-                    }
-                    return comment + "."
-                }
-                .first
-        } else {
-            description = nil
-        }
-
-        scriptHeaderDescriptionCache[path] = description
-        return description
-    }
-
-    private func scriptFallbackDescription(from path: String) -> String {
-        let title = scriptDisplayTitle(from: path)
-        return "Uses the \(title.lowercased()) helper."
-    }
-
-    private func normalizedShortcutCopy(_ text: String) -> String {
-        text
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func actionMeta(for actionID: TilePilotActionID) -> (
-        title: String,
-        subtitle: String,
-        category: String,
-        buttonLabel: String,
-        requiredCapabilities: [String],
-        requiresLiveState: Bool,
-        disableInDegradedMode: Bool
-    ) {
-        switch actionID {
-        case .balanceSpace:
-            return ("Balance Tiles", "Evenly space tiles on the current desktop", "Layouts", "Balance", ["yabai-binary", "yabai-daemon", "yabai-query"], true, true)
-        case .layoutBSPAndBalance:
-            return ("Tile Layout + Balance", "Use split tiling layout, then rebalance tiles", "Layouts", "Set Tile Layout", ["yabai-binary", "yabai-daemon", "yabai-query"], true, true)
-        case .layoutStack:
-            return ("Stack Layout", "Show windows in a stack layout on the current desktop", "Layouts", "Set Stack Layout", ["yabai-binary", "yabai-daemon", "yabai-query"], true, true)
-        case .toggleFloat:
-            return ("Toggle Float/Tile", "Switch the focused window between floating and tiled", "Window", "Toggle", ["yabai-binary", "yabai-daemon", "yabai-query"], true, false)
-        case .focusWest:
-            return ("Focus Left", "Move focus to the window on the left", "Focus", "Focus Left", ["yabai-binary", "yabai-daemon", "yabai-query"], true, false)
-        case .focusEast:
-            return ("Focus Right", "Move focus to the window on the right", "Focus", "Focus Right", ["yabai-binary", "yabai-daemon", "yabai-query"], true, false)
-        case .focusNorth:
-            return ("Focus Up", "Move focus to the window above", "Focus", "Focus Up", ["yabai-binary", "yabai-daemon", "yabai-query"], true, false)
-        case .focusSouth:
-            return ("Focus Down", "Move focus to the window below", "Focus", "Focus Down", ["yabai-binary", "yabai-daemon", "yabai-query"], true, false)
-        case .browserReliefPlaceholder:
-            return ("Browser Relief", "Planned helper workflow", "Layouts", "Run", ["yabai-binary"], false, true)
-        }
-    }
-
-    private func userFacingDisabledReason(forCapabilityKey key: String, capability: CapabilityState) -> String {
-        switch key {
-        case "yabai-binary":
-            return "Install yabai first."
-        case "yabai-daemon":
-            return "Start yabai, then try again."
-        case "yabai-query":
-            return "TilePilot can’t read yabai right now. Restart yabai and try again."
-        default:
-            return capability.message
-        }
-    }
-
-    private func actionFailureMessage(for actionID: TilePilotActionID, commandResult result: CommandResult) -> String {
-        let stderr = trimForUI(result.stderr).lowercased()
-        let title = actionMeta(for: actionID).title
-
-        if stderr.contains("could not connect") {
-            return "\(title) didn’t run because yabai is not responding. Start or restart yabai, then try again."
-        }
-        if stderr.contains("no such file") || stderr.contains("not found") {
-            return "\(title) didn’t run because yabai is not installed."
-        }
-        if stderr.contains("scripting-addition") {
-            return "\(title) needs yabai desktop control (scripting addition). Use Health/Setup to fix scripting addition."
-        }
-        let trimmed = trimForUI(result.stderr)
-        if trimmed.isEmpty {
-            return "\(title) didn’t work."
-        }
-        return "\(title) didn’t work: \(trimmed)"
-    }
-
-    private func trimForUI(_ string: String, maxLength: Int = 220) -> String {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > maxLength else { return trimmed }
-        return String(trimmed.prefix(maxLength)) + "..."
     }
 
     private func applyDegradedModeCounters(yabaiWindowTotal: Int?, fallbackWindowTotal: Int?) {
@@ -6184,5 +1032,193 @@ final class AppModel: ObservableObject {
             consecutiveHealthySamples: consecutiveHealthySamples,
             lastErrorMessage: poll.errorMessage
         )
+    }
+
+    private func rebuildOverviewCaches(from snapshot: LiveStateSnapshot) {
+        overviewDisplayPreviews = buildOverviewPreviews(from: snapshot)
+        overviewDisplaySections = OverviewSectionsBuilder.build(snapshot: snapshot, isExcluded: isOverviewExcludedWindow)
+        overviewCachesDirty = false
+        recordRuntimeBurst(.overviewCacheRebuild)
+        mutateRuntimeDiagnostics { $0.overviewCacheRebuildCount += 1 }
+    }
+
+    func rebuildShortcutPresentationCaches() {
+        cachedUnifiedControlRows = buildUnifiedControlRows()
+        cachedFeatureControlRows = buildFeatureControlRows(from: cachedUnifiedControlRows)
+        cachedFeatureControlRowByShortcutStableKey = Dictionary(
+            cachedFeatureControlRows.compactMap { row in
+                row.shortcutEntry.map { ($0.stableKey, row) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedFeatureControlRowByFeatureID = Dictionary(
+            cachedFeatureControlRows.compactMap { row in
+                row.featureID.map { ($0.rawValue, row) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedShortcutTitleByStableKey = Dictionary(
+            shortcutEntries.map { ($0.stableKey, shortcutTitle(for: $0)) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedShortcutSecondaryByStableKey = Dictionary(
+            shortcutEntries.map { entry in
+                let title = cachedShortcutTitleByStableKey[entry.stableKey] ?? shortcutTitle(for: entry)
+                let explanation = shortcutExplanation(entry)
+                let secondary = normalizedShortcutCopy(title) == normalizedShortcutCopy(explanation) ? nil : explanation
+                return (entry.stableKey, secondary)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedShortcutComboWordsByStableKey = Dictionary(
+            shortcutEntries.map { ($0.stableKey, parseShortcutComboDisplay($0.combo).words) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedShortcutComboSymbolsSpacedByStableKey = Dictionary(
+            shortcutEntries.map { ($0.stableKey, parseShortcutComboDisplay($0.combo).symbolsSpaced) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        cachedFlatShortcutsOrderRankByID = buildFlatShortcutsOrderRankByID()
+        cachedPinnedFeatureControlRows = buildPinnedFeatureControlRows(orderRank: cachedFlatShortcutsOrderRankByID)
+        cachedPinnedShortcutEntries = buildPinnedShortcutEntries(orderRank: cachedFlatShortcutsOrderRankByID)
+        cachedPinnedDirectionalGroupBindings = buildPinnedDirectionalGroupBindings(orderRank: cachedFlatShortcutsOrderRankByID)
+        cachedPinnedShortcutContextItems = buildPinnedShortcutContextItems(
+            orderRank: cachedFlatShortcutsOrderRankByID,
+            pinnedFeatureRows: cachedPinnedFeatureControlRows,
+            pinnedDirectionalBindings: cachedPinnedDirectionalGroupBindings,
+            pinnedEntries: cachedPinnedShortcutEntries
+        )
+        shortcutPresentationCachesDirty = false
+        recordRuntimeBurst(.shortcutsCacheRebuild)
+        mutateRuntimeDiagnostics { $0.shortcutsCacheRebuildCount += 1 }
+    }
+
+    func ensureOverviewCachesIfNeeded() {
+        publishLiveStateSnapshotIfNeeded(force: true)
+        guard overviewCachesDirty, let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot else { return }
+        guard hasVisibleTilePilotWindow, currentVisibleTab == .now else { return }
+        rebuildOverviewCaches(from: snapshot)
+    }
+
+    func ensureShortcutPresentationCachesIfNeeded() {
+        publishLiveStateSnapshotIfNeeded(force: true)
+        guard shortcutPresentationCachesDirty else { return }
+        guard hasVisibleTilePilotWindow, currentVisibleTab == .actions else { return }
+        rebuildShortcutPresentationCaches()
+    }
+
+    func invalidateOverviewCaches() {
+        overviewCachesDirty = true
+    }
+
+    func invalidateShortcutPresentationCaches() {
+        shortcutPresentationCachesDirty = true
+    }
+
+    private func updateOverviewCachesForCurrentVisibility(with snapshot: LiveStateSnapshot) {
+        if hasVisibleTilePilotWindow && currentVisibleTab == .now {
+            rebuildOverviewCaches(from: snapshot)
+        } else {
+            invalidateOverviewCaches()
+        }
+    }
+
+    private func refreshWindowBadgesIfNeeded() {
+        guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
+            refreshWindowBadges()
+            return
+        }
+        guard hasActiveOverlayConsumer else { return }
+        refreshWindowBadges()
+    }
+
+    var hasActiveOverlayConsumer: Bool {
+        hasVisibleTilePilotWindow || currentVisibleTab == .now || hasVisibleWindowBadgePanels
+    }
+
+    var hasVisibleWindowBadgePanels = false
+
+    func setHasVisibleWindowBadgePanels(_ value: Bool) {
+        guard hasVisibleWindowBadgePanels != value else { return }
+        hasVisibleWindowBadgePanels = value
+    }
+
+    func recordRuntimeBurst(_ source: RuntimeBurstSource) {
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-10)
+        for key in RuntimeBurstSource.allCases {
+            runtimeBurstSamples[key] = (runtimeBurstSamples[key] ?? []).filter { $0 >= cutoff }
+        }
+        runtimeBurstSamples[source, default: []].append(now)
+        mutateRuntimeDiagnostics { diagnostics in
+            diagnostics.recentLiveStateRefreshCount = runtimeBurstSamples[.liveStateRefresh]?.count ?? 0
+            diagnostics.recentLiveStatePublishedCount = runtimeBurstSamples[.liveStatePublish]?.count ?? 0
+            diagnostics.recentLiveStateUnchangedPollCount = runtimeBurstSamples[.unchangedPoll]?.count ?? 0
+            diagnostics.recentOverviewCacheRebuildCount = runtimeBurstSamples[.overviewCacheRebuild]?.count ?? 0
+            diagnostics.recentShortcutsCacheRebuildCount = runtimeBurstSamples[.shortcutsCacheRebuild]?.count ?? 0
+            diagnostics.recentKeepOnTopEnforcementPassCount = runtimeBurstSamples[.keepOnTopEnforcement]?.count ?? 0
+            diagnostics.recentOverlayPanelUpdateCount = runtimeBurstSamples[.overlayUpdate]?.count ?? 0
+            diagnostics.dominantBurstSource = dominantBurstSourceTitle()
+        }
+    }
+
+    private func dominantBurstSourceTitle() -> String {
+        let liveStateCount = (runtimeBurstSamples[.liveStateRefresh]?.count ?? 0)
+            + (runtimeBurstSamples[.liveStatePublish]?.count ?? 0)
+            + (runtimeBurstSamples[.unchangedPoll]?.count ?? 0)
+        let overlayCount = runtimeBurstSamples[.overlayUpdate]?.count ?? 0
+        let keepOnTopCount = runtimeBurstSamples[.keepOnTopEnforcement]?.count ?? 0
+        let uiCount = (runtimeBurstSamples[.overviewCacheRebuild]?.count ?? 0)
+            + (runtimeBurstSamples[.shortcutsCacheRebuild]?.count ?? 0)
+        let entries = [
+            ("Live-state polling", liveStateCount),
+            ("Overlay updates", overlayCount),
+            ("Keep-on-top enforcement", keepOnTopCount),
+            ("UI recomposition", uiCount),
+        ].filter { $0.1 > 0 }
+        guard let maxValue = entries.map(\.1).max() else { return "Idle" }
+        let leaders = entries.filter { $0.1 == maxValue }
+        if leaders.count == 1 {
+            return leaders[0].0
+        }
+        return "Mixed"
+    }
+
+    private func liveStateContentSignature(for snapshot: LiveStateSnapshot) -> String {
+        let displays = snapshot.displays.map {
+            "\($0.id)|\($0.name)|\($0.frameX)|\($0.frameY)|\($0.frameW)|\($0.frameH)|\($0.focused)|\($0.windowCount)|\($0.source.rawValue)"
+        }.joined(separator: "||")
+        let spaces = snapshot.spaces.map {
+            "\($0.index)|\($0.label ?? "")|\($0.displayId)|\($0.focused)|\($0.visible)|\($0.layout ?? "")|\($0.windowCount)|\($0.source.rawValue)"
+        }.joined(separator: "||")
+        let windows = snapshot.windows.map {
+            "\($0.id)|\($0.pid)|\($0.app)|\($0.space)|\($0.display)|\($0.frameX)|\($0.frameY)|\($0.frameW)|\($0.frameH)|\($0.floating)|\($0.hasAXReference)|\($0.canMove)|\($0.canResize)|\($0.title)|\($0.focused)|\($0.isVisible)|\($0.isMinimized)|\($0.isHidden)|\($0.source.rawValue)"
+        }.joined(separator: "||")
+        let fallbackDisplays = snapshot.fallbackDisplays.map {
+            "\($0.id)|\($0.name)|\($0.windowCount)|\($0.source.rawValue)"
+        }.joined(separator: "||")
+        return [
+            snapshot.source.rawValue,
+            snapshot.degraded ? "1" : "0",
+            snapshot.degradedReason ?? "",
+            String(snapshot.yabaiWindowTotal ?? -1),
+            String(snapshot.fallbackWindowTotal ?? -1),
+            String(snapshot.consecutiveMismatchSamples),
+            String(snapshot.consecutiveHealthySamples),
+            snapshot.lastErrorMessage ?? "",
+            displays,
+            spaces,
+            windows,
+            fallbackDisplays,
+        ].joined(separator: "###")
+    }
+
+    func currentKeepOnTopEnforcementIntervalSeconds() -> Double {
+        guard runtimeActivityMode.includesKeepOnTopWork else { return 0 }
+        var interval = performanceKeepOnTopEnforcementSeconds
+        if performanceFastLiveRefreshEnabled {
+            interval = min(interval, 0.8)
+        }
+        return interval
     }
 }

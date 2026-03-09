@@ -25,6 +25,10 @@ struct WindowBadgeView: View {
         !pinnedContextItems.isEmpty
     }
 
+    private var openTilePilotRow: FeatureControlRow? {
+        model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-tilepilot"))
+    }
+
     var body: some View {
         Button {
             guard runtimeEnabled else { return }
@@ -83,6 +87,16 @@ struct WindowBadgeView: View {
 
             if hasPinnedContextActions {
                 Divider()
+            }
+
+            if let row = openTilePilotRow {
+                Button(featureMenuTitle(row)) {
+                    model.openTilePilotDashboard()
+                }
+            } else {
+                Button("Open TilePilot") {
+                    model.openTilePilotDashboard()
+                }
             }
 
             Button("Pin More Shortcuts") {

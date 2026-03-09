@@ -372,12 +372,6 @@ final class YabaiStateService: @unchecked Sendable {
             .first { !$0.isEmpty }
     }
 
-    private func trimForUI(_ string: String, maxLength: Int = 220) -> String {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > maxLength else { return trimmed }
-        return String(trimmed.prefix(maxLength)) + "..."
-    }
-
     private func userFacingLiveStateError(from raw: String) -> String {
         let normalized = raw.lowercased()
         if normalized.contains("env: yabai: no such file or directory") || normalized.contains("not found") {

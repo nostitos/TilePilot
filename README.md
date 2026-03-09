@@ -116,7 +116,7 @@ Some advanced desktop actions (especially moving windows between desktops) depen
 - TilePilot-managed config blocks use `TILEPILOT ...` markers.
 - `Shift + Option + M` now targets `auto-layout-current-desktop.sh` (grid-based, keeps windows floating). `readable-current-space.sh` remains as a compatibility alias.
 - `Grid Tiling (Floating)` keeps windows floating in a packed grid.
-- `Grid -> Auto-Tile (BSP)` returns windows to real managed tiling (BSP).
+- `Rebuild Balanced Tile Layout` rebuilds the current desktop into a more even tiled BSP layout.
 
 ## Developers
 

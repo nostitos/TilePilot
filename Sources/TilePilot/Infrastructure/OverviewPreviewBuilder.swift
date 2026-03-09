@@ -1,0 +1,120 @@
+import CoreGraphics
+import Foundation
+
+enum OverviewPreviewBuilder {
+    static func build(
+        snapshot: LiveStateSnapshot,
+        isExcluded: (WindowState) -> Bool
+    ) -> [OverviewDisplayPreview] {
+        guard snapshot.source == .yabai, !snapshot.degraded else { return [] }
+
+        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            return lhs.id < rhs.id
+        }
+        let windows = snapshot.windows.filter { window in
+            !isExcluded(window) &&
+                !window.isMinimized &&
+                !window.isHidden
+        }
+        let windowsBySpace = Dictionary(grouping: windows, by: \.space)
+        let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
+
+        return sortedDisplays.compactMap { display in
+            guard display.frameW > 1, display.frameH > 1 else { return nil }
+            let desktops = (spacesByDisplay[display.id] ?? [])
+                .sorted { $0.index < $1.index }
+                .map { space in
+                    let normalizedWindows = (windowsBySpace[space.index] ?? [])
+                        .filter { $0.display == display.id }
+                        .compactMap { normalizedPreview(for: $0, in: display, desktopIndex: space.index) }
+                        .sorted { lhs, rhs in
+                            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+                            return lhs.id < rhs.id
+                        }
+                    return OverviewDesktopPreview(
+                        id: "display-\(display.id)-desktop-\(space.index)",
+                        displayID: display.id,
+                        desktopIndex: space.index,
+                        focused: space.focused,
+                        visible: space.visible,
+                        tilingEnabled: (space.layout ?? "").lowercased() != "float",
+                        windows: normalizedWindows
+                    )
+                }
+
+            return OverviewDisplayPreview(
+                id: display.id,
+                name: display.name,
+                focused: display.focused,
+                aspectRatio: max(display.frameW, 1) / max(display.frameH, 1),
+                frameW: display.frameW,
+                frameH: display.frameH,
+                desktops: desktops
+            )
+        }
+    }
+
+    static func normalizedPreview(for window: WindowState, in display: DisplayState, desktopIndex: Int) -> OverviewWindowPreview? {
+        let displayW = max(display.frameW, 1)
+        let displayH = max(display.frameH, 1)
+
+        let x = (window.frameX - display.frameX) / displayW
+        let y = (window.frameY - display.frameY) / displayH
+        let w = window.frameW / displayW
+        let h = window.frameH / displayH
+
+        let left = max(0, min(1, x))
+        let top = max(0, min(1, y))
+        let right = max(0, min(1, x + w))
+        let bottom = max(0, min(1, y + h))
+
+        guard right > left, bottom > top else { return nil }
+
+        return OverviewWindowPreview(
+            id: window.id,
+            app: window.app,
+            title: window.title,
+            desktopIndex: desktopIndex,
+            floating: window.floating,
+            runtimeManageable: window.isRuntimeManageable,
+            focused: window.focused,
+            visible: window.isVisible,
+            normalizedX: left,
+            normalizedY: top,
+            normalizedW: right - left,
+            normalizedH: bottom - top
+        )
+    }
+}
+
+enum OverviewMiniMapGeometry {
+    static func frame(for window: OverviewWindowPreview, in canvasSize: CGSize) -> CGRect {
+        let x = max(0, min(1, window.normalizedX)) * canvasSize.width
+        let y = max(0, min(1, window.normalizedY)) * canvasSize.height
+        let maxWidth = max(0, canvasSize.width - x)
+        let maxHeight = max(0, canvasSize.height - y)
+        let width = min(maxWidth, max(10, window.normalizedW * canvasSize.width))
+        let height = min(maxHeight, max(8, window.normalizedH * canvasSize.height))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    static func iconFrame(
+        for window: OverviewWindowPreview,
+        iconSize: CGFloat,
+        inset: CGFloat,
+        in canvasSize: CGSize
+    ) -> CGRect {
+        let windowFrame = frame(for: window, in: canvasSize)
+        let availableWidth = max(0, windowFrame.width - (inset * 2))
+        let availableHeight = max(0, windowFrame.height - (inset * 2))
+        let width = min(iconSize, availableWidth)
+        let height = min(iconSize, availableHeight)
+        return CGRect(
+            x: windowFrame.minX + inset,
+            y: windowFrame.minY + inset,
+            width: width,
+            height: height
+        )
+    }
+}

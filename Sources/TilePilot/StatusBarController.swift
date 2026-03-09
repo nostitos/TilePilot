@@ -183,7 +183,7 @@ final class StatusBarController: NSObject {
     private func presentQuickMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(item("Open TilePilot", action: #selector(openTilePilot)))
+        menu.addItem(openTilePilotMenuItem())
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
         menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
@@ -235,6 +235,15 @@ final class StatusBarController: NSObject {
         item.target = self
         item.isEnabled = enabled
         return item
+    }
+
+    private func openTilePilotMenuItem() -> NSMenuItem {
+        let menuItem = item("Open TilePilot", action: #selector(openTilePilot))
+        if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-tilepilot")) {
+            let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+            applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
+        }
+        return menuItem
     }
 
     private func addPinnedContextItems(to menu: NSMenu) -> Bool {
@@ -552,6 +561,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
 
         model.startIfNeeded()
+
+        // Accessory apps can otherwise look "dead" if the status item is missing or hidden.
+        // Surface the main window on launch so manual launches always produce visible UI.
+        DispatchQueue.main.async { [weak self] in
+            self?.tilePilotWindowController?.showAndFocus()
+        }
     }
 
     private func shouldTerminateAsDuplicateInstance() -> Bool {

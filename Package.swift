@@ -16,5 +16,10 @@ let package = Package(
             name: "TilePilot",
             path: "Sources/TilePilot"
         ),
+        .testTarget(
+            name: "TilePilotTests",
+            dependencies: ["TilePilot"],
+            path: "Tests/TilePilotTests"
+        ),
     ]
 )

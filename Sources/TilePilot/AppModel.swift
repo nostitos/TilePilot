@@ -263,6 +263,7 @@ final class AppModel: ObservableObject {
     var scriptHeaderDescriptionCache: [String: String?] = [:]
     var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
     private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
+    private let firstLaunchGreetingShownDefaultsKey = "TilePilot.firstLaunchGreetingShown"
     let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
     var hasAttemptedReleaseDefaultsInitialization = false
     var windowBehaviorAutoSaveTask: Task<Void, Never>?
@@ -399,6 +400,31 @@ final class AppModel: ObservableObject {
         }
         defaults.set(true, forKey: initialSetupLandingShownDefaultsKey)
         return true
+    }
+
+    var shouldShowFirstLaunchGreeting: Bool {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: firstLaunchGreetingShownDefaultsKey) else { return false }
+        guard let snapshot = doctorSnapshot else { return false }
+
+        let setupNeeded = snapshot.capabilities.contains { capability in
+            switch capability.key {
+            case "yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon":
+                return capability.status != .available
+            default:
+                return false
+            }
+        }
+
+        let accessibilityNeedsAttention = snapshot.capabilities.contains { capability in
+            capability.key == "accessibility" && capability.status != .available
+        }
+
+        return setupNeeded || accessibilityNeedsAttention
+    }
+
+    func dismissFirstLaunchGreeting() {
+        UserDefaults.standard.set(true, forKey: firstLaunchGreetingShownDefaultsKey)
     }
 
     func publishLiveStateSnapshotIfNeeded(_ snapshot: LiveStateSnapshot? = nil, force: Bool = false) {

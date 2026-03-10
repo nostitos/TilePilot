@@ -223,7 +223,7 @@ cat > "$INFO_PLIST" <<EOF
     </dict>
   </array>
   <key>CFBundleShortVersionString</key>
-  <string>0.2.2</string>
+  <string>0.2.3</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

@@ -32,14 +32,23 @@ struct NowDashboardView: View {
                         }
 
                         if let snapshot = model.liveStateSnapshot {
-                            if snapshot.degraded, let reason = snapshot.degradedReason {
-                                degradedBanner(reason: reason)
+                            if shouldShowStaleOverviewNotice(for: snapshot), let reason = snapshot.degradedReason {
+                                staleOverviewNotice(reason: reason)
                             }
 
-                            if snapshot.source == .yabai && !snapshot.degraded {
+                            if shouldShowPreciseOverview(for: snapshot) {
                                 desktopPreviewCard(snapshot, scrollProxy: scrollProxy)
                                 yabaiMapCard(snapshot)
+                            } else if snapshot.source == .yabai {
+                                if snapshot.degraded, let reason = snapshot.degradedReason {
+                                    degradedBanner(reason: reason)
+                                }
+                                desktopPreviewUnavailableCard
+                                fallbackMapCard(snapshot)
                             } else {
+                                if snapshot.degraded, let reason = snapshot.degradedReason {
+                                    degradedBanner(reason: reason)
+                                }
                                 desktopPreviewUnavailableCard
                                 fallbackMapCard(snapshot)
                             }
@@ -77,6 +86,21 @@ struct NowDashboardView: View {
         } label: {
             Label("Desktop Mini-map", systemImage: "square.grid.3x3")
         }
+    }
+
+    private var hasCachedPreciseOverview: Bool {
+        !model.overviewDisplayPreviews.isEmpty || !model.overviewDisplaySections.isEmpty
+    }
+
+    private func shouldShowPreciseOverview(for snapshot: LiveStateSnapshot) -> Bool {
+        if snapshot.source == .yabai && !snapshot.degraded {
+            return true
+        }
+        return snapshot.source == .yabai && snapshot.degraded && hasCachedPreciseOverview
+    }
+
+    private func shouldShowStaleOverviewNotice(for snapshot: LiveStateSnapshot) -> Bool {
+        snapshot.degraded && snapshot.source == .yabai && hasCachedPreciseOverview
     }
 
     private func desktopPreviewCard(_ snapshot: LiveStateSnapshot, scrollProxy: ScrollViewProxy) -> some View {
@@ -164,6 +188,41 @@ struct NowDashboardView: View {
         } label: {
             Label("Degraded", systemImage: "minus.circle")
         }
+    }
+
+    private func staleOverviewNotice(reason: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+                .font(.caption)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Live data may be temporarily out of date.")
+                    .font(.caption.weight(.semibold))
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let liveStateHelp = liveStateHelp(for: reason) {
+                    HStack(spacing: 8) {
+                        ForEach(liveStateHelp.actions, id: \.label) { action in
+                            Button(action.label, action: action.handler)
+                                .font(.caption)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+        )
     }
 
     private func yabaiMapCard(_ snapshot: LiveStateSnapshot) -> some View {

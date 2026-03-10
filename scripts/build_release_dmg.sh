@@ -12,6 +12,9 @@ DMG_NAME="${APP_NAME}-${VERSION}"
 FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
 TEMP_DMG="$DIST_DIR/${DMG_NAME}-temp.dmg"
 BACKGROUND_IMG="$ROOT_DIR/assets/dmg/dmg-background.png"
+NOTARIZE_DMG=0
+NOTARY_PROFILE="${TILEPILOT_NOTARY_PROFILE:-}"
+NOTARY_KEYCHAIN="${TILEPILOT_NOTARY_KEYCHAIN:-}"
 
 usage() {
   cat <<EOF
@@ -22,11 +25,15 @@ Builds a signed release app bundle and packages a drag-and-drop DMG.
 Options:
   --version <v>     Release version label in dmg filename (default: ${VERSION})
   --no-sign-dmg     Skip code-signing the DMG artifact
+  --notarize        Submit the final DMG for notarization and staple the result
+  --notary-profile  notarytool keychain profile name (default: TILEPILOT_NOTARY_PROFILE)
+  --notary-keychain keychain path for notary profile lookup (default: TILEPILOT_NOTARY_KEYCHAIN)
   --help            Show this help
 
 Examples:
   scripts/build_release_dmg.sh
   scripts/build_release_dmg.sh --version v0.2.0
+  scripts/build_release_dmg.sh --version v0.2.3 --notarize --notary-profile TilePilot
 EOF
 }
 
@@ -48,6 +55,25 @@ while [[ $# -gt 0 ]]; do
     --no-sign-dmg)
       SIGN_DMG=0
       ;;
+    --notarize)
+      NOTARIZE_DMG=1
+      ;;
+    --notary-profile)
+      shift
+      NOTARY_PROFILE="${1:-}"
+      if [[ -z "$NOTARY_PROFILE" ]]; then
+        echo "--notary-profile requires a value" >&2
+        exit 1
+      fi
+      ;;
+    --notary-keychain)
+      shift
+      NOTARY_KEYCHAIN="${1:-}"
+      if [[ -z "$NOTARY_KEYCHAIN" ]]; then
+        echo "--notary-keychain requires a value" >&2
+        exit 1
+      fi
+      ;;
     --help|-h)
       usage
       exit 0
@@ -60,6 +86,35 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+run_notarization() {
+  local dmg_path="$1"
+  local profile="$2"
+  local keychain="$3"
+
+  if [[ -z "$profile" ]]; then
+    echo "Notarization requested, but no notary profile was provided." >&2
+    echo "Set TILEPILOT_NOTARY_PROFILE or pass --notary-profile <profile>." >&2
+    exit 1
+  fi
+
+  echo "Submitting DMG for notarization with profile: $profile"
+  local -a notary_args=(
+    submit "$dmg_path"
+    --keychain-profile "$profile"
+    --wait
+  )
+  if [[ -n "$keychain" ]]; then
+    notary_args+=(--keychain "$keychain")
+  fi
+  xcrun notarytool "${notary_args[@]}"
+
+  echo "Stapling notarization ticket..."
+  xcrun stapler staple "$dmg_path"
+
+  echo "Gatekeeper assessment after notarization:"
+  spctl -a -vv "$dmg_path" || true
+}
 
 resolve_sign_identity() {
   security find-identity -v -p codesigning 2>/dev/null \
@@ -157,6 +212,10 @@ if [[ $SIGN_DMG -eq 1 ]]; then
   else
     echo "No Developer ID Application identity found; leaving DMG unsigned."
   fi
+fi
+
+if [[ $NOTARIZE_DMG -eq 1 ]]; then
+  run_notarization "$FINAL_DMG" "$NOTARY_PROFILE" "$NOTARY_KEYCHAIN"
 fi
 
 echo

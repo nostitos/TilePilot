@@ -147,7 +147,7 @@ extension AppModel {
             return false
         }
 
-        let commonSetupBlockedKeys: Set<String> = ["accessibility", "yabai-binary", "skhd-binary", "yabai-query"]
+        let commonSetupBlockedKeys: Set<String> = ["yabai-binary", "skhd-binary", "yabai-query"]
         guard blockedKeys.isSubset(of: commonSetupBlockedKeys) else {
             return false
         }
@@ -161,7 +161,7 @@ extension AppModel {
             }
         }
 
-        return blockedKeys == Set(["accessibility"]) || blockedKeys == Set(["accessibility", "yabai-query"])
+        return blockedKeys == Set(["yabai-query"])
     }
 
     private var shouldUseNeutralSetupMenuBar: Bool {
@@ -178,7 +178,7 @@ extension AppModel {
         if failing.isEmpty { return false }
 
         let allSetupish = failing.allSatisfy { capability in
-            ["accessibility", "yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon", "yabai-query"].contains(capability.key)
+            ["yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon", "yabai-query"].contains(capability.key)
         }
         return allSetupish && liveStateSnapshot == nil
     }

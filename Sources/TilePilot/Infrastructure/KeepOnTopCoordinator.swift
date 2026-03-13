@@ -385,7 +385,6 @@ final class KeepOnTopCoordinator {
     }
 
     private func raiseWindowUsingAccessibility(on model: AppModel, windowID: Int) -> Bool {
-        guard AXIsProcessTrusted() else { return false }
         guard let targetWindow = (model.latestLiveStateSnapshot ?? model.liveStateSnapshot)?.windows.first(where: { $0.id == windowID }) else { return false }
 
         let appElement = AXUIElementCreateApplication(pid_t(targetWindow.pid))

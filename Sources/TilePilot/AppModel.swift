@@ -64,6 +64,7 @@ final class AppModel: ObservableObject {
     static let performanceMiniMapHoverTitlesEnabledDefaultsKey = "TilePilot.performanceMiniMapHoverTitlesEnabled"
     static let performanceFastLiveRefreshEnabledDefaultsKey = "TilePilot.performanceFastLiveRefreshEnabled"
     static let performanceKeepOnTopEnforcementEnabledDefaultsKey = "TilePilot.performanceKeepOnTopEnforcementEnabled"
+    static let megamapCacheArmedDefaultsKey = "TilePilot.megamapCacheArmed"
     static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
     static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
     static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
@@ -83,6 +84,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
     @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
+    @Published var megamapDisplaySections: [MegamapDisplaySection] = []
+    @Published var isRefreshingMegamap = false
+    @Published var megamapCaptureProgress: MegamapCaptureProgress?
+    @Published var megamapLastRefreshedAt: Date?
+    @Published var megamapScreenRecordingAuthorized = false
+    @Published var megamapLastActionMessage: String?
+    @Published var megamapLastErrorMessage: String?
+    @Published var megamapCacheArmed: Bool = UserDefaults.standard.bool(forKey: AppModel.megamapCacheArmedDefaultsKey)
     @Published var windowBadges: [WindowBadgeState] = []
     @Published var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
@@ -225,6 +234,7 @@ final class AppModel: ObservableObject {
     let yabaiRulesConfigService = YabaiRulesConfigService()
     let configFilesService = ConfigFilesService()
     let releaseDefaultsService = ReleaseDefaultsService()
+    let megamapCaptureService = MegamapCaptureService()
     private let keepOnTopCoordinator = KeepOnTopCoordinator()
     private(set) var overviewDisplayPreviews: [OverviewDisplayPreview] = []
     private(set) var overviewDisplaySections: [OverviewDisplaySection] = []
@@ -256,6 +266,11 @@ final class AppModel: ObservableObject {
     private var consecutiveHealthySamples = 0
     private let degradedEnterThreshold = 3
     private let degradedExitThreshold = 5
+    var megamapCaptureRecordsByDesktopID: [String: MegamapCaptureRecord] = [:]
+    var megamapDesktopMessagesByID: [String: String] = [:]
+    var megamapLastCaptureDateByDesktopID: [String: Date] = [:]
+    var megamapLastCapturedDesktopID: String?
+    var megamapIncrementalDestinationCaptureTask: Task<Void, Never>?
     var originalManagedConfigSection: String = ""
     var loadedFullConfigContent: String = ""
     var originalWindowBehaviorPolicy = ManagedWindowBehaviorPolicy.default

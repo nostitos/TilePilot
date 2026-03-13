@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.4-defaults.1"
+    static let currentProfileVersion = "v0.2.5-defaults.1"
 
     private let fileManager = FileManager.default
 

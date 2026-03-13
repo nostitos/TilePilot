@@ -33,7 +33,7 @@ Options:
 Examples:
   scripts/build_release_dmg.sh
   scripts/build_release_dmg.sh --version v0.2.0
-  scripts/build_release_dmg.sh --version v0.2.4 --notarize --notary-profile TilePilot
+  scripts/build_release_dmg.sh --version v0.2.5 --notarize --notary-profile TilePilot
 EOF
 }
 

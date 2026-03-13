@@ -12,6 +12,12 @@ extension AppModel {
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Toggles keep-on-top for the focused app when floating."
         }
+        if normalized.contains("tilepilot://feature/app.open-megamap") {
+            return "Opens the large screenshot-based view of all desktops."
+        }
+        if normalized.contains("tilepilot://feature/app.refresh-megamap") {
+            return "Visibly sweeps desktops and captures fresh Megamap screenshots."
+        }
         if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
             return "Brings TilePilot to the front."
         }
@@ -130,6 +136,12 @@ extension AppModel {
         }
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Keep App on Top"
+        }
+        if normalized.contains("tilepilot://feature/app.open-megamap") {
+            return "Open Megamap"
+        }
+        if normalized.contains("tilepilot://feature/app.refresh-megamap") {
+            return "Refresh Megamap"
         }
         if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
             return "Open TilePilot"

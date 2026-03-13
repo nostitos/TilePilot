@@ -17,8 +17,8 @@ magick -size 1280x800 gradient:'#0B1220-#1C2E50' \
   \( -size 1280x800 radial-gradient:'#3B82F622-#0B122000' \) -gravity southeast -composite \
   -fill '#FFFFFF15' -draw "circle 340,410 340,580" \
   -fill '#FFFFFF14' -draw "circle 940,410 940,580" \
-  -stroke '#E2E8F0C0' -strokewidth 8 -fill none -draw "path 'M 510,410 C 640,300 780,300 840,410'" \
-  -fill '#E2E8F0C0' -stroke none -draw "polygon 840,410 805,392 811,428" \
+  -stroke '#E2E8F0D8' -strokewidth 9 -fill none -draw "path 'M 430,420 C 570,320 650,320 850,406'" \
+  -fill '#E2E8F0D8' -stroke none -draw "polygon 888,432 840,421 860,391" \
   -fill '#F8FAFC' -font 'Helvetica-Bold' -pointsize 62 -gravity north -annotate +0+78 'Install TilePilot' \
   -fill '#CBD5E1' -font 'Helvetica' -pointsize 30 -gravity north -annotate +0+164 'Drag TilePilot to Applications' \
   -fill '#BFDBFE' -font 'Helvetica-Bold' -pointsize 26 -draw "text 250,640 'TilePilot.app'" \

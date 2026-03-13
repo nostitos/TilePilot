@@ -152,8 +152,8 @@ extension AppModel {
         ])
         let accessibilityStatus: SystemCheckStatus
         switch rawAccessibilityStatus {
-        case .error: accessibilityStatus = .warning
-        default: accessibilityStatus = rawAccessibilityStatus
+        case .good: accessibilityStatus = .good
+        default: accessibilityStatus = .notice
         }
         rows.append(SystemCheckRow(
             id: "accessibility",
@@ -239,6 +239,7 @@ extension AppModel {
     var systemPrimaryActions: [SystemCheckAction] {
         var actions: [SystemCheckAction] = []
         for row in systemCheckRows where row.status != .good {
+            if row.id == "accessibility" { continue }
             for action in row.actions where action != .recheck && !actions.contains(action) {
                 actions.append(action)
                 if actions.count >= 5 { return actions }
@@ -301,7 +302,7 @@ extension AppModel {
             case "skhd-daemon":
                 items.append(checklist(from: item, title: "skhd daemon running", isCore: true))
             case "accessibility":
-                items.append(checklist(from: item, title: "Accessibility permission", isCore: true))
+                items.append(checklist(from: item, title: "Accessibility permission", isCore: false))
             case "yabai-query":
                 items.append(checklist(from: item, title: "Live yabai query", isCore: true))
             case "scripting-addition":

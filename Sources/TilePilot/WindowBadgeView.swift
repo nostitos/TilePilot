@@ -29,6 +29,10 @@ struct WindowBadgeView: View {
         model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-tilepilot"))
     }
 
+    private var openMegamapRow: FeatureControlRow? {
+        model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-megamap"))
+    }
+
     var body: some View {
         Button {
             guard runtimeEnabled else { return }
@@ -96,6 +100,16 @@ struct WindowBadgeView: View {
             } else {
                 Button("Open TilePilot") {
                     model.openTilePilotDashboard()
+                }
+            }
+
+            if let row = openMegamapRow {
+                Button(featureMenuTitle(row)) {
+                    model.presentMegamap()
+                }
+            } else {
+                Button("Open Megamap") {
+                    model.presentMegamap()
                 }
             }
 

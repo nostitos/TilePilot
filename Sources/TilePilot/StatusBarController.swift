@@ -184,6 +184,7 @@ final class StatusBarController: NSObject {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(openTilePilotMenuItem())
+        menu.addItem(openMegamapMenuItem())
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
         menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
@@ -240,6 +241,15 @@ final class StatusBarController: NSObject {
     private func openTilePilotMenuItem() -> NSMenuItem {
         let menuItem = item("Open TilePilot", action: #selector(openTilePilot))
         if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-tilepilot")) {
+            let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+            applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
+        }
+        return menuItem
+    }
+
+    private func openMegamapMenuItem() -> NSMenuItem {
+        let menuItem = item("Open Megamap", action: #selector(openMegamap))
+        if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-megamap")) {
             let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
             applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
         }
@@ -389,6 +399,11 @@ final class StatusBarController: NSObject {
 
     @objc private func openTilePilot() { onOpenTilePilot() }
 
+    @objc private func openMegamap() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.presentMegamap()
+    }
+
     @objc private func runDoctor() {
         model.acknowledgeInitialStatusIfNeeded()
         Task { await model.refreshDoctor() }
@@ -535,6 +550,7 @@ final class StatusBarController: NSObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel.shared
     private var tilePilotWindowController: TilePilotWindowController?
+    private var megamapWindowController: MegamapWindowController?
     private var statusBarController: StatusBarController?
     private var windowBadgeOverlayController: WindowBadgeOverlayController?
 
@@ -547,6 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         tilePilotWindowController = TilePilotWindowController(model: model)
+        megamapWindowController = MegamapWindowController(model: model)
         statusBarController = StatusBarController(
             model: model,
             onOpenTilePilot: { [weak self] in
@@ -559,6 +576,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showMegamapWindow),
+            name: .tilePilotOpenMegamap,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hideMegamapWindow),
+            name: .tilePilotHideMegamap,
+            object: nil
+        )
 
         model.startIfNeeded()
 
@@ -576,6 +605,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let keeperPID = instances.map(\.processIdentifier).min() ?? currentPID
         return currentPID != keeperPID
+    }
+
+    @objc private func showMegamapWindow() {
+        model.acknowledgeInitialStatusIfNeeded()
+        megamapWindowController?.showAndFocus()
+    }
+
+    @objc private func hideMegamapWindow() {
+        megamapWindowController?.window?.orderOut(nil)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -616,6 +654,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         tilePilotWindowController?.persistCurrentWindowSize()
+        megamapWindowController?.persistCurrentWindowSize()
         windowBadgeOverlayController = nil
+        NotificationCenter.default.removeObserver(self, name: .tilePilotOpenMegamap, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .tilePilotHideMegamap, object: nil)
     }
 }

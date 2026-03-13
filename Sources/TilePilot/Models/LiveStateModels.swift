@@ -185,4 +185,11 @@ struct RuntimeDiagnostics: Sendable, Equatable {
     var recentKeepOnTopEnforcementPassCount: Int = 0
     var recentOverlayPanelUpdateCount: Int = 0
     var dominantBurstSource: String = "Idle"
+    var megamapRefreshCount: Int = 0
+    var megamapFirstSwitchLatencyMilliseconds: Double = 0
+    var megamapAverageSwitchVerificationMilliseconds: Double = 0
+    var megamapAverageCaptureMilliseconds: Double = 0
+    var megamapTotalSweepMilliseconds: Double = 0
+    var megamapCapturedDesktopCount: Int = 0
+    var megamapFailedDesktopCount: Int = 0
 }

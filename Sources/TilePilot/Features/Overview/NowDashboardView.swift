@@ -110,6 +110,17 @@ struct NowDashboardView: View {
             .max() ?? 1
         return GroupBox {
             VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Text("Need a higher-resolution view? Megamap captures real desktop screenshots with a manual sweep.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Open Megamap") {
+                        model.presentMegamap()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
                 if previews.isEmpty {
                     Text("No preview available for current displays.")
                         .font(.caption)

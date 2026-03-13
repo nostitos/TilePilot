@@ -206,7 +206,7 @@ final class BootstrapService: @unchecked Sendable {
             id: "accessibility-permission",
             title: "Optional: TilePilot Accessibility permission",
             state: trusted ? .installed : .unknown,
-            detail: trusted ? "Granted" : "Not granted (optional). The app still works without this."
+            detail: trusted ? "Granted" : "TilePilot could not confirm this permission right now. The app still works without it."
         )
     }
 

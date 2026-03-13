@@ -113,14 +113,56 @@ private struct FirstLaunchGreetingView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var isPresented: Bool
 
-    private var missingEssentials: [SystemCheckRow] {
+    private var requiredMissingItems: [SystemCheckRow] {
         model.systemCheckRows.filter { row in
             switch row.id {
-            case "yabai-installed", "skhd-installed", "yabai-running", "skhd-running", "accessibility":
+            case "yabai-installed", "skhd-installed", "yabai-running", "skhd-running":
                 return row.status != .good
             default:
                 return false
             }
+        }
+    }
+
+    private var missingStatusSummary: String {
+        if requiredMissingItems.isEmpty {
+            return "Everything essential looks ready."
+        }
+        return "\(requiredMissingItems.count) item\(requiredMissingItems.count == 1 ? "" : "s") still need attention."
+    }
+
+    private var missingStatusColor: Color {
+        if requiredMissingItems.contains(where: { $0.status == .error }) {
+            return .red
+        }
+        if requiredMissingItems.contains(where: { $0.status == .warning }) {
+            return .orange
+        }
+        if requiredMissingItems.contains(where: { $0.status == .notice }) {
+            return .yellow
+        }
+        return .green
+    }
+
+    private var missingStatusSymbol: String {
+        if requiredMissingItems.contains(where: { $0.status == .error }) {
+            return "xmark.circle.fill"
+        }
+        if requiredMissingItems.contains(where: { $0.status == .warning }) {
+            return "exclamationmark.triangle.fill"
+        }
+        if requiredMissingItems.contains(where: { $0.status == .notice }) {
+            return "questionmark.circle.fill"
+        }
+        return "checkmark.circle.fill"
+    }
+
+    private func color(for status: SystemCheckStatus) -> Color {
+        switch status {
+        case .good: return .green
+        case .notice: return .yellow
+        case .warning: return .orange
+        case .error: return .red
         }
     }
 
@@ -156,22 +198,40 @@ private struct FirstLaunchGreetingView: View {
                 }
 
                 GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Missing or incomplete right now")
-                            .font(.headline)
-                        if missingEssentials.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: missingStatusSymbol)
+                                .foregroundStyle(missingStatusColor)
+                                .font(.title3.weight(.semibold))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Setup status")
+                                    .font(.headline)
+                                Text(missingStatusSummary)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(missingStatusColor)
+                            }
+                        }
+                        if requiredMissingItems.isEmpty {
                             Text("Everything essential already looks good.")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary)
                         } else {
-                            ForEach(missingEssentials) { row in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.title)
+                            ForEach(requiredMissingItems) { row in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: row.status.symbolName)
+                                        .foregroundStyle(color(for: row.status))
                                         .font(.subheadline.weight(.semibold))
-                                    Text(row.detail)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(row.title)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text(row.detail)
+                                            .font(.callout)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .padding(.vertical, 2)
                             }
                         }
                     }

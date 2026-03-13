@@ -78,6 +78,13 @@ extension AppModel {
             ("Recent shortcuts rebuilds (10s)", "\(runtimeDiagnostics.recentShortcutsCacheRebuildCount)"),
             ("Recent keep-on-top passes (10s)", "\(runtimeDiagnostics.recentKeepOnTopEnforcementPassCount)"),
             ("Recent overlay updates (10s)", "\(runtimeDiagnostics.recentOverlayPanelUpdateCount)"),
+            ("Megamap refreshes", "\(runtimeDiagnostics.megamapRefreshCount)"),
+            ("Megamap first switch", runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds)) ms" : "—"),
+            ("Megamap avg switch verify", runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds)) ms" : "—"),
+            ("Megamap avg capture", runtimeDiagnostics.megamapAverageCaptureMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageCaptureMilliseconds)) ms" : "—"),
+            ("Megamap total sweep", runtimeDiagnostics.megamapTotalSweepMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapTotalSweepMilliseconds)) ms" : "—"),
+            ("Megamap desktops captured", "\(runtimeDiagnostics.megamapCapturedDesktopCount)"),
+            ("Megamap desktops failed", "\(runtimeDiagnostics.megamapFailedDesktopCount)"),
         ]
     }
 
@@ -170,6 +177,25 @@ extension AppModel {
     func incrementOverlayPanelUpdates() {
         recordRuntimeBurst(.overlayUpdate)
         mutateRuntimeDiagnostics { $0.overlayPanelUpdateCount += 1 }
+    }
+
+    func recordMegamapRefreshDiagnostics(
+        firstSwitchLatencyMilliseconds: Double,
+        averageSwitchVerificationMilliseconds: Double,
+        averageCaptureMilliseconds: Double,
+        totalSweepMilliseconds: Double,
+        capturedDesktopCount: Int,
+        failedDesktopCount: Int
+    ) {
+        mutateRuntimeDiagnostics {
+            $0.megamapRefreshCount += 1
+            $0.megamapFirstSwitchLatencyMilliseconds = firstSwitchLatencyMilliseconds
+            $0.megamapAverageSwitchVerificationMilliseconds = averageSwitchVerificationMilliseconds
+            $0.megamapAverageCaptureMilliseconds = averageCaptureMilliseconds
+            $0.megamapTotalSweepMilliseconds = totalSweepMilliseconds
+            $0.megamapCapturedDesktopCount = capturedDesktopCount
+            $0.megamapFailedDesktopCount = failedDesktopCount
+        }
     }
 
     func mutateRuntimeDiagnostics(_ mutate: (inout RuntimeDiagnostics) -> Void) {

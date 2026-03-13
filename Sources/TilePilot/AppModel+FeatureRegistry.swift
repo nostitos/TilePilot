@@ -220,6 +220,34 @@ extension AppModel {
                 isExperimental: false
             ),
             FeatureDefinition(
+                id: "app.open-megamap",
+                group: .desktops,
+                title: "Open Megamap",
+                description: "Opens the large screenshot-based view of all desktops.",
+                backend: .tilePilotAction,
+                capabilityGate: .none,
+                defaultCombo: nil,
+                commandMatchers: [tilePilotFeatureURL("app.open-megamap")],
+                matchAllCommandMatchers: false,
+                preferredCommand: tilePilotFeatureCommand("app.open-megamap"),
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
+                id: "app.refresh-megamap",
+                group: .desktops,
+                title: "Refresh Megamap",
+                description: "Visibly sweeps desktops and captures fresh Megamap screenshots.",
+                backend: .tilePilotAction,
+                capabilityGate: .none,
+                defaultCombo: nil,
+                commandMatchers: [tilePilotFeatureURL("app.refresh-megamap")],
+                matchAllCommandMatchers: false,
+                preferredCommand: tilePilotFeatureCommand("app.refresh-megamap"),
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
                 id: "app.keep-on-top-when-floating",
                 group: .apps,
                 title: "Keep App on Top",

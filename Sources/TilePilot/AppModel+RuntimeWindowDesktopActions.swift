@@ -2,6 +2,11 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+private enum MegamapDesktopSwitchCapturePolicy {
+    case none
+    case incremental
+}
+
 @MainActor
 extension AppModel {
     func bringFloatingWindowsToFrontCurrentDesktop() {
@@ -86,7 +91,11 @@ extension AppModel {
 
             if let currentSpace = await self.queryCurrentFocusedSpaceIndex(),
                currentSpace != desktopIndex {
-                let switched = await self.focusDesktopInternal(index: desktopIndex, updateMessages: false)
+                let switched = await self.focusDesktopInternal(
+                    index: desktopIndex,
+                    updateMessages: false,
+                    megamapCapturePolicy: .incremental
+                )
                 guard switched else {
                     await MainActor.run {
                         self.lastErrorMessage = "Could not switch to Desktop \(desktopIndex)."
@@ -122,7 +131,11 @@ extension AppModel {
     func focusDesktop(index: Int) {
         Task { [weak self] in
             guard let self else { return }
-            let switched = await self.focusDesktopInternal(index: index, updateMessages: true)
+            let switched = await self.focusDesktopInternal(
+                index: index,
+                updateMessages: true,
+                megamapCapturePolicy: .incremental
+            )
             guard switched else { return }
             await self.refreshLiveState()
         }
@@ -357,7 +370,18 @@ extension AppModel {
             || (text.contains("cannot focus space") && text.contains("scripting addition"))
     }
 
-    private func focusDesktopInternal(index: Int, updateMessages: Bool) async -> Bool {
+    private func focusDesktopInternal(
+        index: Int,
+        updateMessages: Bool,
+        megamapCapturePolicy: MegamapDesktopSwitchCapturePolicy
+    ) async -> Bool {
+        let currentSpace = await queryCurrentFocusedSpaceIndex()
+        if megamapCapturePolicy == .incremental,
+           let currentSpace,
+           currentSpace != index {
+            await captureMegamapDesktopIfNeeded(spaceIndex: currentSpace, reason: .beforeTilePilotDesktopSwitch)
+        }
+
         let result = await self.doctorService.runSupportCommand(
             ShellCommand("/usr/bin/env", ["yabai", "-m", "space", "--focus", String(index)], timeout: 1.5)
         )
@@ -365,6 +389,9 @@ extension AppModel {
             self.appendCommandLog(from: result)
         }
         if result.isSuccess {
+            if megamapCapturePolicy == .incremental {
+                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index)
+            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index)."
@@ -375,6 +402,9 @@ extension AppModel {
         }
 
         if await self.focusAnyWindowOnDesktop(index: index) {
+            if megamapCapturePolicy == .incremental {
+                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index)
+            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index)."
@@ -386,6 +416,9 @@ extension AppModel {
 
         if self.isScriptingAdditionDesktopFocusFailure(result),
            self.triggerMissionControlDesktopShortcut(index: index) {
+            if megamapCapturePolicy == .incremental {
+                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index, delayMilliseconds: 220)
+            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index) using macOS shortcut fallback."
@@ -401,6 +434,20 @@ extension AppModel {
                 self.lastActionMessage = nil
             }
         }
+        return false
+    }
+
+    func focusDesktopForMegamapCapture(index: Int) async -> Bool {
+        let issued = await focusDesktopInternal(index: index, updateMessages: false, megamapCapturePolicy: .none)
+        guard issued else { return false }
+
+        for _ in 0..<8 {
+            if let focusedSpace = await queryCurrentFocusedSpaceIndex(), focusedSpace == index {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
         return false
     }
 
@@ -444,7 +491,6 @@ extension AppModel {
     }
 
     private func triggerMissionControlDesktopShortcut(index: Int) -> Bool {
-        guard AXIsProcessTrusted() else { return false }
         let binding = missionControlDesktopBinding(for: index)
             ?? missionControlDefaultBinding(for: index)
         guard let binding else { return false }

@@ -1,0 +1,447 @@
+import AppKit
+import Foundation
+
+extension Notification.Name {
+    static let tilePilotOpenMegamap = Notification.Name("TilePilotOpenMegamap")
+    static let tilePilotHideMegamap = Notification.Name("TilePilotHideMegamap")
+}
+
+enum MegamapCaptureReason: String, Sendable {
+    case manualRefresh
+    case beforeTilePilotDesktopSwitch
+    case afterTilePilotDesktopSwitch
+}
+
+@MainActor
+extension AppModel {
+    func presentMegamap() {
+        if isMegamapVisible {
+            refreshMegamap()
+        } else {
+            openMegamapDashboard()
+        }
+    }
+
+    func openMegamapDashboard() {
+        acknowledgeInitialStatusIfNeeded()
+        NSApp.activate(ignoringOtherApps: true)
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        rebuildMegamapSections()
+        NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refreshLiveState()
+            await MainActor.run {
+                self.megamapScreenRecordingAuthorized = self.megamapCaptureService.screenRecordingAuthorized()
+                self.rebuildMegamapSections()
+            }
+        }
+    }
+
+    func refreshMegamap() {
+        acknowledgeInitialStatusIfNeeded()
+        NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
+        megamapLastActionMessage = "Refreshing Megamap…"
+        megamapLastErrorMessage = nil
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        if !megamapScreenRecordingAuthorized {
+            NSApp.activate(ignoringOtherApps: true)
+            rebuildMegamapSections()
+            NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refreshMegamapCaptureSweep()
+        }
+    }
+
+    func requestMegamapScreenRecordingAccess() {
+        let granted = megamapCaptureService.requestScreenRecordingAccess()
+        megamapScreenRecordingAuthorized = granted || megamapCaptureService.screenRecordingAuthorized()
+        if megamapScreenRecordingAuthorized {
+            megamapLastActionMessage = "Screen Recording access confirmed."
+            megamapLastErrorMessage = nil
+        } else {
+            megamapLastErrorMessage = "TilePilot could not confirm Screen Recording yet. If you just granted it, reopen TilePilot and refresh Megamap."
+            megamapLastActionMessage = nil
+        }
+        rebuildMegamapSections()
+    }
+
+    func setMegamapCacheArmed(_ armed: Bool) {
+        guard megamapCacheArmed != armed else { return }
+        megamapCacheArmed = armed
+        UserDefaults.standard.set(armed, forKey: AppModel.megamapCacheArmedDefaultsKey)
+    }
+
+    func scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: Int, delayMilliseconds: Int = 160) {
+        guard megamapCacheArmed, !isRefreshingMegamap else { return }
+        megamapIncrementalDestinationCaptureTask?.cancel()
+        megamapIncrementalDestinationCaptureTask = Task { [weak self] in
+            guard let self else { return }
+            if delayMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+            }
+            guard !Task.isCancelled else { return }
+            await self.captureMegamapDesktopIfNeeded(spaceIndex: spaceIndex, reason: .afterTilePilotDesktopSwitch)
+        }
+    }
+
+    func captureMegamapDesktopIfNeeded(spaceIndex: Int, reason: MegamapCaptureReason) async {
+        guard megamapCacheArmed, !isRefreshingMegamap else { return }
+        let screenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        guard screenRecordingAuthorized else {
+            megamapScreenRecordingAuthorized = false
+            return
+        }
+        megamapScreenRecordingAuthorized = true
+
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        guard let snapshot,
+              snapshot.source == .yabai,
+              let space = snapshot.spaces.first(where: { $0.index == spaceIndex }),
+              let display = snapshot.displays.first(where: { $0.id == space.displayId }) else {
+            return
+        }
+
+        let desktopID = megamapDesktopID(displayID: display.id, desktopIndex: spaceIndex)
+        let now = Date()
+        if let lastCaptureAt = megamapLastCaptureDateByDesktopID[desktopID],
+           now.timeIntervalSince(lastCaptureAt) < 1.0 {
+            return
+        }
+
+        let desktopCountOnDisplay = snapshot.spaces.filter { $0.displayId == display.id }.count
+        guard desktopCountOnDisplay > 1 else { return }
+
+        let resolvedDisplaysByID = megamapCaptureService.resolveScreenDescriptors(for: [display])
+        guard let resolvedDisplay = resolvedDisplaysByID[display.id] else { return }
+
+        do {
+            let record = try megamapCaptureService.capture(display: display, desktopIndex: spaceIndex, screen: resolvedDisplay)
+            if let old = megamapCaptureRecordsByDesktopID[desktopID], old.screenshotPath != record.screenshotPath {
+                megamapCaptureService.removeCapture(at: old.screenshotPath)
+            }
+            megamapCaptureRecordsByDesktopID[desktopID] = record
+            megamapDesktopMessagesByID[desktopID] = nil
+            megamapLastCaptureDateByDesktopID[desktopID] = now
+            megamapLastCapturedDesktopID = desktopID
+            setMegamapCacheArmed(true)
+            if isMegamapVisible {
+                rebuildMegamapSections()
+            }
+        } catch {
+            if reason == .manualRefresh {
+                megamapDesktopMessagesByID[desktopID] = "This desktop could not be captured just now."
+            }
+        }
+    }
+
+    func openMegamapScreenRecordingSettings() {
+        megamapCaptureService.openScreenRecordingSettings()
+    }
+
+    private func refreshMegamapCaptureSweep() async {
+        guard !isRefreshingMegamap else { return }
+        isRefreshingMegamap = true
+        megamapCaptureProgress = nil
+        defer {
+            isRefreshingMegamap = false
+            megamapCaptureProgress = nil
+        }
+
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+
+        guard megamapScreenRecordingAuthorized else {
+            megamapLastErrorMessage = "Screen Recording is needed for real megamap screenshots. TilePilot is showing synthetic fallback previews for now."
+            megamapLastActionMessage = nil
+            return
+        }
+
+        var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
+            await refreshLiveState()
+            snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        }
+
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            megamapLastErrorMessage = "Live desktop data is unavailable right now, so Megamap could not start a fresh sweep."
+            megamapLastActionMessage = nil
+            rebuildMegamapSections()
+            NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
+            return
+        }
+
+        let targets = await queryMegamapCaptureTargets(using: snapshot)
+
+        guard !targets.isEmpty else {
+            megamapLastErrorMessage = "No multi-desktop displays are available to capture."
+            megamapLastActionMessage = nil
+            rebuildMegamapSections()
+            NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
+            return
+        }
+
+        let resolvedDisplaysByID = megamapCaptureService.resolveScreenDescriptors(
+            for: Array(Dictionary(grouping: targets, by: { $0.display.id }).compactMap { $0.value.first?.display })
+        )
+        let originalSpace = await queryCurrentFocusedSpaceIndex() ?? activeSpaceIndex(in: snapshot)
+        var successCount = 0
+        var failureCount = 0
+        var updatedCaptureRecordsByDesktopID = megamapCaptureRecordsByDesktopID
+        var updatedDesktopMessagesByID = megamapDesktopMessagesByID
+        var replacedCapturePaths: [String] = []
+        var switchVerificationDurations: [Double] = []
+        var captureDurations: [Double] = []
+        let refreshStart = Date()
+        var firstSwitchStartedAt: Date?
+
+        NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
+
+        for target in targets {
+            let desktopID = megamapDesktopID(displayID: target.display.id, desktopIndex: target.desktopIndex)
+            if firstSwitchStartedAt == nil {
+                firstSwitchStartedAt = Date()
+            }
+            let switchStart = Date()
+            let switched = await focusDesktopForMegamapCapture(index: target.desktopIndex)
+            switchVerificationDurations.append(Date().timeIntervalSince(switchStart) * 1000)
+            guard switched else {
+                failureCount += 1
+                updatedDesktopMessagesByID[desktopID] = "Could not switch to Desktop \(target.desktopIndex) during sweep. Using any last capture available."
+                continue
+            }
+
+            try? await Task.sleep(for: .milliseconds(90))
+
+            do {
+                guard let resolvedDisplay = resolvedDisplaysByID[target.display.id] else {
+                    throw NSError(
+                        domain: "MegamapCaptureService",
+                        code: 4,
+                        userInfo: [NSLocalizedDescriptionKey: "Could not resolve the macOS display for \(target.display.name)."]
+                    )
+                }
+                let captureStart = Date()
+                let record = try megamapCaptureService.capture(display: target.display, desktopIndex: target.desktopIndex, screen: resolvedDisplay)
+                captureDurations.append(Date().timeIntervalSince(captureStart) * 1000)
+                if let old = updatedCaptureRecordsByDesktopID[desktopID], old.screenshotPath != record.screenshotPath {
+                    replacedCapturePaths.append(old.screenshotPath)
+                }
+                updatedCaptureRecordsByDesktopID[desktopID] = record
+                updatedDesktopMessagesByID[desktopID] = nil
+                successCount += 1
+            } catch {
+                failureCount += 1
+                let hasPriorCapture = updatedCaptureRecordsByDesktopID[desktopID] != nil
+                updatedDesktopMessagesByID[desktopID] = hasPriorCapture
+                    ? "Using the last capture because this desktop could not be captured just now."
+                    : "This desktop could not be captured just now."
+            }
+        }
+
+        if let originalSpace {
+            _ = await focusDesktopForMegamapCapture(index: originalSpace)
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        megamapCaptureRecordsByDesktopID = updatedCaptureRecordsByDesktopID
+        megamapDesktopMessagesByID = updatedDesktopMessagesByID
+        for (desktopID, record) in updatedCaptureRecordsByDesktopID {
+            megamapLastCaptureDateByDesktopID[desktopID] = record.capturedAt
+            megamapLastCapturedDesktopID = desktopID
+        }
+        replacedCapturePaths.forEach { megamapCaptureService.removeCapture(at: $0) }
+        rebuildMegamapSections()
+        NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refreshLiveState()
+            await MainActor.run {
+                self.rebuildMegamapSections()
+            }
+        }
+
+        megamapLastRefreshedAt = Date()
+        if successCount > 0 {
+            setMegamapCacheArmed(true)
+        }
+        let totalSweepMilliseconds = Date().timeIntervalSince(refreshStart) * 1000
+        let firstSwitchLatencyMilliseconds = firstSwitchStartedAt.map { $0.timeIntervalSince(refreshStart) * 1000 } ?? 0
+        recordMegamapRefreshDiagnostics(
+            firstSwitchLatencyMilliseconds: firstSwitchLatencyMilliseconds,
+            averageSwitchVerificationMilliseconds: averageMilliseconds(switchVerificationDurations),
+            averageCaptureMilliseconds: averageMilliseconds(captureDurations),
+            totalSweepMilliseconds: totalSweepMilliseconds,
+            capturedDesktopCount: successCount,
+            failedDesktopCount: failureCount
+        )
+        if successCount > 0 && failureCount == 0 {
+            megamapLastActionMessage = "Megamap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
+            megamapLastErrorMessage = nil
+        } else if successCount > 0 {
+            megamapLastActionMessage = "Megamap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
+            megamapLastErrorMessage = "\(failureCount) desktop\(failureCount == 1 ? "" : "s") could not be captured. Last screenshots were kept where available."
+        } else {
+            megamapLastActionMessage = nil
+            megamapLastErrorMessage = "Megamap could not capture any desktops in this sweep."
+        }
+    }
+
+    private func averageMilliseconds(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    func rebuildMegamapSections() {
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        let previewDisplays: [OverviewDisplayPreview]
+        if let snapshot, snapshot.source == .yabai, !snapshot.degraded {
+            previewDisplays = buildOverviewPreviews(from: snapshot)
+        } else {
+            previewDisplays = []
+        }
+
+        let previewDisplayByID = Dictionary(uniqueKeysWithValues: previewDisplays.map { ($0.id, $0) })
+        let previewDesktopByID = Dictionary(
+            previewDisplays
+                .flatMap { display in
+                    display.desktops.map { (megamapDesktopID(displayID: display.id, desktopIndex: $0.desktopIndex), $0) }
+                },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let capturedByDisplay = Dictionary(grouping: megamapCaptureRecordsByDesktopID.values, by: \.displayID)
+
+        let orderedDisplayIDs = Array(Set(previewDisplays.map(\.id) + capturedByDisplay.keys))
+            .sorted { lhs, rhs in
+                let lhsFocused = previewDisplayByID[lhs]?.focused ?? false
+                let rhsFocused = previewDisplayByID[rhs]?.focused ?? false
+                if lhsFocused != rhsFocused { return lhsFocused && !rhsFocused }
+                return lhs < rhs
+            }
+
+        megamapDisplaySections = orderedDisplayIDs.compactMap { displayID in
+            let previewDisplay = previewDisplayByID[displayID]
+            let displayState = snapshot?.displays.first(where: { $0.id == displayID })
+            let captures = capturedByDisplay[displayID] ?? []
+            let desktopIndexes = Array(
+                Set((previewDisplay?.desktops.map(\.desktopIndex) ?? []) + captures.map(\.desktopIndex))
+            ).sorted()
+            guard !desktopIndexes.isEmpty else { return nil }
+
+            let name = previewDisplay?.name ?? captures.first?.displayName ?? "Display \(displayID)"
+            let focused = previewDisplay?.focused ?? false
+            let desktops = desktopIndexes.map { desktopIndex -> MegamapDesktopSection in
+                let desktopID = megamapDesktopID(displayID: displayID, desktopIndex: desktopIndex)
+                let preview = previewDesktopByID[desktopID]
+                let capture = megamapCaptureRecordsByDesktopID[desktopID]
+                let screenshotPath = capture.flatMap {
+                    FileManager.default.fileExists(atPath: $0.screenshotPath) ? $0.screenshotPath : nil
+                }
+                let contentMode: MegamapDesktopContentMode
+                if screenshotPath != nil {
+                    contentMode = .screenshot
+                } else if preview != nil {
+                    contentMode = .syntheticFallback
+                } else {
+                    contentMode = .unavailable
+                }
+
+                let message = megamapDesktopMessagesByID[desktopID]
+                    ?? (contentMode == .syntheticFallback && !megamapScreenRecordingAuthorized
+                        ? "Screen Recording is needed for real screenshots. Showing the synthetic fallback for now."
+                        : nil)
+
+                return MegamapDesktopSection(
+                    id: desktopID,
+                    displayID: displayID,
+                    displayName: name,
+                    displayAspectRatio: capture?.displayAspectRatio ?? previewDisplay?.aspectRatio ?? 1.6,
+                    displayFrameX: displayState?.frameX ?? capture?.capturedFrameX ?? 0,
+                    displayFrameY: displayState?.frameY ?? capture?.capturedFrameY ?? 0,
+                    displayFrameW: displayState?.frameW ?? capture?.capturedFrameW ?? 1,
+                    displayFrameH: displayState?.frameH ?? capture?.capturedFrameH ?? 1,
+                    desktopIndex: desktopIndex,
+                    focused: preview?.focused ?? false,
+                    visible: preview?.visible ?? false,
+                    tilingEnabled: preview?.tilingEnabled,
+                    contentMode: contentMode,
+                    screenshotPath: screenshotPath,
+                    screenshotCropX: capture?.capturedFrameX ?? displayState?.frameX ?? 0,
+                    screenshotCropY: capture?.capturedFrameY ?? displayState?.frameY ?? 0,
+                    screenshotCropW: capture?.capturedFrameW ?? displayState?.frameW ?? 1,
+                    screenshotCropH: capture?.capturedFrameH ?? displayState?.frameH ?? 1,
+                    capturedAt: capture?.capturedAt,
+                    fallbackPreview: preview,
+                    message: message
+                )
+            }
+
+            guard desktops.count > 1 else { return nil }
+
+            return MegamapDisplaySection(
+                id: displayID,
+                name: name,
+                focused: focused,
+                desktops: desktops
+            )
+        }
+    }
+
+    private func megamapDesktopID(displayID: Int, desktopIndex: Int) -> String {
+        "megamap-\(displayID)-\(desktopIndex)"
+    }
+
+    private func queryMegamapCaptureTargets(using snapshot: LiveStateSnapshot) async -> [(display: DisplayState, desktopIndex: Int)] {
+        let query = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--spaces"], timeout: 1.5)
+        )
+        appendCommandLog(from: query)
+
+        func parseInt(_ value: Any?) -> Int? {
+            if let int = value as? Int { return int }
+            if let number = value as? NSNumber { return number.intValue }
+            if let string = value as? String { return Int(string) }
+            return nil
+        }
+        let orderedDisplays = snapshot.displays.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            return lhs.id < rhs.id
+        }
+
+        guard query.isSuccess,
+              let data = query.stdout.data(using: .utf8),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return orderedDisplays.flatMap { display -> [(display: DisplayState, desktopIndex: Int)] in
+                let spaces = snapshot.spaces
+                    .filter { $0.displayId == display.id }
+                    .sorted { $0.index < $1.index }
+                guard spaces.count > 1 else { return [] }
+                return spaces.map { (display: display, desktopIndex: $0.index) }
+            }
+        }
+
+        let spacesByDisplayID = Dictionary(grouping: rows.compactMap { row -> (displayID: Int, index: Int)? in
+            guard let displayID = parseInt(row["display"]),
+                  let index = parseInt(row["index"]) else {
+                return nil
+            }
+            return (displayID, index)
+        }, by: \.displayID)
+
+        return orderedDisplays.flatMap { display -> [(display: DisplayState, desktopIndex: Int)] in
+            let spaces = (spacesByDisplayID[display.id] ?? [])
+                .map(\.index)
+                .sorted()
+            guard spaces.count > 1 else { return [] }
+            return spaces.map { (display: display, desktopIndex: $0) }
+        }
+    }
+
+    private var isMegamapVisible: Bool {
+        NSApp.windows.contains { window in
+            window.title == "Megamap" && window.isVisible
+        }
+    }
+}

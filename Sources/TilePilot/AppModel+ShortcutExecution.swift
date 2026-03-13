@@ -29,6 +29,14 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         bringFloatingWindowsToFrontCurrentDesktop()
         return
     }
+    if featureID.rawValue == "app.open-megamap" {
+        presentMegamap()
+        return
+    }
+    if featureID.rawValue == "app.refresh-megamap" {
+        refreshMegamap()
+        return
+    }
     if let entry = row.shortcutEntry {
         runShortcut(entry)
         return

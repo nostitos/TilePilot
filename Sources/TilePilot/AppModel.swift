@@ -1077,7 +1077,9 @@ final class AppModel: ObservableObject {
 
     private func rebuildOverviewCaches(from snapshot: LiveStateSnapshot) {
         overviewDisplayPreviews = buildOverviewPreviews(from: snapshot)
-        overviewDisplaySections = OverviewSectionsBuilder.build(snapshot: snapshot, isExcluded: isOverviewExcludedWindow)
+        overviewDisplaySections = OverviewSectionsBuilder.build(snapshot: snapshot) { window in
+            self.isOverviewExcludedWindow(window, in: snapshot)
+        }
         overviewCachesDirty = false
         recordRuntimeBurst(.overviewCacheRebuild)
         mutateRuntimeDiagnostics { $0.overviewCacheRebuildCount += 1 }

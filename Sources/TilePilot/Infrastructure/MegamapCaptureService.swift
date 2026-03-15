@@ -10,6 +10,16 @@ final class MegamapCaptureService {
         let visibleFrame: CGRect
     }
 
+    struct CapturedImagePayload {
+        let displayID: Int
+        let displayName: String
+        let displayAspectRatio: Double
+        let desktopIndex: Int
+        let capturedFrame: CGRect
+        let capturedAt: Date
+        let cgImage: CGImage
+    }
+
     func screenRecordingAuthorized() -> Bool {
         CGPreflightScreenCaptureAccess()
     }
@@ -45,7 +55,6 @@ final class MegamapCaptureService {
     }
 
     func capture(display: DisplayState, desktopIndex: Int) throws -> MegamapCaptureRecord {
-        let directory = try capturesDirectoryURL()
         guard let screen = resolveScreenDescriptor(for: display) else {
             throw NSError(
                 domain: "MegamapCaptureService",
@@ -53,51 +62,14 @@ final class MegamapCaptureService {
                 userInfo: [NSLocalizedDescriptionKey: "Could not match display \(display.name) to a macOS screen."]
             )
         }
-        let captureRect = captureRect(for: screen)
-        let cgImage: CGImage?
-        if let captureRect {
-            cgImage = CGDisplayCreateImage(screen.displayID, rect: captureRect)
-        } else {
-            cgImage = CGDisplayCreateImage(screen.displayID)
-        }
-        guard let cgImage else {
-            throw NSError(
-                domain: "MegamapCaptureService",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Screen capture returned no image for \(display.name)."]
-            )
-        }
-
-        let imageRep = NSBitmapImageRep(cgImage: cgImage)
-        guard let pngData = imageRep.representation(using: .png, properties: [:]) else {
-            throw NSError(
-                domain: "MegamapCaptureService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for \(display.name)."]
-            )
-        }
-
-        let timestamp = Date()
-        let fileName = "display-\(display.id)-desktop-\(desktopIndex)-\(Int(timestamp.timeIntervalSince1970)).png"
-        let fileURL = directory.appendingPathComponent(fileName)
-        try pngData.write(to: fileURL, options: .atomic)
-
-        return MegamapCaptureRecord(
-            displayID: display.id,
-            displayName: display.name,
-            displayAspectRatio: captureAspectRatio(for: screen, fallbackDisplay: display),
-            desktopIndex: desktopIndex,
-            capturedFrameX: captureFrame(for: screen, fallbackDisplay: display).origin.x,
-            capturedFrameY: captureFrame(for: screen, fallbackDisplay: display).origin.y,
-            capturedFrameW: captureFrame(for: screen, fallbackDisplay: display).size.width,
-            capturedFrameH: captureFrame(for: screen, fallbackDisplay: display).size.height,
-            screenshotPath: fileURL.path,
-            capturedAt: timestamp
-        )
+        return try persist(capturedPayload(display: display, desktopIndex: desktopIndex, screen: screen))
     }
 
     func capture(display: DisplayState, desktopIndex: Int, screen: ScreenDescriptor) throws -> MegamapCaptureRecord {
-        let directory = try capturesDirectoryURL()
+        try persist(capturedPayload(display: display, desktopIndex: desktopIndex, screen: screen))
+    }
+
+    func capturedPayload(display: DisplayState, desktopIndex: Int, screen: ScreenDescriptor) throws -> CapturedImagePayload {
         let captureRect = captureRect(for: screen)
         let cgImage: CGImage?
         if let captureRect {
@@ -113,31 +85,43 @@ final class MegamapCaptureService {
             )
         }
 
-        let imageRep = NSBitmapImageRep(cgImage: cgImage)
-        guard let pngData = imageRep.representation(using: .png, properties: [:]) else {
-            throw NSError(
-                domain: "MegamapCaptureService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for \(display.name)."]
-            )
-        }
-
-        let timestamp = Date()
-        let fileName = "display-\(display.id)-desktop-\(desktopIndex)-\(Int(timestamp.timeIntervalSince1970)).png"
-        let fileURL = directory.appendingPathComponent(fileName)
-        try pngData.write(to: fileURL, options: .atomic)
-
-        return MegamapCaptureRecord(
+        return CapturedImagePayload(
             displayID: display.id,
             displayName: display.name,
             displayAspectRatio: captureAspectRatio(for: screen, fallbackDisplay: display),
             desktopIndex: desktopIndex,
-            capturedFrameX: captureFrame(for: screen, fallbackDisplay: display).origin.x,
-            capturedFrameY: captureFrame(for: screen, fallbackDisplay: display).origin.y,
-            capturedFrameW: captureFrame(for: screen, fallbackDisplay: display).size.width,
-            capturedFrameH: captureFrame(for: screen, fallbackDisplay: display).size.height,
+            capturedFrame: captureFrame(for: screen, fallbackDisplay: display),
+            capturedAt: Date(),
+            cgImage: cgImage
+        )
+    }
+
+    func persist(_ payload: CapturedImagePayload) throws -> MegamapCaptureRecord {
+        let directory = try capturesDirectoryURL()
+        let imageRep = NSBitmapImageRep(cgImage: payload.cgImage)
+        guard let pngData = imageRep.representation(using: .png, properties: [:]) else {
+            throw NSError(
+                domain: "MegamapCaptureService",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for \(payload.displayName)."]
+            )
+        }
+
+        let fileName = "display-\(payload.displayID)-desktop-\(payload.desktopIndex)-\(Int(payload.capturedAt.timeIntervalSince1970)).png"
+        let fileURL = directory.appendingPathComponent(fileName)
+        try pngData.write(to: fileURL, options: .atomic)
+
+        return MegamapCaptureRecord(
+            displayID: payload.displayID,
+            displayName: payload.displayName,
+            displayAspectRatio: payload.displayAspectRatio,
+            desktopIndex: payload.desktopIndex,
+            capturedFrameX: payload.capturedFrame.origin.x,
+            capturedFrameY: payload.capturedFrame.origin.y,
+            capturedFrameW: payload.capturedFrame.size.width,
+            capturedFrameH: payload.capturedFrame.size.height,
             screenshotPath: fileURL.path,
-            capturedAt: timestamp
+            capturedAt: payload.capturedAt
         )
     }
 

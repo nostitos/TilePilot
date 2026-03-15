@@ -56,8 +56,12 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
     let source: StateSourceQuality
     let lastUpdatedAt: Date
 
+    var supportsFocusedFloatToggleFallback: Bool {
+        (app == "iTerm2" || app == "iTerm") && !isMinimized && !isHidden
+    }
+
     var isRuntimeManageable: Bool {
-        hasAXReference && canMove
+        (hasAXReference && canMove) || supportsFocusedFloatToggleFallback
     }
 }
 

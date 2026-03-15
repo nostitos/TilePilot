@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct HoveredMiniWindowBubbleState: Equatable {
+    let windowID: Int
     let title: String
     let iconFrame: CGRect
 }
@@ -193,7 +194,8 @@ struct OverviewDesktopPreviewCard: View {
                         OverviewMiniWindowFrameLayer(
                             window: window,
                             canvasSize: size,
-                            isSelected: selectedWindowID == window.id
+                            isSelected: selectedWindowID == window.id,
+                            isHovered: hoveredBubble?.windowID == window.id
                         )
                     }
 
@@ -222,11 +224,6 @@ struct OverviewDesktopPreviewCard: View {
         }
         .padding(8)
         .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-        .onChange(of: model.miniMapHoverTitlesEnabled) { enabled in
-            if !enabled {
-                hoveredBubble = nil
-            }
-        }
         .zIndex(hoveredBubble == nil ? 0 : 100)
     }
 }
@@ -269,22 +266,32 @@ private struct OverviewMiniWindowFrameLayer: View {
     let window: OverviewWindowPreview
     let canvasSize: CGSize
     let isSelected: Bool
+    let isHovered: Bool
 
     var body: some View {
         let frame = OverviewMiniMapGeometry.frame(for: window, in: canvasSize)
+        let palette = MapWindowPalette.colors(
+            windowID: window.id,
+            isFloating: window.floating,
+            isRuntimeManageable: window.runtimeManageable,
+            isFocused: window.focused,
+            isSelected: isSelected
+        )
+        let baseLineWidth: CGFloat = isSelected ? 2 : 1.2
+        let lineWidth = isHovered ? baseLineWidth * 2 : baseLineWidth
 
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 4)
-                .fill(windowFillColor)
+                .fill(palette.fill)
                 .allowsHitTesting(false)
 
             RoundedRectangle(cornerRadius: 4)
-                .stroke(borderColor.opacity(window.visible ? 1 : 0.72), lineWidth: isSelected ? 2 : 1.2)
+                .stroke(palette.border.opacity(window.visible ? 1 : 0.72), lineWidth: lineWidth)
                 .allowsHitTesting(false)
 
             if window.focused {
                 Circle()
-                    .fill(Color.blue)
+                    .fill(palette.border)
                     .frame(width: 5, height: 5)
                     .padding(2)
                     .allowsHitTesting(false)
@@ -292,18 +299,6 @@ private struct OverviewMiniWindowFrameLayer: View {
         }
         .frame(width: frame.width, height: frame.height, alignment: .topLeading)
         .offset(x: frame.minX, y: frame.minY)
-    }
-
-    private var borderColor: Color {
-        if !window.runtimeManageable { return .gray }
-        return window.floating ? .orange : .blue
-    }
-
-    private var windowFillColor: Color {
-        if isSelected {
-            return Color.black.opacity(0.10)
-        }
-        return Color.black.opacity(0.05)
     }
 }
 
@@ -350,17 +345,16 @@ private struct OverviewMiniWindowIconButton: View {
         }
         .buttonStyle(.plain)
         .onContinuousHover { phase in
-            guard model.miniMapHoverTitlesEnabled else {
-                onHoverChanged(nil)
-                return
-            }
             switch phase {
             case .active:
-                model.incrementMiniMapHoverUpdates()
                 onHoverChanged(HoveredMiniWindowBubbleState(
+                    windowID: window.id,
                     title: hoverTitle,
                     iconFrame: iconFrame
                 ))
+                if model.miniMapHoverTitlesEnabled {
+                    model.incrementMiniMapHoverUpdates()
+                }
             case .ended:
                 onHoverChanged(nil)
             }

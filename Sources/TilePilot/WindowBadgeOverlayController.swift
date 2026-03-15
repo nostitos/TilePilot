@@ -55,12 +55,29 @@ final class WindowBadgeOverlayController {
                 self.scheduleOverlayUpdate(with: self.pendingBadges)
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.invalidateAndReapplyOverlays()
+            }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.invalidateAndReapplyOverlays()
+            }
+            .store(in: &cancellables)
     }
 
     private func scheduleOverlayUpdate(with badges: [WindowBadgeState]) {
         pendingBadges = badges
         let signature = makeSignature(from: badges)
-        if signature == pendingSignature || signature == appliedSignature {
+        let badgePanelsMissing = signature.showBadges && badgePanels.count != signature.badgeTargets.count
+        let outlinePanelsMissing = signature.showOutlines && outlinePanels.count != signature.outlineTargets.count
+        let needsRebuild = badgePanelsMissing || outlinePanelsMissing
+        if !needsRebuild && (signature == pendingSignature || signature == appliedSignature) {
             return
         }
         pendingSignature = signature
@@ -78,6 +95,13 @@ final class WindowBadgeOverlayController {
             delay = 0.40
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func invalidateAndReapplyOverlays() {
+        pendingSignature = nil
+        appliedSignature = nil
+        let badges = pendingBadges.isEmpty ? model.windowBadges : pendingBadges
+        scheduleOverlayUpdate(with: badges)
     }
 
     private func applyOverlayUpdate(_ badges: [WindowBadgeState]) {

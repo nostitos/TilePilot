@@ -1,5 +1,22 @@
 import AppKit
+import Combine
 import SwiftUI
+
+private final class MegamapWindow: NSWindow {
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+}
 
 @MainActor
 final class MegamapWindowController: NSWindowController, NSWindowDelegate {
@@ -13,12 +30,11 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
 
     init(model: AppModel) {
         self.model = model
-        let rootView = MegamapRootView()
-            .environmentObject(model)
+        let rootView = MegamapRootView(model: model)
         let hosting = NSHostingController(rootView: rootView)
 
         let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1600, height: 900)
-        let window = NSWindow(contentViewController: hosting)
+        let window = MegamapWindow(contentViewController: hosting)
         window.title = "Megamap"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.titleVisibility = .hidden
@@ -34,6 +50,9 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         _ = window.setFrameUsingName(PersistedWindowKeys.frameAutosaveName)
         Self.restorePersistedSize(for: window)
         window.setFrameAutosaveName(PersistedWindowKeys.frameAutosaveName)
+        window.onEscape = {
+            NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
+        }
 
         super.init(window: window)
         shouldCascadeWindows = true
@@ -47,9 +66,16 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
 
     func showAndFocus() {
         NSApp.activate(ignoringOtherApps: true)
+        window?.alphaValue = 1
         showWindow(nil)
         snapToVisibleFrame()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func hideImmediately() {
+        guard let window else { return }
+        window.alphaValue = 0
+        window.orderOut(nil)
     }
 
     func persistCurrentWindowSize() {
@@ -93,17 +119,121 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+@MainActor
+final class MegamapViewBridge: ObservableObject {
+    @Published private(set) var displaySections: [MegamapDisplaySection]
+    @Published private(set) var isRefreshing: Bool
+    @Published private(set) var screenRecordingAuthorized: Bool
+    @Published private(set) var lastActionMessage: String?
+    @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var runtimeCommandsEnabled: Bool
+    @Published private(set) var runtimeDisabledReason: String?
+
+    let model: AppModel
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init(model: AppModel) {
+        self.model = model
+        displaySections = model.megamapDisplaySections
+        isRefreshing = model.isRefreshingMegamap
+        screenRecordingAuthorized = model.megamapScreenRecordingAuthorized
+        lastActionMessage = model.megamapLastActionMessage
+        lastErrorMessage = model.megamapLastErrorMessage
+        runtimeCommandsEnabled = model.canRunYabaiRuntimeCommands
+        runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason
+
+        model.$megamapDisplaySections
+            .removeDuplicates()
+            .sink { [weak self] in self?.displaySections = $0 }
+            .store(in: &cancellables)
+        model.$isRefreshingMegamap
+            .removeDuplicates()
+            .sink { [weak self] in self?.isRefreshing = $0 }
+            .store(in: &cancellables)
+        model.$megamapScreenRecordingAuthorized
+            .removeDuplicates()
+            .sink { [weak self] in self?.screenRecordingAuthorized = $0 }
+            .store(in: &cancellables)
+        model.$megamapLastActionMessage
+            .removeDuplicates()
+            .sink { [weak self] in self?.lastActionMessage = $0 }
+            .store(in: &cancellables)
+        model.$megamapLastErrorMessage
+            .removeDuplicates()
+            .sink { [weak self] in self?.lastErrorMessage = $0 }
+            .store(in: &cancellables)
+        model.$doctorSnapshot
+            .sink { [weak self, weak model] _ in
+                guard let self else { return }
+                self.runtimeCommandsEnabled = model?.canRunYabaiRuntimeCommands ?? false
+                self.runtimeDisabledReason = model?.yabaiRuntimeControlDisabledReason
+            }
+            .store(in: &cancellables)
+    }
+
+    func rebuildSections() {
+        model.rebuildMegamapSections()
+    }
+
+    func refreshMegamap() {
+        model.refreshMegamap()
+    }
+
+    func refreshDesktop(_ desktop: MegamapDesktopSection) {
+        model.refreshMegamapDesktop(spaceIndex: desktop.desktopIndex)
+    }
+
+    func openScreenRecordingSettings() {
+        model.openMegamapScreenRecordingSettings()
+    }
+
+    func dismissMegamap() {
+        NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
+    }
+
+    func selectDesktop(_ desktop: MegamapDesktopSection) {
+        dismissMegamap()
+        let snapshot = model.latestLiveStateSnapshot ?? model.liveStateSnapshot
+        let currentSpace = snapshot.flatMap { model.activeSpaceIndex(in: $0) }
+        guard currentSpace != desktop.desktopIndex else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            self.model.focusDesktop(index: desktop.desktopIndex)
+        }
+    }
+
+    func focusWindow(_ window: OverviewWindowPreview) {
+        dismissMegamap()
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            self.model.focusWindow(windowID: window.id, desktopIndex: window.desktopIndex)
+        }
+    }
+
+    func toggleWindowFloating(_ window: OverviewWindowPreview) {
+        model.toggleWindowFloating(windowID: window.id)
+    }
+
+    func setWindowFloating(_ window: OverviewWindowPreview, shouldFloat: Bool) {
+        model.setWindowFloating(windowID: window.id, shouldFloat: shouldFloat)
+    }
+}
+
 struct MegamapRootView: View {
-    @EnvironmentObject private var model: AppModel
+    @StateObject private var bridge: MegamapViewBridge
+
+    init(model: AppModel) {
+        _bridge = StateObject(wrappedValue: MegamapViewBridge(model: model))
+    }
 
     var body: some View {
-        MegamapDashboardView()
-            .environmentObject(model)
+        MegamapDashboardView(bridge: bridge)
     }
 }
 
 private struct MegamapDashboardView: View {
-    @EnvironmentObject private var model: AppModel
+    @ObservedObject var bridge: MegamapViewBridge
 
     var body: some View {
         GeometryReader { proxy in
@@ -111,7 +241,7 @@ private struct MegamapDashboardView: View {
                 Color.black.opacity(0.46)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
+                        bridge.dismissMegamap()
                     }
 
                 content(in: proxy.size)
@@ -126,18 +256,18 @@ private struct MegamapDashboardView: View {
                 transaction.animation = nil
             }
         }
-        .animation(nil, value: model.megamapDisplaySections)
-        .animation(nil, value: model.isRefreshingMegamap)
-        .animation(nil, value: model.megamapLastActionMessage)
-        .animation(nil, value: model.megamapLastErrorMessage)
+        .animation(nil, value: bridge.displaySections)
+        .animation(nil, value: bridge.isRefreshing)
+        .animation(nil, value: bridge.lastActionMessage)
+        .animation(nil, value: bridge.lastErrorMessage)
         .task {
-            model.rebuildMegamapSections()
+            bridge.rebuildSections()
         }
     }
 
     @ViewBuilder
     private func content(in size: CGSize) -> some View {
-        if model.megamapDisplaySections.isEmpty {
+        if bridge.displaySections.isEmpty {
             emptyState
         } else {
             let fitted = fittedCompositeSize(in: size)
@@ -146,14 +276,11 @@ private struct MegamapDashboardView: View {
                     inlineControls
                 }
                 VStack(spacing: 1) {
-                    ForEach(model.megamapDisplaySections) { display in
+                    ForEach(bridge.displaySections) { display in
                         MegamapDisplayRow(display: display) { desktop in
-                            model.focusDesktop(index: desktop.desktopIndex)
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(350))
-                                model.rebuildMegamapSections()
-                            }
+                            bridge.selectDesktop(desktop)
                         }
+                        .environmentObject(bridge)
                     }
                 }
                 .frame(width: fitted.width, height: fitted.height)
@@ -169,23 +296,23 @@ private struct MegamapDashboardView: View {
 
     private var emptyState: some View {
         VStack(spacing: 14) {
-            Text(model.megamapScreenRecordingAuthorized ? "No Megamap capture yet" : "Screen Recording is off")
+            Text(bridge.screenRecordingAuthorized ? "No Megamap capture yet" : "Screen Recording is off")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
-            Text(model.megamapScreenRecordingAuthorized ? "Use Refresh to capture all desktops." : "Megamap is showing the synthetic fallback until macOS allows screenshots for TilePilot.")
+            Text(bridge.screenRecordingAuthorized ? "Use Refresh to capture all desktops." : "Megamap is showing the synthetic fallback until macOS allows screenshots for TilePilot.")
                 .font(.body)
                 .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
             HStack(spacing: 10) {
                 Button("Refresh") {
-                    model.refreshMegamap()
+                    bridge.refreshMegamap()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isRefreshingMegamap)
+                .disabled(bridge.isRefreshing)
 
-                if !model.megamapScreenRecordingAuthorized {
+                if !bridge.screenRecordingAuthorized {
                     Button("Open Screen Recording Settings") {
-                        model.openMegamapScreenRecordingSettings()
+                        bridge.openScreenRecordingSettings()
                     }
                     .buttonStyle(.bordered)
                 }
@@ -197,7 +324,7 @@ private struct MegamapDashboardView: View {
 
     private func totalCompositeHeight(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return 0 }
-        return model.megamapDisplaySections.reduce(CGFloat.zero) { partial, display in
+        return bridge.displaySections.reduce(CGFloat.zero) { partial, display in
             let rowHeight = megamapDisplayHeight(for: display, width: width)
             let separator: CGFloat = partial == 0 ? 0 : 1
             return partial + separator + rowHeight
@@ -227,33 +354,33 @@ private struct MegamapDashboardView: View {
 
     private func megamapDisplayHeight(for display: MegamapDisplaySection, width: CGFloat) -> CGFloat {
         let desktopAspect = max(display.desktops.first?.displayAspectRatio ?? 1.6, 0.1)
-        if display.desktops.count == 4 {
-            let singleRowHeight = width / CGFloat(2.0 * desktopAspect)
-            return (singleRowHeight * 2) + 1
-        }
-        let rowAspect = CGFloat(Double(max(display.desktops.count, 1)) * desktopAspect)
-        return width / rowAspect
+        let packing = MegamapDesktopPacking.rows(for: display.desktops)
+        let maxColumns = max(MegamapDesktopPacking.maxColumns(for: packing), 1)
+        let rowCount = max(packing.count, 1)
+        let tileWidth = (width - CGFloat(maxColumns - 1) * MegamapDesktopPacking.gap) / CGFloat(maxColumns)
+        let rowHeight = tileWidth / desktopAspect
+        return (rowHeight * CGFloat(rowCount)) + (CGFloat(rowCount - 1) * MegamapDesktopPacking.gap)
     }
 
     private var inlineControls: some View {
         HStack(spacing: 10) {
-            if !model.megamapScreenRecordingAuthorized {
+            if !bridge.screenRecordingAuthorized {
                 Button("Open Screen Recording Settings") {
-                    model.openMegamapScreenRecordingSettings()
+                    bridge.openScreenRecordingSettings()
                 }
                 .buttonStyle(MegamapHudButtonStyle(prominent: false))
             }
 
-            Button(model.isRefreshingMegamap ? "Refreshing…" : "Refresh") {
-                model.refreshMegamap()
+            Button(bridge.isRefreshing ? "Refreshing…" : "Refresh") {
+                bridge.refreshMegamap()
             }
             .buttonStyle(MegamapHudButtonStyle(prominent: true))
-            .disabled(model.isRefreshingMegamap)
+            .disabled(bridge.isRefreshing)
         }
     }
 
     private var controlsAboveComposite: Bool {
-        model.megamapDisplaySections.contains { $0.desktops.count == 4 }
+        bridge.displaySections.contains { MegamapDesktopPacking.rows(for: $0.desktops).count == 2 && MegamapDesktopPacking.maxColumns(for: MegamapDesktopPacking.rows(for: $0.desktops)) == 2 }
     }
 
     private var inlineControlsReservedHeight: CGFloat {
@@ -266,7 +393,7 @@ private struct MegamapDashboardView: View {
 
     private var statusOverlay: some View {
         VStack(spacing: 8) {
-            if !model.megamapScreenRecordingAuthorized {
+            if !bridge.screenRecordingAuthorized {
                 MegamapHudNotice(
                     text: "Screen Recording is off. Showing the synthetic preview instead of real screenshots.",
                     foreground: .white,
@@ -274,19 +401,19 @@ private struct MegamapDashboardView: View {
                 )
             }
 
-            if model.isRefreshingMegamap {
+            if bridge.isRefreshing {
                 MegamapHudNotice(
                     text: "Refreshing Megamap…",
                     foreground: .white,
                     background: Color.blue.opacity(0.88)
                 )
-            } else if let error = model.megamapLastErrorMessage {
+            } else if let error = bridge.lastErrorMessage {
                 MegamapHudNotice(
                     text: error,
                     foreground: .white,
                     background: Color.red.opacity(0.88)
                 )
-            } else if let action = model.megamapLastActionMessage {
+            } else if let action = bridge.lastActionMessage {
                 MegamapHudNotice(
                     text: action,
                     foreground: .white,
@@ -305,24 +432,29 @@ private struct MegamapDisplayRow: View {
     let onSelect: (MegamapDesktopSection) -> Void
 
     var body: some View {
-        Group {
-            if usesTwoByTwoGrid {
-                VStack(spacing: 1) {
-                    ForEach(twoByTwoRows.indices, id: \.self) { rowIndex in
-                        HStack(spacing: 1) {
-                            ForEach(twoByTwoRows[rowIndex]) { desktop in
-                                tile(for: desktop)
-                            }
+        let rows = MegamapDesktopPacking.rows(for: display.desktops)
+        let maxColumns = max(MegamapDesktopPacking.maxColumns(for: rows), 1)
+
+        return GeometryReader { proxy in
+            let tileWidth = max(
+                0,
+                (proxy.size.width - (CGFloat(maxColumns - 1) * MegamapDesktopPacking.gap)) / CGFloat(maxColumns)
+            )
+
+            VStack(spacing: MegamapDesktopPacking.gap) {
+                ForEach(rows.indices, id: \.self) { rowIndex in
+                    HStack(spacing: MegamapDesktopPacking.gap) {
+                        Spacer(minLength: 0)
+                        ForEach(rows[rowIndex]) { desktop in
+                            tile(for: desktop)
+                                .frame(width: tileWidth)
                         }
-                    }
-                }
-            } else {
-                HStack(spacing: 1) {
-                    ForEach(display.desktops) { desktop in
-                        tile(for: desktop)
+                        Spacer(minLength: 0)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(compositeAspectRatio, contentMode: .fit)
@@ -337,32 +469,53 @@ private struct MegamapDisplayRow: View {
         .aspectRatio(max(desktop.displayAspectRatio, 0.1), contentMode: .fit)
     }
 
-    private var usesTwoByTwoGrid: Bool {
-        display.desktops.count == 4
-    }
-
-    private var twoByTwoRows: [[MegamapDesktopSection]] {
-        stride(from: 0, to: display.desktops.count, by: 2).map { start in
-            Array(display.desktops[start..<min(start + 2, display.desktops.count)])
-        }
-    }
-
     private var compositeAspectRatio: CGFloat {
         let desktopAspect = max(display.desktops.first?.displayAspectRatio ?? 1.6, 0.1)
-        if usesTwoByTwoGrid {
-            let rowHeight = 1.0 / (2.0 * desktopAspect)
-            let totalHeight = (rowHeight * 2.0) + (1.0 / 1000.0)
-            return CGFloat(1.0 / totalHeight)
+        let rows = MegamapDesktopPacking.rows(for: display.desktops)
+        let maxColumns = max(MegamapDesktopPacking.maxColumns(for: rows), 1)
+        let rowCount = max(rows.count, 1)
+        let tileWidth = 1.0 / CGFloat(maxColumns)
+        let rowHeight = tileWidth / CGFloat(desktopAspect)
+        let totalHeight = (rowHeight * CGFloat(rowCount)) + ((CGFloat(rowCount - 1) * MegamapDesktopPacking.gap) / 1000.0)
+        return 1.0 / totalHeight
+    }
+}
+
+private enum MegamapDesktopPacking {
+    static let gap: CGFloat = 1
+
+    static func rows(for desktops: [MegamapDesktopSection]) -> [[MegamapDesktopSection]] {
+        guard !desktops.isEmpty else { return [] }
+        let rowCount = Int(ceil(Double(desktops.count) / 3.0))
+        let baseCount = desktops.count / rowCount
+        let remainder = desktops.count % rowCount
+
+        var rows: [[MegamapDesktopSection]] = []
+        rows.reserveCapacity(rowCount)
+
+        var cursor = 0
+        for rowIndex in 0..<rowCount {
+            let count = baseCount + (rowIndex < remainder ? 1 : 0)
+            guard count > 0 else { continue }
+            let nextCursor = min(cursor + count, desktops.count)
+            rows.append(Array(desktops[cursor..<nextCursor]))
+            cursor = nextCursor
         }
-        let count = max(display.desktops.count, 1)
-        return CGFloat(Double(count) * desktopAspect)
+
+        return rows
+    }
+
+    static func maxColumns(for rows: [[MegamapDesktopSection]]) -> Int {
+        rows.map(\.count).max() ?? 1
     }
 }
 
 private struct MegamapDesktopTile: View {
-    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var bridge: MegamapViewBridge
     let desktop: MegamapDesktopSection
     let onSelect: () -> Void
+    @State private var isHovered = false
+    @State private var hoverOverrideMessage: String?
 
     var body: some View {
         Group {
@@ -375,7 +528,10 @@ private struct MegamapDesktopTile: View {
                             preview: preview,
                             onDesktopSelect: onSelect,
                             onWindowSelect: { window in
-                                model.focusWindow(windowID: window.id, desktopIndex: window.desktopIndex)
+                                bridge.focusWindow(window)
+                            },
+                            onWindowHoverMessageChange: { message in
+                                hoverOverrideMessage = message
                             }
                         )
                     }
@@ -389,7 +545,10 @@ private struct MegamapDesktopTile: View {
                             preview: preview,
                             onDesktopSelect: onSelect,
                             onWindowSelect: { window in
-                                model.focusWindow(windowID: window.id, desktopIndex: window.desktopIndex)
+                                bridge.focusWindow(window)
+                            },
+                            onWindowHoverMessageChange: { message in
+                                hoverOverrideMessage = message
                             }
                         )
                     }
@@ -402,11 +561,9 @@ private struct MegamapDesktopTile: View {
         }
     }
 
-    private var overlayMessage: String? {
-        if desktop.contentMode != .screenshot {
-            return "#\(desktop.desktopIndex)"
-        }
-        return nil
+    private var hoverMessage: String? {
+        guard isHovered else { return nil }
+        return hoverOverrideMessage ?? "Jump to #\(desktop.desktopIndex)"
     }
 
     private var unavailablePlaceholder: some View {
@@ -424,12 +581,8 @@ private struct MegamapDesktopTile: View {
             tileChrome {
                 switch desktop.contentMode {
                 case .screenshot:
-                    if let image = desktop.screenshotPath.flatMap(NSImage.init(contentsOfFile:)) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    if let screenshotPath = desktop.screenshotPath {
+                        MegamapCachedScreenshotView(path: screenshotPath)
                     } else {
                         unavailablePlaceholder
                     }
@@ -441,7 +594,6 @@ private struct MegamapDesktopTile: View {
             }
         }
         .buttonStyle(.plain)
-        .help("Switch to Desktop #\(desktop.desktopIndex).")
     }
 
     private func tileChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -455,26 +607,54 @@ private struct MegamapDesktopTile: View {
                     .frame(height: 2)
             }
         }
-        .overlay(alignment: .bottomLeading) {
-            if let message = overlayMessage {
+        .overlay(alignment: .top) {
+            if let message = hoverMessage {
                 Text(message)
-                    .font(.caption2.weight(.medium))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(Color.black.opacity(0.7), in: Capsule())
-                    .padding(6)
+                    .padding(.top, 8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if desktop.contentMode == .screenshot && bridge.screenRecordingAuthorized {
+                Button {
+                    bridge.refreshDesktop(desktop)
+                } label: {
+                    Image(systemName: bridge.isRefreshing ? "arrow.clockwise.circle.fill" : "arrow.clockwise.circle")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(12)
+                        .background(Color.black.opacity(0.72), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(bridge.isRefreshing)
+                .onHover { isHovering in
+                    hoverOverrideMessage = isHovering ? "Refresh #\(desktop.desktopIndex)" : nil
+                }
+                .padding(6)
             }
         }
         .contentShape(Rectangle())
+        .onHover { isHovering in
+            isHovered = isHovering
+            if !isHovering {
+                hoverOverrideMessage = nil
+            }
+        }
     }
 }
 
 private struct MegamapSyntheticDesktopCanvas: View {
-    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var bridge: MegamapViewBridge
     let preview: OverviewDesktopPreview
     let onDesktopSelect: () -> Void
     let onWindowSelect: (OverviewWindowPreview) -> Void
+    let onWindowHoverMessageChange: (String?) -> Void
+    @State private var hoveredWindowID: Int?
 
     var body: some View {
         GeometryReader { proxy in
@@ -486,11 +666,19 @@ private struct MegamapSyntheticDesktopCanvas: View {
 
                 ForEach(preview.windows) { window in
                     let frame = OverviewMiniMapGeometry.frame(for: window, in: size)
+                    let palette = MapWindowPalette.colors(
+                        windowID: window.id,
+                        isFloating: window.floating,
+                        isRuntimeManageable: window.runtimeManageable,
+                        isFocused: window.focused
+                    )
+                    let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
+                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 2 : baseLineWidth
                     Rectangle()
-                        .fill(Color.black.opacity(0.05))
+                        .fill(Color.clear)
                         .overlay(
                             Rectangle()
-                                .stroke(borderColor(for: window), lineWidth: window.focused ? 2 : 1.2)
+                                .stroke(palette.border.opacity(window.visible ? 1 : 0.72), lineWidth: lineWidth)
                         )
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
@@ -500,8 +688,8 @@ private struct MegamapSyntheticDesktopCanvas: View {
                     let frame = OverviewMiniMapGeometry.frame(for: window, in: size)
                     let iconSize = wireframeIconDimension(for: frame.size)
                     let iconFrame = OverviewMiniMapGeometry.iconFrame(for: window, iconSize: iconSize, inset: 4, in: size)
-                    let runtimeEnabled = model.canRunYabaiRuntimeCommands
-                    let runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
+                    let runtimeEnabled = bridge.runtimeCommandsEnabled
+                    let runtimeDisabledReason = bridge.runtimeDisabledReason ?? "Unavailable"
                     let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
                     Button {
                         onWindowSelect(window)
@@ -522,28 +710,31 @@ private struct MegamapSyntheticDesktopCanvas: View {
                         .frame(width: iconFrame.width, height: iconFrame.height)
                     }
                     .buttonStyle(.plain)
-                    .help(hoverTitle)
+                    .onHover { isHovering in
+                        hoveredWindowID = isHovering ? window.id : (hoveredWindowID == window.id ? nil : hoveredWindowID)
+                        onWindowHoverMessageChange(isHovering ? "Jump to \"\(hoverTitle)\"" : nil)
+                    }
                     .offset(x: iconFrame.minX, y: iconFrame.minY)
                     .contextMenu {
                         Button("Focus Window") {
-                            model.focusWindow(windowID: window.id, desktopIndex: window.desktopIndex)
+                            bridge.focusWindow(window)
                         }
                         .disabled(!runtimeEnabled)
 
                         Divider()
 
                         Button(window.floating ? "Set Tiled" : "Set Floating") {
-                            model.toggleWindowFloating(windowID: window.id)
+                            bridge.toggleWindowFloating(window)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable)
 
                         Button("Set Floating") {
-                            model.setWindowFloating(windowID: window.id, shouldFloat: true)
+                            bridge.setWindowFloating(window, shouldFloat: true)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || window.floating)
 
                         Button("Set Tiled") {
-                            model.setWindowFloating(windowID: window.id, shouldFloat: false)
+                            bridge.setWindowFloating(window, shouldFloat: false)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
 
@@ -561,11 +752,6 @@ private struct MegamapSyntheticDesktopCanvas: View {
         .clipped()
     }
 
-    private func borderColor(for window: OverviewWindowPreview) -> Color {
-        if !window.runtimeManageable { return .gray }
-        return window.floating ? .orange : .blue
-    }
-
     private func wireframeIconDimension(for size: CGSize) -> CGFloat {
         let base = min(size.width, size.height) * 0.72 * 1.5
         return max(18, min(40, base))
@@ -573,12 +759,14 @@ private struct MegamapSyntheticDesktopCanvas: View {
 }
 
 private struct MegamapMergedDesktopCanvas: View {
-    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var bridge: MegamapViewBridge
 
     let desktop: MegamapDesktopSection
     let preview: OverviewDesktopPreview
     let onDesktopSelect: () -> Void
     let onWindowSelect: (OverviewWindowPreview) -> Void
+    let onWindowHoverMessageChange: (String?) -> Void
+    @State private var hoveredWindowID: Int?
 
     var body: some View {
         GeometryReader { proxy in
@@ -590,11 +778,19 @@ private struct MegamapMergedDesktopCanvas: View {
 
                 ForEach(preview.windows) { window in
                     let frame = MegamapOverlayGeometry.frame(for: window, desktop: desktop, in: size)
+                    let palette = MapWindowPalette.colors(
+                        windowID: window.id,
+                        isFloating: window.floating,
+                        isRuntimeManageable: window.runtimeManageable,
+                        isFocused: window.focused
+                    )
+                    let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
+                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 2 : baseLineWidth
                     Rectangle()
-                        .fill(Color.black.opacity(0.05))
+                        .fill(Color.clear)
                         .overlay(
                             Rectangle()
-                                .stroke(borderColor(for: window), lineWidth: window.focused ? 2 : 1.2)
+                                .stroke(palette.border.opacity(window.visible ? 1 : 0.72), lineWidth: lineWidth)
                         )
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
@@ -604,8 +800,8 @@ private struct MegamapMergedDesktopCanvas: View {
                     let frame = MegamapOverlayGeometry.frame(for: window, desktop: desktop, in: size)
                     let iconSize = wireframeIconDimension(for: frame.size)
                     let iconFrame = MegamapOverlayGeometry.iconFrame(for: window, desktop: desktop, iconSize: iconSize, inset: 4, in: size)
-                    let runtimeEnabled = model.canRunYabaiRuntimeCommands
-                    let runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
+                    let runtimeEnabled = bridge.runtimeCommandsEnabled
+                    let runtimeDisabledReason = bridge.runtimeDisabledReason ?? "Unavailable"
                     let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
                     Button {
                         onWindowSelect(window)
@@ -627,28 +823,31 @@ private struct MegamapMergedDesktopCanvas: View {
                         .opacity(window.visible ? 1 : 0.75)
                     }
                     .buttonStyle(.plain)
-                    .help(hoverTitle)
+                    .onHover { isHovering in
+                        hoveredWindowID = isHovering ? window.id : (hoveredWindowID == window.id ? nil : hoveredWindowID)
+                        onWindowHoverMessageChange(isHovering ? "Jump to \"\(hoverTitle)\"" : nil)
+                    }
                     .offset(x: iconFrame.minX, y: iconFrame.minY)
                     .contextMenu {
                         Button("Focus Window") {
-                            model.focusWindow(windowID: window.id, desktopIndex: window.desktopIndex)
+                            bridge.focusWindow(window)
                         }
                         .disabled(!runtimeEnabled)
 
                         Divider()
 
                         Button(window.floating ? "Set Tiled" : "Set Floating") {
-                            model.toggleWindowFloating(windowID: window.id)
+                            bridge.toggleWindowFloating(window)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable)
 
                         Button("Set Floating") {
-                            model.setWindowFloating(windowID: window.id, shouldFloat: true)
+                            bridge.setWindowFloating(window, shouldFloat: true)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || window.floating)
 
                         Button("Set Tiled") {
-                            model.setWindowFloating(windowID: window.id, shouldFloat: false)
+                            bridge.setWindowFloating(window, shouldFloat: false)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
 
@@ -668,26 +867,46 @@ private struct MegamapMergedDesktopCanvas: View {
 
     @ViewBuilder
     private var desktopBackground: some View {
-        if let path = desktop.screenshotPath,
-           let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        if let path = desktop.screenshotPath {
+            MegamapCachedScreenshotView(path: path)
         } else {
             Color(white: 0.96)
         }
     }
 
-    private func borderColor(for window: OverviewWindowPreview) -> Color {
-        if !window.runtimeManageable { return .gray }
-        return window.floating ? .orange : .blue
-    }
-
     private func wireframeIconDimension(for size: CGSize) -> CGFloat {
         let base = min(size.width, size.height) * 0.72 * 1.5
         return max(18, min(40, base))
+    }
+}
+
+private struct MegamapCachedScreenshotView: View {
+    let path: String
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        GeometryReader { proxy in
+            Group {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    Color(white: 0.96)
+                }
+            }
+            .task(id: cacheTaskID(for: proxy.size)) {
+                guard proxy.size.width > 0, proxy.size.height > 0 else { return }
+                image = MegamapScreenshotCache.shared.image(for: path, idealSize: proxy.size)
+            }
+        }
+    }
+
+    private func cacheTaskID(for size: CGSize) -> String {
+        "\(path)|\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
     }
 }
 

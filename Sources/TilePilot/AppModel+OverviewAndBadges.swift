@@ -25,17 +25,41 @@ extension AppModel {
         liveStateSnapshot?.windows.first(where: \.focused)
     }
 
-    func isOverviewExcludedWindow(_ window: WindowState) -> Bool {
-        guard window.app == "zoom.us" else { return false }
-        guard !window.canResize else { return false }
-        let tiny = window.frameW <= 140 || window.frameH <= 60
-        guard tiny else { return false }
-        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalizedTitle.isEmpty || normalizedTitle == "window"
+    func isOverviewExcludedWindow(_ window: WindowState, in snapshot: LiveStateSnapshot) -> Bool {
+        if window.app == "zoom.us" {
+            guard !window.canResize else { return false }
+            let tiny = window.frameW <= 140 || window.frameH <= 60
+            guard tiny else { return false }
+            let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalizedTitle.isEmpty || normalizedTitle == "window"
+        }
+
+        if !window.isVisible,
+           !window.isMinimized,
+           !window.isHidden,
+           !window.hasAXReference,
+           !window.canMove,
+           !window.canResize {
+            let hasVisibleSiblingOnSameDesktop = snapshot.windows.contains { sibling in
+                sibling.id != window.id &&
+                    sibling.pid == window.pid &&
+                    sibling.space == window.space &&
+                    sibling.isVisible &&
+                    !sibling.isMinimized &&
+                    !sibling.isHidden
+            }
+            if hasVisibleSiblingOnSameDesktop {
+                return true
+            }
+        }
+
+        return false
     }
 
     func buildOverviewPreviews(from snapshot: LiveStateSnapshot) -> [OverviewDisplayPreview] {
-        OverviewPreviewBuilder.build(snapshot: snapshot, isExcluded: isOverviewExcludedWindow)
+        OverviewPreviewBuilder.build(snapshot: snapshot) { window in
+            self.isOverviewExcludedWindow(window, in: snapshot)
+        }
     }
 
     var canControlFocusedWindow: Bool {

@@ -63,23 +63,19 @@ extension AppModel {
         guard let window = focusableWindow(windowID: windowID) else { return }
         Task { [weak self] in
             guard let self else { return }
-            let focus = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: focus)
-            }
-            guard focus.isSuccess else {
-                await MainActor.run {
-                    self.lastErrorMessage = "Could not focus \(window.app)."
-                    self.lastActionMessage = nil
-                }
+            let focused = await self.focusWindowWithRestore(windowID: windowID, knownWindow: window)
+            guard focused else {
                 return
             }
             await MainActor.run {
                 self.lastActionMessage = "Focused \(window.app)."
                 self.lastErrorMessage = nil
             }
+            self.scheduleMegamapDestinationCaptureIfNeeded(
+                spaceIndex: window.space,
+                delayMilliseconds: 420,
+                minimumAgeSeconds: 0.0
+            )
             await self.refreshLiveState()
         }
     }
@@ -106,17 +102,8 @@ extension AppModel {
                 try? await Task.sleep(for: .milliseconds(180))
             }
 
-            let focus = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
-            )
-            await MainActor.run {
-                self.appendCommandLog(from: focus)
-            }
-            guard focus.isSuccess else {
-                await MainActor.run {
-                    self.lastErrorMessage = "Could not focus \(window.app)."
-                    self.lastActionMessage = nil
-                }
+            let focused = await self.focusWindowWithRestore(windowID: windowID, knownWindow: window)
+            guard focused else {
                 return
             }
 
@@ -124,6 +111,11 @@ extension AppModel {
                 self.lastActionMessage = "Focused \(window.app)."
                 self.lastErrorMessage = nil
             }
+            self.scheduleMegamapDestinationCaptureIfNeeded(
+                spaceIndex: desktopIndex,
+                delayMilliseconds: 420,
+                minimumAgeSeconds: 0.0
+            )
             await self.refreshLiveState()
         }
     }
@@ -267,12 +259,30 @@ extension AppModel {
             )
             await MainActor.run {
                 self.appendCommandLog(from: toggle)
-                if !toggle.isSuccess {
+            }
+
+            let toggled: Bool
+            if toggle.isSuccess {
+                toggled = true
+            } else if window.supportsFocusedFloatToggleFallback {
+                toggled = await self.setWindowFloatingUsingFocusedFallback(
+                    window: window
+                )
+            } else {
+                await MainActor.run {
                     self.lastErrorMessage = shouldFloat ? "Failed to set window to floating." : "Failed to set window to tiled."
                     self.lastActionMessage = nil
                 }
+                return
             }
-            guard toggle.isSuccess else { return }
+
+            guard toggled else {
+                await MainActor.run {
+                    self.lastErrorMessage = shouldFloat ? "Failed to set window to floating." : "Failed to set window to tiled."
+                    self.lastActionMessage = nil
+                }
+                return
+            }
 
             let foregroundPolicyEnabled = self.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
             if shouldFloat && (bringToFrontOnFloat || self.raiseOnFloatToggleEnabled || foregroundPolicyEnabled) {
@@ -298,6 +308,32 @@ extension AppModel {
             }
             await self.refreshLiveState()
         }
+    }
+
+    private func setWindowFloatingUsingFocusedFallback(window: WindowState) async -> Bool {
+        if let currentSpace = await queryCurrentFocusedSpaceIndex(),
+           currentSpace != window.space {
+            let switched = await focusDesktopInternal(
+                index: window.space,
+                updateMessages: false,
+                megamapCapturePolicy: .incremental
+            )
+            guard switched else { return false }
+            try? await Task.sleep(for: .milliseconds(180))
+        }
+
+        let focused = await focusWindowWithRestore(windowID: window.id, knownWindow: window)
+        guard focused else { return false }
+
+        let toggleFocused = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--toggle", "float"], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: toggleFocused)
+        }
+        guard toggleFocused.isSuccess else { return false }
+
+        return true
     }
 
     func openWindowBehaviorSettings() {
@@ -389,9 +425,6 @@ extension AppModel {
             self.appendCommandLog(from: result)
         }
         if result.isSuccess {
-            if megamapCapturePolicy == .incremental {
-                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index)
-            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index)."
@@ -402,9 +435,6 @@ extension AppModel {
         }
 
         if await self.focusAnyWindowOnDesktop(index: index) {
-            if megamapCapturePolicy == .incremental {
-                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index)
-            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index)."
@@ -416,9 +446,6 @@ extension AppModel {
 
         if self.isScriptingAdditionDesktopFocusFailure(result),
            self.triggerMissionControlDesktopShortcut(index: index) {
-            if megamapCapturePolicy == .incremental {
-                scheduleMegamapDestinationCaptureIfNeeded(spaceIndex: index, delayMilliseconds: 220)
-            }
             if updateMessages {
                 await MainActor.run {
                     self.lastActionMessage = "Switched to Desktop \(index) using macOS shortcut fallback."
@@ -607,11 +634,217 @@ extension AppModel {
             lastActionMessage = nil
             return nil
         }
-        guard let window = liveStateSnapshot?.windows.first(where: { $0.id == windowID }) else {
+        guard let window = (latestLiveStateSnapshot ?? liveStateSnapshot)?.windows.first(where: { $0.id == windowID }) else {
             lastErrorMessage = "Window is no longer available."
             lastActionMessage = nil
             return nil
         }
         return window
+    }
+
+    private func focusWindowWithRestore(windowID: Int, knownWindow: WindowState) async -> Bool {
+        let focus = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: focus)
+        }
+        if focus.isSuccess {
+            return true
+        }
+
+        if await focusWindowUsingAppScriptFallback(knownWindow) {
+            return true
+        }
+
+        if focusWindowUsingAccessibilityFallback(knownWindow) {
+            return true
+        }
+
+        let latestWindow = (latestLiveStateSnapshot ?? liveStateSnapshot)?.windows.first(where: { $0.id == windowID }) ?? knownWindow
+        guard latestWindow.isMinimized else {
+            await MainActor.run {
+                self.lastErrorMessage = "Could not focus \(knownWindow.app)."
+                self.lastActionMessage = nil
+            }
+            return false
+        }
+
+        let restore = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--deminimize", String(windowID)], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: restore)
+        }
+
+        guard restore.isSuccess else {
+            await MainActor.run {
+                self.lastErrorMessage = "Could not restore minimized window for \(knownWindow.app)."
+                self.lastActionMessage = nil
+            }
+            return false
+        }
+
+        let refocus = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: refocus)
+        }
+
+        if refocus.isSuccess {
+            return true
+        }
+
+        if await focusWindowUsingAppScriptFallback(latestWindow) {
+            return true
+        }
+
+        if focusWindowUsingAccessibilityFallback(latestWindow) {
+            return true
+        }
+
+        await MainActor.run {
+            self.lastErrorMessage = "Could not focus restored window for \(knownWindow.app)."
+            self.lastActionMessage = nil
+        }
+        return false
+    }
+
+    private func focusWindowUsingAppScriptFallback(_ window: WindowState) async -> Bool {
+        let scriptLines: [String]
+        switch window.app {
+        case "iTerm2":
+            scriptLines = [
+                "tell application \"iTerm2\" to activate",
+                "tell application \"iTerm2\" to select (first window whose id is \(window.id))"
+            ]
+        case "Notes":
+            scriptLines = [
+                "tell application \"Notes\" to activate",
+                "tell application \"Notes\" to set index of window id \(window.id) to 1"
+            ]
+        default:
+            return false
+        }
+
+        var args: [String] = []
+        for line in scriptLines {
+            args.append("-e")
+            args.append(line)
+        }
+
+        let result = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/osascript", args, timeout: 2.0)
+        )
+        await MainActor.run {
+            appendCommandLog(from: result)
+        }
+
+        guard result.isSuccess else {
+            return false
+        }
+
+        try? await Task.sleep(for: .milliseconds(120))
+        let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName
+        return frontApp == window.app
+    }
+
+    private func focusWindowUsingAccessibilityFallback(_ window: WindowState) -> Bool {
+        let appPID = pid_t(window.pid)
+        NSRunningApplication(processIdentifier: appPID)?.activate(options: [.activateIgnoringOtherApps])
+
+        let appElement = AXUIElementCreateApplication(appPID)
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty else {
+            return false
+        }
+
+        guard let targetWindow = matchingAXWindow(for: window, in: windows) else {
+            return false
+        }
+
+        if window.isMinimized || axBoolValue(targetWindow, kAXMinimizedAttribute as CFString) == true {
+            _ = AXUIElementSetAttributeValue(targetWindow, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+
+        let raised = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString) == .success
+        let mainSet = AXUIElementSetAttributeValue(targetWindow, kAXMainAttribute as CFString, kCFBooleanTrue) == .success
+        let focusedSet = AXUIElementSetAttributeValue(targetWindow, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
+
+        let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        return raised || mainSet || focusedSet || frontmostPID == Int(appPID)
+    }
+
+    private func matchingAXWindow(for window: WindowState, in windows: [AXUIElement]) -> AXUIElement? {
+        let wantedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !wantedTitle.isEmpty,
+           let byTitle = windows.first(where: { axStringValue($0, kAXTitleAttribute as CFString) == wantedTitle }) {
+            return byTitle
+        }
+
+        let wantedFrame = CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH)
+        if let byFrame = windows
+            .compactMap({ element -> (AXUIElement, CGFloat)? in
+                guard let frame = axFrameValue(element) else { return nil }
+                let delta =
+                    abs(frame.origin.x - wantedFrame.origin.x) +
+                    abs(frame.origin.y - wantedFrame.origin.y) +
+                    abs(frame.size.width - wantedFrame.size.width) +
+                    abs(frame.size.height - wantedFrame.size.height)
+                return (element, delta)
+            })
+            .min(by: { $0.1 < $1.1 })?
+            .0 {
+            return byFrame
+        }
+
+        if let focused = windows.first(where: { axBoolValue($0, kAXFocusedAttribute as CFString) == true }) {
+            return focused
+        }
+
+        return windows.first
+    }
+
+    private func axStringValue(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        return value as? String
+    }
+
+    private func axBoolValue(_ element: AXUIElement, _ attribute: CFString) -> Bool? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        if let number = value as? NSNumber {
+            return number.boolValue
+        }
+        return nil
+    }
+
+    private func axFrameValue(_ element: AXUIElement) -> CGRect? {
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let positionValue = positionRef,
+              let sizeValue = sizeRef
+        else {
+            return nil
+        }
+
+        var point = CGPoint.zero
+        var size = CGSize.zero
+        guard CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID(),
+              AXValueGetValue(positionValue as! AXValue, .cgPoint, &point),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        else {
+            return nil
+        }
+
+        return CGRect(origin: point, size: size)
     }
 }

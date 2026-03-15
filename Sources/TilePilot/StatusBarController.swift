@@ -613,7 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func hideMegamapWindow() {
-        megamapWindowController?.window?.orderOut(nil)
+        megamapWindowController?.hideImmediately()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

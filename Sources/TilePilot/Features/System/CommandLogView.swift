@@ -90,7 +90,7 @@ struct CommandLogView: View {
         }
 
         if command.contains("yabai"), stderr.contains("no such file or directory") {
-            return "yabai is not installed yet. Use System -> Install Dependencies."
+            return "yabai is not installed yet. Use System -> Install TilePilot Helpers."
         }
 
         if command.contains("yabai"), stderr.contains("could not connect") {

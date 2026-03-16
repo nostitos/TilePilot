@@ -94,8 +94,9 @@ extension AppModel {
                     self.lastSetupInstallerURL = scriptURL
                     self.appendCommandLog(from: openResult)
                     if openResult.isSuccess {
-                        self.lastActionMessage = "Opened setup installer in Terminal."
+                        self.lastActionMessage = "Opened TilePilot Helper installer in Terminal."
                         self.lastErrorMessage = nil
+                        self.scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.5)
                     } else {
                         self.lastErrorMessage = "Failed to open installer in Terminal. Try opening \(scriptURL.path) manually."
                         self.lastActionMessage = nil
@@ -111,38 +112,9 @@ extension AppModel {
     }
 
     func runScriptingAdditionRepairInTerminal() {
-        guard !isLaunchingScriptingAdditionFix else { return }
         acknowledgeInitialStatusIfNeeded()
-        isLaunchingScriptingAdditionFix = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isLaunchingScriptingAdditionFix = false } }
-
-            do {
-                let scriptURL = try self.bootstrapService.prepareScriptingAdditionRepairScript()
-                let openResult = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/open", ["-a", "Terminal", scriptURL.path], timeout: 3.0)
-                )
-
-                await MainActor.run {
-                    self.lastScriptingAdditionRepairURL = scriptURL
-                    self.appendCommandLog(from: openResult)
-                    if openResult.isSuccess {
-                        self.lastActionMessage = "Opened scripting addition repair in Terminal."
-                        self.lastErrorMessage = nil
-                    } else {
-                        self.lastErrorMessage = "Failed to open scripting addition repair in Terminal. Try opening \(scriptURL.path) manually."
-                        self.lastActionMessage = nil
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Failed to prepare scripting addition repair script: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
-            }
-        }
+        lastErrorMessage = "This desktop-control repair flow is not supported by TilePilot."
+        lastActionMessage = nil
     }
 
     func openSystemSettings() {
@@ -163,8 +135,10 @@ extension AppModel {
         acknowledgeInitialStatusIfNeeded()
         runSupportCommand(
             ShellCommand("/usr/bin/xcode-select", ["--install"], timeout: 2.0),
-            successMessage: "Requested Xcode Command Line Tools installer prompt."
+            successMessage: "Requested Apple Developer Tools installer prompt. If nothing appears, check System Settings > Software Update."
         )
+        openSoftwareUpdateSettings()
+        scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.5)
     }
 
     func requestAccessibilityAccessPrompt() {
@@ -180,12 +154,7 @@ extension AppModel {
         _ = AXIsProcessTrustedWithOptions(options)
         lastActionMessage = "Requested Accessibility access prompt. If no prompt appears, open Accessibility Settings manually."
         lastErrorMessage = nil
-
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.0))
-            await self?.refreshBootstrapSetup()
-            await self?.refreshDoctor()
-        }
+        scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.0)
     }
 
     func openMissionControlSettings() {
@@ -193,6 +162,14 @@ extension AppModel {
             "x-apple.systempreferences:com.apple.preference.expose",
             "x-apple.systempreferences:",
         ])
+    }
+
+    func openSoftwareUpdateSettings() {
+        openURLCandidates([
+            "x-apple.systempreferences:com.apple.Software-Update-Settings.extension",
+            "x-apple.systempreferences:com.apple.preferences.softwareupdate",
+            "x-apple.systempreferences:",
+        ], updateMessaging: false)
     }
 
     func openMissionControlKeyboardShortcuts() {
@@ -266,16 +243,47 @@ extension AppModel {
         )
     }
 
-    private func openURLCandidates(_ candidates: [String]) {
+    func startHelperServicesBestEffort() {
+        Task { [weak self] in
+            guard let self else { return }
+            let yabaiResult = await self.doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["yabai", "--start-service"], timeout: 5.0)
+            )
+            let skhdResult = await self.doctorService.runSupportCommand(
+                ShellCommand("/usr/bin/env", ["skhd", "--start-service"], timeout: 5.0)
+            )
+
+            await MainActor.run {
+                self.appendCommandLog(from: yabaiResult)
+                self.appendCommandLog(from: skhdResult)
+                if yabaiResult.isSuccess && skhdResult.isSuccess {
+                    self.lastActionMessage = "Requested helper services start."
+                    self.lastErrorMessage = nil
+                } else {
+                    self.lastErrorMessage = "TilePilot could not start one or more helper services automatically."
+                    self.lastActionMessage = nil
+                }
+            }
+
+            await self.refreshBootstrapSetup()
+            await self.refreshDoctor()
+        }
+    }
+
+    private func openURLCandidates(_ candidates: [String], updateMessaging: Bool = true) {
         for candidate in candidates {
             guard let url = URL(string: candidate) else { continue }
             if NSWorkspace.shared.open(url) {
-                lastActionMessage = "Opened System Settings."
-                lastErrorMessage = nil
+                if updateMessaging {
+                    lastActionMessage = "Opened System Settings."
+                    lastErrorMessage = nil
+                }
                 return
             }
         }
-        lastErrorMessage = "Unable to open System Settings."
+        if updateMessaging {
+            lastErrorMessage = "Unable to open System Settings."
+        }
     }
 
     private func startAtLogonLaunchAgentPlist() -> String {
@@ -308,5 +316,13 @@ extension AppModel {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private func scheduleSetupRefreshAfterExternalHandoff(delaySeconds: Double) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            await self?.refreshBootstrapSetup()
+            await self?.refreshDoctor()
+        }
     }
 }

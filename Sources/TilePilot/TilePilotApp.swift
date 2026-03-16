@@ -92,6 +92,11 @@ struct TilePilotRootView: View {
                 showFirstLaunchGreeting = true
             }
         }
+        .onReceive(model.$bootstrapSnapshot) { _ in
+            if model.shouldShowFirstLaunchGreeting {
+                showFirstLaunchGreeting = true
+            }
+        }
         .sheet(isPresented: $showFirstLaunchGreeting, onDismiss: {
             model.dismissFirstLaunchGreeting()
         }) {
@@ -114,44 +119,40 @@ private struct FirstLaunchGreetingView: View {
     @Binding var isPresented: Bool
 
     private var requiredMissingItems: [SystemCheckRow] {
-        model.systemCheckRows.filter { row in
-            switch row.id {
-            case "yabai-installed", "skhd-installed", "yabai-running", "skhd-running":
-                return row.status != .good
-            default:
-                return false
-            }
-        }
+        model.setupBlockingRows
     }
 
     private var missingStatusSummary: String {
-        if requiredMissingItems.isEmpty {
-            return "Everything essential looks ready."
-        }
-        return "\(requiredMissingItems.count) item\(requiredMissingItems.count == 1 ? "" : "s") still need attention."
+        model.primarySetupAction.summaryTitle
     }
 
     private var missingStatusColor: Color {
+        if model.primarySetupAction == .ready {
+            return .green
+        }
         if requiredMissingItems.contains(where: { $0.status == .error }) {
             return .red
         }
         if requiredMissingItems.contains(where: { $0.status == .warning }) {
             return .orange
         }
-        if requiredMissingItems.contains(where: { $0.status == .notice }) {
+        if requiredMissingItems.contains(where: { $0.status == .notice }) || model.primarySetupAction == .recheck {
             return .yellow
         }
         return .green
     }
 
     private var missingStatusSymbol: String {
+        if model.primarySetupAction == .ready {
+            return "checkmark.circle.fill"
+        }
         if requiredMissingItems.contains(where: { $0.status == .error }) {
             return "xmark.circle.fill"
         }
         if requiredMissingItems.contains(where: { $0.status == .warning }) {
             return "exclamationmark.triangle.fill"
         }
-        if requiredMissingItems.contains(where: { $0.status == .notice }) {
+        if requiredMissingItems.contains(where: { $0.status == .notice }) || model.primarySetupAction == .recheck {
             return "questionmark.circle.fill"
         }
         return "checkmark.circle.fill"
@@ -172,7 +173,7 @@ private struct FirstLaunchGreetingView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to TilePilot")
                         .font(.title2.weight(.semibold))
-                    Text("TilePilot is the control app. It needs two helper tools before it can manage windows and keyboard shortcuts on your Mac. You can install the missing pieces automatically, then recheck here.")
+                    Text("TilePilot needs two helper tools to manage windows and keyboard shortcuts on your Mac. TilePilot can guide the install and recheck setup when you return.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -187,10 +188,12 @@ private struct FirstLaunchGreetingView: View {
                             .font(.subheadline)
                         Text("skhd: the background shortcut helper that listens for global hotkeys.")
                             .font(.subheadline)
-                        Text("Homebrew: just the installer TilePilot currently uses to fetch yabai and skhd. You do not need to manage Homebrew directly unless you want to.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text("Accessibility permission is optional, but some UI helpers work better with it.")
+                        if model.primarySetupAction == .updateAppleDeveloperTools {
+                            Text("Apple Developer Tools: required before TilePilot can install its helper tools on a fresh Mac.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Accessibility permission is optional. Core TilePilot setup does not depend on it.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -211,6 +214,9 @@ private struct FirstLaunchGreetingView: View {
                                     .foregroundStyle(missingStatusColor)
                             }
                         }
+                        Text(model.primarySetupActionDetail)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                         if requiredMissingItems.isEmpty {
                             Text("Everything essential already looks good.")
                                 .font(.subheadline)
@@ -234,23 +240,40 @@ private struct FirstLaunchGreetingView: View {
                                 .padding(.vertical, 2)
                             }
                         }
+                        if !model.setupOptionalRowsNeedingAttention.isEmpty {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Optional guidance")
+                                    .font(.subheadline.weight(.semibold))
+                                ForEach(model.setupOptionalRowsNeedingAttention) { row in
+                                    Text("\(row.title): \(row.detail)")
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 10) {
-                    Button("Install Missing Dependencies") {
-                        model.runSetupInstallerInTerminal()
+                    if model.primarySetupAction == .ready {
+                        Button("Continue") {
+                            model.dismissFirstLaunchGreeting()
+                            isPresented = false
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isPrimarySetupActionInFlight)
+                    } else {
+                        Button(model.primarySetupActionLabel) {
+                            model.performPrimarySetupAction()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isPrimarySetupActionInFlight)
                     }
-                    .buttonStyle(.borderedProminent)
 
-                    Button("Open Accessibility Settings") {
-                        model.openAccessibilitySettings()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Recheck") {
-                        Task { await model.refreshDoctor() }
+                    Button("Recheck Setup") {
+                        model.performSetupAction(.recheck)
                     }
                     .buttonStyle(.bordered)
 
@@ -263,7 +286,7 @@ private struct FirstLaunchGreetingView: View {
                     .buttonStyle(.bordered)
                 }
 
-                Text("TilePilot will still open now. The app will become fully useful as these requirements are completed.")
+                Text("TilePilot will still open now. When you come back from Terminal or System Settings, TilePilot will recheck setup automatically.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

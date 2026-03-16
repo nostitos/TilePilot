@@ -284,8 +284,8 @@ struct ShortcutsDashboardView: View {
             }
         case .desktopJumpFamily(let entries):
             jumpDesktopFamilyCard(entries)
-        case .desktopMoveFamily(let entries):
-            desktopMoveAdvancedFamilyCard(entries)
+        case .desktopMoveFamily:
+            EmptyView()
         }
     }
 
@@ -441,21 +441,13 @@ struct ShortcutsDashboardView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
-                Label("Advanced Desktop Move", systemImage: "exclamationmark.triangle.fill")
+                Label("Unsupported Desktop Move", systemImage: "minus.circle")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                if !model.canRunScriptingAdditionDesktopActions {
-                    Button("Open System Setup") {
-                        model.requestOpenTilePilotTab(.system)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .environment(\.controlActiveState, .key)
-                }
             }
 
-            Text("Requires yabai scripting addition (security override / SIP changes). Hidden by default.")
+            Text("TilePilot does not support this desktop-move shortcut family.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -470,7 +462,7 @@ struct ShortcutsDashboardView: View {
                     .padding(.top, 4)
                 },
                 label: {
-                    Text(showDesktopMoveAdvanced ? "Hide Advanced Desktop Move Shortcuts" : "Show Advanced Desktop Move Shortcuts")
+                    Text(showDesktopMoveAdvanced ? "Hide Unsupported Desktop Move Shortcuts" : "Show Unsupported Desktop Move Shortcuts")
                         .font(.caption.weight(.semibold))
                 }
             )
@@ -1241,28 +1233,19 @@ struct ShortcutsDashboardView: View {
 
     private func desktopShortcutFamilies(from entries: [ShortcutEntry]) -> [DesktopShortcutFamilySummary] {
         var goTo: [(ShortcutEntry, Int)] = []
-        var moveAndFollow: [(ShortcutEntry, Int)] = []
 
         for entry in entries {
             if let desktop = desktopGoToTarget(from: entry.command), !entry.command.lowercased().contains("window --space") {
                 goTo.append((entry, desktop))
                 continue
             }
-            if let desktop = desktopMoveAndFollowTarget(from: entry.command) {
-                moveAndFollow.append((entry, desktop))
-                continue
-            }
         }
 
         let sortedGoTo = goTo.sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.0.sourceLine < rhs.0.sourceLine : lhs.1 < rhs.1 }
-        let sortedMove = moveAndFollow.sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.0.sourceLine < rhs.0.sourceLine : lhs.1 < rhs.1 }
 
         var output: [DesktopShortcutFamilySummary] = []
         if !sortedGoTo.isEmpty {
             output.append(.init(kind: .goToDesktop, entries: sortedGoTo.map { ($0.0, $0.1) }))
-        }
-        if !sortedMove.isEmpty {
-            output.append(.init(kind: .moveWindowToDesktopAndFollow, entries: sortedMove.map { ($0.0, $0.1) }))
         }
         return output
     }
@@ -1394,9 +1377,9 @@ struct ShortcutsDashboardView: View {
     private func desktopFamilyDescription(_ kind: DesktopShortcutFamilySummary.Kind) -> String {
         switch kind {
         case .goToDesktop:
-            return "Switch to desktop number N. macOS can do this natively in Keyboard Shortcuts → Mission Control (no SIP changes needed)."
+            return "Switch to desktop number N using your configured desktop shortcut."
         case .moveWindowToDesktopAndFollow:
-            return "Move the focused window to desktop N, then switch there. This is an advanced yabai desktop-control feature (scripting addition) and may not be worth enabling for many users."
+            return "This shortcut family is not supported by TilePilot."
         }
     }
 

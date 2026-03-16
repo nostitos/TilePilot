@@ -156,7 +156,7 @@ enum TilePilotActionCatalog {
             return "\(title) didn’t run because yabai is not installed."
         }
         if stderr.contains("scripting-addition") {
-            return "\(title) needs yabai desktop control (scripting addition). Use Health/Setup to fix scripting addition."
+            return "\(title) is not supported by TilePilot on this setup."
         }
         let trimmed = trimForUI(result.stderr)
         if trimmed.isEmpty {

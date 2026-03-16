@@ -375,7 +375,7 @@ final class YabaiStateService: @unchecked Sendable {
     private func userFacingLiveStateError(from raw: String) -> String {
         let normalized = raw.lowercased()
         if normalized.contains("env: yabai: no such file or directory") || normalized.contains("not found") {
-            return "yabai is not installed yet. Use System -> Install Dependencies, then return to Overview."
+            return "yabai is not installed yet. Use System to install TilePilot Helpers, then return to Overview."
         }
         if normalized.contains("could not connect") || normalized.contains("message socket") {
             return "yabai is installed but not running. Start the yabai service in Setup or use Restart yabai."

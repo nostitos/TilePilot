@@ -11,13 +11,12 @@ extension AppModel {
     }
 
     var setupCoreItems: [SetupCheckItem] {
-        setupChecklistItems.filter { ["xcode-clt", "homebrew", "yabai-binary", "skhd-binary"].contains($0.id) }
+        setupChecklistItems.filter { ["xcode-clt", "yabai-binary", "skhd-binary"].contains($0.id) }
     }
 
     var setupServiceItems: [SetupCheckItem] {
         setupChecklistItems.filter {
             [
-                "brew-tap-koekeishiya",
                 "brew-service-yabai",
                 "brew-service-skhd",
                 "start-at-logon",
@@ -27,13 +26,7 @@ extension AppModel {
     }
 
     var setupSummaryLine: String {
-        guard let snapshot = bootstrapSnapshot else { return "Setup scan has not run yet" }
-        let missingCount = snapshot.items.filter { $0.state == .missing }.count
-        let warningCount = snapshot.items.filter { $0.state == .warning }.count
-        if missingCount == 0 && warningCount == 0 {
-            return "Ready · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-        }
-        return "\(missingCount) missing · \(warningCount) warnings · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
+        primarySetupSummaryLine
     }
 
     var systemCheckRows: [SystemCheckRow] {
@@ -42,7 +35,6 @@ extension AppModel {
         let missionControlChecks = doctorSnapshot?.missionControlChecks ?? []
 
         let xcode = setupByID["xcode-clt"]
-        let homebrew = setupByID["homebrew"]
         let yabaiBinarySetup = setupByID["yabai-binary"]
         let skhdBinarySetup = setupByID["skhd-binary"]
         let yabaiServiceSetup = setupByID["brew-service-yabai"]
@@ -56,38 +48,36 @@ extension AppModel {
         let skhdDaemonCap = capabilityByKey["skhd-daemon"]
         let yabaiQueryCap = capabilityByKey["yabai-query"]
         let accessibilityCap = capabilityByKey["accessibility"]
-        let scriptingAdditionCap = capabilityByKey["scripting-addition"]
-
         var rows: [SystemCheckRow] = []
 
         let xcodeStatus = mappedSystemStatus(from: xcode?.state) ?? .notice
+        let xcodeDetail = externalInstallerStatus.flatMap { status -> String? in
+            switch status.blocker {
+            case .appleDeveloperToolsMissing, .appleDeveloperToolsOutdated:
+                return status.summary
+            default:
+                return nil
+            }
+        }
         rows.append(SystemCheckRow(
             id: "xcode-clt",
-            title: "Xcode Command Line Tools",
-            detail: xcode?.detail ?? "Needed by Homebrew and terminal tooling on a fresh Mac.",
+            title: "Apple Developer Tools",
+            detail: firstDetail(xcodeDetail, xcode?.detail, fallback: "Needed before TilePilot can install its helper tools on a fresh Mac."),
             status: xcodeStatus,
             actions: xcodeStatus == .good ? [.recheck] : [.installCLT, .recheck]
-        ))
-
-        let homebrewStatus = mappedSystemStatus(from: homebrew?.state) ?? .notice
-        rows.append(SystemCheckRow(
-            id: "homebrew",
-            title: "Homebrew",
-            detail: homebrew?.detail ?? "Package manager used to install yabai and skhd.",
-            status: homebrewStatus,
-            actions: homebrewStatus == .good ? [.recheck] : [.installDependencies, .recheck]
         ))
 
         let yabaiInstallStatus = mergedSystemStatus([
             mappedSystemStatus(from: yabaiBinarySetup?.state),
             mappedSystemStatus(from: yabaiBinaryCap?.status),
         ])
+        let installHelpersAction: SystemCheckAction = primarySetupAction == .updateAppleDeveloperTools ? .installCLT : .installDependencies
         rows.append(SystemCheckRow(
             id: "yabai-installed",
             title: "yabai Installed",
-            detail: firstDetail(yabaiBinaryCap?.message, yabaiBinarySetup?.detail, fallback: "Install yabai to enable desktop/window runtime controls."),
+            detail: firstDetail(yabaiBinaryCap?.message, yabaiBinarySetup?.detail, fallback: "Install TilePilot helpers to enable desktop and window runtime controls."),
             status: yabaiInstallStatus,
-            actions: yabaiInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
+            actions: yabaiInstallStatus == .good ? [.recheck] : [installHelpersAction, .recheck]
         ))
 
         let skhdInstallStatus = mergedSystemStatus([
@@ -97,9 +87,9 @@ extension AppModel {
         rows.append(SystemCheckRow(
             id: "skhd-installed",
             title: "skhd Installed",
-            detail: firstDetail(skhdBinaryCap?.message, skhdBinarySetup?.detail, fallback: "Optional, but recommended for keyboard shortcut workflows."),
+            detail: firstDetail(skhdBinaryCap?.message, skhdBinarySetup?.detail, fallback: "Install TilePilot helpers to enable keyboard shortcut workflows."),
             status: skhdInstallStatus,
-            actions: skhdInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
+            actions: skhdInstallStatus == .good ? [.recheck] : [installHelpersAction, .recheck]
         ))
 
         let yabaiRunningStatus = mergedSystemStatus([
@@ -107,6 +97,12 @@ extension AppModel {
             mappedSystemStatus(from: yabaiDaemonCap?.status),
             mappedSystemStatus(from: yabaiQueryCap?.status),
         ])
+        let yabaiRunningActions: [SystemCheckAction]
+        if yabaiInstallStatus != .good {
+            yabaiRunningActions = [installHelpersAction, .recheck]
+        } else {
+            yabaiRunningActions = yabaiRunningStatus == .good ? [.recheck] : [.startYabai, .restartYabai, .recheck]
+        }
         rows.append(SystemCheckRow(
             id: "yabai-running",
             title: "yabai Running",
@@ -117,19 +113,25 @@ extension AppModel {
                 fallback: "Start yabai to control windows/desktops from TilePilot."
             ),
             status: yabaiRunningStatus,
-            actions: yabaiRunningStatus == .good ? [.recheck] : [.startYabai, .restartYabai, .recheck]
+            actions: yabaiRunningActions
         ))
 
         let skhdRunningStatus = mergedSystemStatus([
             mappedSystemStatus(from: skhdServiceSetup?.state),
             mappedSystemStatus(from: skhdDaemonCap?.status),
         ])
+        let skhdRunningActions: [SystemCheckAction]
+        if skhdInstallStatus != .good {
+            skhdRunningActions = [installHelpersAction, .recheck]
+        } else {
+            skhdRunningActions = skhdRunningStatus == .good ? [.recheck] : [.startSkhd, .restartSkhd, .recheck]
+        }
         rows.append(SystemCheckRow(
             id: "skhd-running",
             title: "skhd Running",
             detail: firstDetail(skhdDaemonCap?.message, skhdServiceSetup?.detail, fallback: "Start skhd for keyboard shortcuts."),
             status: skhdRunningStatus,
-            actions: skhdRunningStatus == .good ? [.recheck] : [.startSkhd, .restartSkhd, .recheck]
+            actions: skhdRunningActions
         ))
 
         let startAtLogonStatus = mappedSystemStatus(from: startAtLogonSetup?.state) ?? .notice
@@ -197,24 +199,7 @@ extension AppModel {
                 : [.openMissionControlSettings, .openMissionControlKeyboardShortcuts, .recheck]
         ))
 
-        let saStatus = mappedSystemStatus(from: scriptingAdditionCap?.status) ?? .notice
-        let normalizedSAStatus: SystemCheckStatus = saStatus == .error ? .warning : saStatus
-        rows.append(SystemCheckRow(
-            id: "scripting-addition",
-            title: "Desktop Move Shortcuts (Advanced)",
-            detail: scriptingAdditionDetail(from: scriptingAdditionCap),
-            status: normalizedSAStatus,
-            actions: normalizedSAStatus == .good
-                ? [.openMissionControlKeyboardShortcuts, .recheck]
-                : [.fixScriptingAddition, .openMissionControlKeyboardShortcuts, .recheck]
-        ))
-
         return rows.sorted { lhs, rhs in
-            let lhsIsAdvanced = lhs.id == "scripting-addition"
-            let rhsIsAdvanced = rhs.id == "scripting-addition"
-            if lhsIsAdvanced != rhsIsAdvanced {
-                return !lhsIsAdvanced
-            }
             if lhs.status.severityRank != rhs.status.severityRank {
                 return lhs.status.severityRank > rhs.status.severityRank
             }
@@ -223,37 +208,25 @@ extension AppModel {
     }
 
     var systemSummaryLine: String {
-        let errors = systemCheckRows.filter { $0.status == .error }.count
-        let warnings = systemCheckRows.filter { $0.status == .warning }.count
-        let notices = systemCheckRows.filter { $0.status == .notice }.count
-        if errors == 0 && warnings == 0 && notices == 0 {
-            return "Ready"
-        }
-        var parts: [String] = []
-        if errors > 0 { parts.append("\(errors) need action") }
-        if warnings > 0 { parts.append("\(warnings) recommended") }
-        if notices > 0 { parts.append("\(notices) informational") }
-        return parts.joined(separator: " · ")
-    }
-
-    var systemPrimaryActions: [SystemCheckAction] {
-        var actions: [SystemCheckAction] = []
-        for row in systemCheckRows where row.status != .good {
-            if row.id == "accessibility" { continue }
-            for action in row.actions where action != .recheck && !actions.contains(action) {
-                actions.append(action)
-                if actions.count >= 5 { return actions }
+        switch primarySetupAction {
+        case .ready:
+            if let snapshot = bootstrapSnapshot {
+                return "Ready · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
             }
+            return "Ready"
+        case .recheck:
+            return "Setup scan needed"
+        default:
+            return primarySetupAction.summaryTitle
         }
-        return actions
     }
 
     func performSystemCheckAction(_ action: SystemCheckAction) {
         switch action {
         case .installDependencies:
-            runSetupInstallerInTerminal()
+            performSetupAction(.installHelpers)
         case .installCLT:
-            requestXcodeCLTInstallPrompt()
+            performSetupAction(.updateAppleDeveloperTools)
         case .startYabai:
             startBrewServiceYabai()
         case .startSkhd:
@@ -277,11 +250,7 @@ extension AppModel {
         case .restartSkhd:
             restartSkhdBestEffort()
         case .recheck:
-            Task { [weak self] in
-                guard let self else { return }
-                await self.refreshBootstrapSetup()
-                await self.refreshDoctor()
-            }
+            performSetupAction(.recheck)
         }
     }
 
@@ -305,8 +274,6 @@ extension AppModel {
                 items.append(checklist(from: item, title: "Accessibility permission", isCore: false))
             case "yabai-query":
                 items.append(checklist(from: item, title: "Live yabai query", isCore: true))
-            case "scripting-addition":
-                items.append(scriptingAdditionChecklist(from: item))
             default:
                 continue
             }
@@ -327,41 +294,6 @@ extension AppModel {
             status: capability.status,
             detail: capability.message,
             remediation: capability.remediationSteps
-        )
-    }
-
-    private func scriptingAdditionChecklist(from capability: CapabilityState) -> DoctorChecklistItem {
-        if hasObservedScriptingAdditionRuntimeFailure {
-            var remediation = capability.remediationSteps
-            if !remediation.contains(where: { $0.localizedCaseInsensitiveContains("repair") || $0.localizedCaseInsensitiveContains("install") }) {
-                remediation.append("Use System -> Fix Scripting Addition to reinstall the scripting addition.")
-            }
-            return DoctorChecklistItem(
-                title: "Desktop move support",
-                isCore: false,
-                status: .degraded,
-                detail: "Runtime commands reported scripting-addition failures recently. Desktop move shortcuts are unavailable until it is repaired.",
-                remediation: remediation
-            )
-        }
-
-        var detail = capability.message
-        if detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            detail = "Optional advanced feature. Regular desktop switching can use macOS Mission Control shortcuts without scripting addition."
-        }
-        if capability.status == .available {
-            detail = "Advanced desktop/window move shortcuts are available."
-        }
-        var remediation = capability.remediationSteps
-        if capability.status != .available, !remediation.contains(where: { $0.localizedCaseInsensitiveContains("mission control") }) {
-            remediation.append("You can still switch desktops using macOS Mission Control keyboard shortcuts.")
-        }
-        return DoctorChecklistItem(
-            title: "Desktop move support",
-            isCore: false,
-            status: capability.status,
-            detail: detail,
-            remediation: remediation
         )
     }
 
@@ -405,13 +337,4 @@ extension AppModel {
         return fallback
     }
 
-    private func scriptingAdditionDetail(from capability: CapabilityState?) -> String {
-        guard let capability else {
-            return "Not yet checked. Optional for advanced desktop/window move shortcuts."
-        }
-        if capability.status == .available {
-            return "Advanced desktop/window move shortcuts are available."
-        }
-        return "Optional advanced feature. Regular desktop switching can use macOS Mission Control shortcuts without scripting addition."
-    }
 }

@@ -3,12 +3,15 @@ import Foundation
 
 struct BootstrapRunResult: Sendable {
     let snapshot: SetupBootstrapSnapshot
+    let externalInstallerStatus: ExternalInstallerStatus?
     let commandLogs: [CommandLogEntry]
 }
 
 final class BootstrapService: @unchecked Sendable {
     static let startAtLogonLaunchAgentLabel = "com.klode.tilepilot.launcher"
     static let startAtLogonLaunchAgentFileName = "com.klode.tilepilot.launcher.plist"
+    static let setupDirectoryRelativePath = "Library/Application Support/TilePilot/Setup"
+    static let installerStatusFileName = "installer_status.json"
 
     private let runner = CommandRunner()
 
@@ -56,15 +59,14 @@ final class BootstrapService: @unchecked Sendable {
                 items: items,
                 brewPrefix: brewInstalled ? brewPrefixText : nil
             ),
+            externalInstallerStatus: loadExternalInstallerStatus(),
             commandLogs: logs
         )
     }
 
     func prepareInstallerScript() throws -> URL {
         let fm = FileManager.default
-        let supportDirectory = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/TilePilot/Setup", isDirectory: true)
-        try fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let supportDirectory = try Self.setupSupportDirectory(fileManager: fm)
 
         let scriptURL = supportDirectory.appendingPathComponent("install_yabai_stack.command")
         let script = installerScriptContents()
@@ -80,9 +82,7 @@ final class BootstrapService: @unchecked Sendable {
 
     func prepareScriptingAdditionRepairScript() throws -> URL {
         let fm = FileManager.default
-        let supportDirectory = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/TilePilot/Setup", isDirectory: true)
-        try fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let supportDirectory = try Self.setupSupportDirectory(fileManager: fm)
 
         let scriptURL = supportDirectory.appendingPathComponent("repair_yabai_scripting_addition.command")
         let script = scriptingAdditionRepairScriptContents()
@@ -94,6 +94,32 @@ final class BootstrapService: @unchecked Sendable {
         try? mutableURL.setResourceValues(values)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         return scriptURL
+    }
+
+    func loadExternalInstallerStatus() -> ExternalInstallerStatus? {
+        let url = Self.installerStatusURL()
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ExternalInstallerStatus.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    static func installerStatusURL(fileManager: FileManager = .default) -> URL {
+        fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(setupDirectoryRelativePath, isDirectory: true)
+            .appendingPathComponent(installerStatusFileName)
+    }
+
+    private static func setupSupportDirectory(fileManager: FileManager) throws -> URL {
+        let supportDirectory = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(setupDirectoryRelativePath, isDirectory: true)
+        try fileManager.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        return supportDirectory
     }
 
     private func xcodeCLTItem(from result: CommandResult) -> SetupCheckItem {
@@ -267,9 +293,12 @@ final class BootstrapService: @unchecked Sendable {
     }
 
     private func installerScriptContents() -> String {
-        """
+        let installerStatusPath = Self.installerStatusURL().path
+        return """
         #!/bin/zsh
-        set -u
+        set -euo pipefail
+
+        INSTALLER_STATUS_FILE="\(installerStatusPath)"
 
         clear
         echo "=============================================="
@@ -279,6 +308,58 @@ final class BootstrapService: @unchecked Sendable {
         echo "This script installs Homebrew (if needed), yabai, and skhd."
         echo "Some steps may prompt for admin password or user confirmation."
         echo
+
+        write_status() {
+          local outcome="$1"
+          local blocker="$2"
+          local action="$3"
+          local summary="$4"
+          local escaped_summary="${summary//\\/\\\\}"
+          escaped_summary="${escaped_summary//\"/\\\"}"
+          local escaped_blocker="null"
+          if [ -n "$blocker" ]; then
+            escaped_blocker="\"$blocker\""
+          fi
+          /bin/mkdir -p "$(dirname "$INSTALLER_STATUS_FILE")"
+          cat > "$INSTALLER_STATUS_FILE" <<EOF
+        {
+          "outcome": "$outcome",
+          "blocker": $escaped_blocker,
+          "summary": "$escaped_summary",
+          "recommendedAction": "$action",
+          "updatedAt": "$(/bin/date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        }
+        EOF
+        }
+
+        finish_with_error() {
+          local message="$1"
+          echo
+          echo "Setup stopped."
+          echo "$message"
+          echo
+          echo "Return to TilePilot after fixing this step. TilePilot will recheck setup when you come back."
+          read -k 1 '?Press any key to close...'
+          echo
+          exit 1
+        }
+
+        run_or_fail() {
+          local label="$1"
+          shift
+          local output=""
+          local exit_code=0
+          set +e
+          output="$("$@" 2>&1)"
+          exit_code=$?
+          set -e
+          if [ $exit_code -ne 0 ]; then
+            echo "$output"
+            echo
+            finish_with_error "$label failed."
+          fi
+          echo "$output"
+        }
 
         ensure_brew_shellenv() {
           if [ -x /opt/homebrew/bin/brew ]; then
@@ -294,8 +375,13 @@ final class BootstrapService: @unchecked Sendable {
           echo "  OK: Command Line Tools already installed."
         else
           echo "  Command Line Tools not detected."
-          echo "  Triggering xcode-select installer (GUI). Complete it, then re-run this script if needed."
+          echo "  Triggering xcode-select installer (GUI)."
+          echo "  Complete that install, then re-run this script."
+          echo "  A reboot is usually not required."
+          write_status "blocked" "apple_developer_tools_missing" "updateAppleDeveloperTools" "Apple Developer Tools are required before TilePilot helpers can be installed."
           /usr/bin/xcode-select --install || true
+          echo
+          finish_with_error "Command Line Tools are required before yabai and skhd can be installed."
         fi
         echo
 
@@ -309,22 +395,47 @@ final class BootstrapService: @unchecked Sendable {
         ensure_brew_shellenv
         if ! /usr/bin/which brew >/dev/null 2>&1; then
           echo "  ERROR: Homebrew still not available in PATH."
-          read -k 1 '?Press any key to close...'
-          echo
-          exit 1
+          write_status "failed" "homebrew_failed" "installHelpers" "TilePilot could not make Homebrew available in Terminal."
+          finish_with_error "Homebrew still is not available in PATH."
         fi
         echo "  Brew: $(brew --version | head -n 1)"
         echo
 
         echo "Step 3: Install yabai + skhd"
-        brew update
-        brew tap koekeishiya/formulae
-        brew install yabai skhd
+        run_or_fail "Homebrew update" brew update
+        run_or_fail "Homebrew tap koekeishiya/formulae" brew tap koekeishiya/formulae
+
+        install_output=""
+        install_exit=0
+        set +e
+        install_output="$(brew install yabai skhd 2>&1)"
+        install_exit=$?
+        set -e
+        echo "$install_output"
+        if [ $install_exit -ne 0 ]; then
+          echo
+          if [[ "$install_output" == *"Command Line Tools are too outdated"* ]]; then
+            write_status "blocked" "apple_developer_tools_outdated" "updateAppleDeveloperTools" "Apple Developer Tools are too old for installing TilePilot helpers."
+            finish_with_error $'Homebrew could not install yabai and skhd because your Xcode Command Line Tools are too old.\n\nUpdate them in System Settings > Software Update, or run:\n  sudo rm -rf /Library/Developer/CommandLineTools\n  xcode-select --install\n\nThen re-run this installer. A reboot is usually not required.'
+          fi
+          write_status "failed" "helper_install_failed" "installHelpers" "TilePilot helpers could not be installed. Fix the Terminal error and rerun the installer."
+          finish_with_error "Homebrew could not install yabai and skhd. Review the error above, fix it, then re-run this installer."
+        fi
+
+        if ! /usr/bin/env yabai --version >/dev/null 2>&1; then
+          write_status "failed" "helper_install_failed" "installHelpers" "yabai did not become available after install."
+          finish_with_error "Homebrew finished without making yabai available in PATH. Re-open Terminal and re-run this installer."
+        fi
+        if ! /usr/bin/env skhd --version >/dev/null 2>&1; then
+          write_status "failed" "helper_install_failed" "installHelpers" "skhd did not become available after install."
+          finish_with_error "Homebrew finished without making skhd available in PATH. Re-open Terminal and re-run this installer."
+        fi
         echo
 
         echo "Step 4: Start background services (best effort)"
-        /usr/bin/env yabai --start-service || true
-        /usr/bin/env skhd --start-service || true
+        service_start_failed=0
+        /usr/bin/env yabai --start-service || { echo "  yabai installed, but automatic service start did not complete."; service_start_failed=1; }
+        /usr/bin/env skhd --start-service || { echo "  skhd installed, but automatic service start did not complete."; service_start_failed=1; }
         echo "  (If your installed version does not support --start-service, start them using your preferred launch method.)"
         echo
 
@@ -333,13 +444,17 @@ final class BootstrapService: @unchecked Sendable {
         echo "  - In TilePilot > System, enable 'Start at logon'"
         echo "  - Enable TilePilot in Accessibility settings"
         echo "  - Verify Mission Control settings in TilePilot > Health"
-        echo "  - Desktop switching/move-window shortcuts may require yabai scripting addition + SIP configuration"
         echo
         echo "Installed versions:"
         /usr/bin/env yabai --version || true
         /usr/bin/env skhd --version || true
         echo
-        echo "Finished. Return to TilePilot and run 'Check System'."
+        if [ "$service_start_failed" -eq 1 ]; then
+          write_status "success" "service_start_failed" "startHelperServices" "TilePilot helpers were installed, but the background services still need to be started."
+        else
+          write_status "success" "" "ready" "TilePilot helpers were installed successfully."
+        fi
+        echo "Finished. Return to TilePilot. It will recheck setup automatically. No reboot should be required."
         read -k 1 '?Press any key to close...'
         echo
         """
@@ -352,93 +467,13 @@ final class BootstrapService: @unchecked Sendable {
 
         clear
         echo "=============================================="
-        echo " TilePilot: Fix yabai Scripting Addition"
+        echo " TilePilot: Unsupported Desktop Control"
         echo "=============================================="
         echo
-        echo "This repairs the yabai scripting addition used by core desktop actions"
-        echo "(switch desktop, move window to desktop, etc.)."
+        echo "TilePilot does not support this desktop-control repair flow."
         echo
-        echo "You will be prompted for your admin password (sudo)."
-        echo "If this fails, macOS version compatibility or SIP configuration may be the reason."
-        echo
-
-        ensure_path() {
-          export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/sbin:/usr/local/sbin:$PATH"
-        }
-
-        ensure_path
-
-        if ! /usr/bin/env yabai --version >/dev/null 2>&1; then
-          echo "ERROR: yabai is not installed or not in PATH."
-          echo "Use TilePilot -> System -> Install Dependencies first."
-          echo
-          read -k 1 '?Press any key to close...'
-          echo
-          exit 1
-        fi
-
-        echo "Detected: $(/usr/bin/env yabai --version)"
-        echo
-        echo "Step 1: Uninstall existing scripting addition (best effort)"
-        /usr/bin/sudo /usr/bin/env yabai --uninstall-sa || true
-        echo
-        YABAI_HELP="$(/usr/bin/env yabai --help 2>&1 || true)"
-        SA_LOAD_CMD=""
-        if [[ "$YABAI_HELP" == *"--load-sa"* ]]; then
-          SA_LOAD_CMD="--load-sa"
-        elif [[ "$YABAI_HELP" == *"--install-sa"* ]]; then
-          SA_LOAD_CMD="--install-sa"
-        fi
-
-        if [ -z "$SA_LOAD_CMD" ]; then
-          echo "ERROR: This yabai version does not expose a known scripting-addition install/load command."
-          echo "Expected one of: --load-sa or --install-sa"
-          echo
-          echo "Detected help output:"
-          echo "$YABAI_HELP" | head -n 20
-          echo
-          read -k 1 '?Press any key to close...'
-          echo
-          exit 1
-        fi
-
-        echo "Step 2: Install/load scripting addition ($SA_LOAD_CMD)"
-        SA_OUTPUT="$({ /usr/bin/sudo /usr/bin/env yabai "$SA_LOAD_CMD"; } 2>&1)"
-        SA_EXIT=$?
-        echo "$SA_OUTPUT"
-        if [ $SA_EXIT -ne 0 ]; then
-          echo
-          echo "Install failed."
-          echo "Common reasons:"
-          echo "  - SIP configuration does not allow scripting addition injection"
-          echo "  - macOS update changed compatibility"
-          echo "  - yabai version / install mismatch"
-          if [[ "$SA_OUTPUT" == *"System Integrity Protection"* ]]; then
-            echo
-            echo "Your output indicates SIP is still blocking scripting-addition support."
-            echo "Desktop switching / move-window shortcuts that target desktops will keep failing until SIP is configured for yabai's scripting addition requirements."
-          fi
-          echo
-          read -k 1 '?Press any key to close...'
-          echo
-          exit 1
-        fi
-        echo
-        echo "Step 3: Scripting addition command completed"
-        if [[ "$SA_LOAD_CMD" != "--load-sa" ]]; then
-          echo "Running --load-sa (if available) to load the installed scripting addition..."
-          /usr/bin/sudo /usr/bin/env yabai --load-sa || true
-        else
-          echo "Already loaded via --load-sa."
-        fi
-        echo
-        echo "Step 4: Restart yabai service (best effort)"
-        /usr/bin/env yabai --restart-service || true
-        echo
-        echo "Back in TilePilot:"
-        echo "  1) Run Check System"
-        echo "  2) Try Option+1 (or a Desktop shortcut) again"
-        echo "  3) If it still fails, review the Health section and command logs"
+        echo "If you need unsupported yabai desktop-control features,"
+        echo "handle that setup manually outside TilePilot."
         echo
         read -k 1 '?Press any key to close...'
         echo

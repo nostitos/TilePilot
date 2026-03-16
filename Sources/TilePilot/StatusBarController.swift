@@ -482,7 +482,7 @@ final class StatusBarController: NSObject {
 
     @objc private func runSetupInstaller() {
         model.acknowledgeInitialStatusIfNeeded()
-        model.runSetupInstallerInTerminal()
+        model.performPrimarySetupAction()
     }
 
     @objc private func runPinnedShortcut(_ sender: NSMenuItem) {

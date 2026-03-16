@@ -83,6 +83,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
+    @Published private(set) var externalInstallerStatus: ExternalInstallerStatus?
     @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
     @Published var megamapDisplaySections: [MegamapDisplaySection] = []
     @Published var isRefreshingMegamap = false
@@ -369,6 +370,7 @@ final class AppModel: ObservableObject {
 
         let result = await bootstrapService.runBootstrapChecks()
         bootstrapSnapshot = result.snapshot
+        externalInstallerStatus = result.externalInstallerStatus
         prependCommandLogs(result.commandLogs)
     }
 
@@ -420,22 +422,8 @@ final class AppModel: ObservableObject {
     var shouldShowFirstLaunchGreeting: Bool {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: firstLaunchGreetingShownDefaultsKey) else { return false }
-        guard let snapshot = doctorSnapshot else { return false }
-
-        let setupNeeded = snapshot.capabilities.contains { capability in
-            switch capability.key {
-            case "yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon":
-                return capability.status != .available
-            default:
-                return false
-            }
-        }
-
-        let accessibilityNeedsAttention = snapshot.capabilities.contains { capability in
-            capability.key == "accessibility" && capability.status != .available
-        }
-
-        return setupNeeded || accessibilityNeedsAttention
+        guard bootstrapSnapshot != nil, doctorSnapshot != nil else { return false }
+        return primarySetupAction != .ready
     }
 
     func dismissFirstLaunchGreeting() {

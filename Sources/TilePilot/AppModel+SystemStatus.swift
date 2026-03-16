@@ -127,13 +127,6 @@ extension AppModel {
         return snapshot.healthBadge
     }
 
-    var hasObservedScriptingAdditionRuntimeFailure: Bool {
-        commandLogs.prefix(100).contains { entry in
-            let haystack = (entry.stderrSnippet + " " + entry.stdoutSnippet).lowercased()
-            return haystack.contains("scripting-addition")
-        }
-    }
-
     private var shouldSoftenInitialBlockedStatus: Bool {
         guard let snapshot = doctorSnapshot else { return false }
         return snapshot.healthBadge == .blocked && !hasAcknowledgedInitialStatus
@@ -165,22 +158,7 @@ extension AppModel {
     }
 
     private var shouldUseNeutralSetupMenuBar: Bool {
-        if let bootstrapSnapshot {
-            let setupMissingIDs: Set<String> = ["xcode-clt", "homebrew", "yabai-binary", "skhd-binary"]
-            let hasSetupMissing = bootstrapSnapshot.items.contains { setupMissingIDs.contains($0.id) && $0.state == .missing }
-            if hasSetupMissing {
-                return true
-            }
-        }
-
-        guard let snapshot = doctorSnapshot else { return false }
-        let failing = snapshot.capabilities.filter { $0.status != .available }
-        if failing.isEmpty { return false }
-
-        let allSetupish = failing.allSatisfy { capability in
-            ["yabai-binary", "skhd-binary", "yabai-daemon", "skhd-daemon", "yabai-query"].contains(capability.key)
-        }
-        return allSetupish && liveStateSnapshot == nil
+        primarySetupAction != .ready
     }
 
     private func primaryMenuBarSummary() -> String? {
@@ -194,14 +172,17 @@ extension AppModel {
             return "Manual tiling off"
         }
 
-        if let bootstrap = bootstrapSnapshot {
-            let missing = Set(bootstrap.items.filter { $0.state == .missing }.map(\.id))
-            if missing.contains("homebrew") {
-                return "Install Homebrew"
-            }
-            if missing.contains("yabai-binary") || missing.contains("skhd-binary") {
-                return "Install Dependencies"
-            }
+        switch primarySetupAction {
+        case .updateAppleDeveloperTools:
+            return "Update Apple Developer Tools"
+        case .installHelpers:
+            return "Install TilePilot Helpers"
+        case .startHelperServices:
+            return "Start Helper Services"
+        case .recheck:
+            return "Recheck Setup"
+        case .ready:
+            break
         }
 
         guard let snapshot = doctorSnapshot else { return nil }
@@ -218,9 +199,6 @@ extension AppModel {
         }
         if snapshot.missionControlChecks.contains(where: { $0.status == .warning }) {
             return "Mission Control settings"
-        }
-        if let sa = capabilityByKey["scripting-addition"], sa.status == .degraded || hasObservedScriptingAdditionRuntimeFailure {
-            return "Fix Scripting Addition"
         }
         if let skhdBinary = capabilityByKey["skhd-binary"], skhdBinary.status == .blocked {
             return "Install skhd (optional)"

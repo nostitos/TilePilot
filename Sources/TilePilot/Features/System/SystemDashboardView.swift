@@ -57,29 +57,35 @@ struct SystemDashboardView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                Text(model.primarySetupActionDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text(model.releaseDefaultsStatus.summaryText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    ForEach(model.systemPrimaryActions, id: \.self) { action in
-                        Button(action.label) {
-                            model.performSystemCheckAction(action)
+                    if model.primarySetupAction == .ready {
+                        Button(model.primarySetupActionLabel) {
+                            model.performPrimarySetupAction()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                    }
-
-                    if model.systemPrimaryActions.isEmpty {
-                        Text("No immediate fixes needed.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .disabled(model.isPrimarySetupActionInFlight)
+                    } else {
+                        Button(model.primarySetupActionLabel) {
+                            model.performPrimarySetupAction()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(model.isPrimarySetupActionInFlight)
                     }
 
                     Spacer()
 
                     Button("Recheck") {
-                        model.performSystemCheckAction(.recheck)
+                        model.performSetupAction(.recheck)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)

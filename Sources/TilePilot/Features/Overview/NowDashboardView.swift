@@ -497,10 +497,11 @@ struct NowDashboardView: View {
         let normalized = message.lowercased()
 
         if normalized.contains("not installed yet") || normalized.contains("no such file or directory") {
+            let action = model.primarySetupAction == .updateAppleDeveloperTools ? SetupNextAction.updateAppleDeveloperTools : SetupNextAction.installHelpers
             return LiveStateHelp(
-                message: "You only need to care if you want live yabai workspace mapping. Install dependencies to enable the full Now view.",
+                message: "TilePilot needs its helper tools before the full Overview can map desktops precisely.",
                 actions: [
-                    .init(label: "Install Dependencies", handler: { model.runSetupInstallerInTerminal() }),
+                    .init(label: action.buttonTitle, handler: { model.performSetupAction(action) }),
                     .init(label: "Recheck", handler: { Task { await model.refreshLiveState() } }),
                 ]
             )
@@ -508,10 +509,15 @@ struct NowDashboardView: View {
 
         if normalized.contains("not running") || normalized.contains("message socket") || normalized.contains("could not connect") {
             return LiveStateHelp(
-                message: "yabai appears installed but inactive. Start the service or retry after setup.",
+                message: "TilePilot helpers look installed, but yabai is not responding yet.",
                 actions: [
-                    .init(label: "Start yabai Service", handler: { model.startBrewServiceYabai() }),
-                    .init(label: "Restart yabai", handler: { model.restartYabaiBestEffort() }),
+                    .init(label: model.primarySetupAction == .startHelperServices ? model.primarySetupActionLabel : "Start Helper Services", handler: {
+                        if model.primarySetupAction == .startHelperServices {
+                            model.performPrimarySetupAction()
+                        } else {
+                            model.startHelperServicesBestEffort()
+                        }
+                    }),
                     .init(label: "Recheck", handler: { Task { await model.refreshLiveState() } }),
                 ]
             )

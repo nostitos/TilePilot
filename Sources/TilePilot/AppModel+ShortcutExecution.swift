@@ -180,7 +180,7 @@ func featureDisabledReason(for gate: FeatureCapabilityGate) -> String? {
     case .yabaiRuntime:
         return canRunYabaiRuntimeCommands ? nil : (yabaiRuntimeControlDisabledReason ?? "yabai runtime controls are unavailable.")
     case .scriptingAddition:
-        return canRunScriptingAdditionDesktopActions ? nil : "Requires scripting addition."
+        return "Not supported by TilePilot."
     }
 }
 

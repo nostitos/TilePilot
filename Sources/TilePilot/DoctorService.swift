@@ -120,7 +120,6 @@ final class DoctorService: @unchecked Sendable {
     func runDoctor() async -> DoctorRunResult {
         async let buildResultTask = runner.run(.init("/usr/bin/sw_vers", ["-buildVersion"], timeout: 1.0))
         async let yabaiVersionTask = runner.run(.init("/usr/bin/env", ["yabai", "--version"], timeout: 1.2))
-        async let yabaiHelpTask = runner.run(.init("/usr/bin/env", ["yabai", "--help"], timeout: 1.5))
         async let skhdVersionTask = runner.run(.init("/usr/bin/env", ["skhd", "--version"], timeout: 1.2))
         async let yabaiDaemonTask = runner.run(.init("/usr/bin/pgrep", ["-x", "yabai"], timeout: 1.0))
         async let skhdDaemonTask = runner.run(.init("/usr/bin/pgrep", ["-x", "skhd"], timeout: 1.0))
@@ -130,27 +129,13 @@ final class DoctorService: @unchecked Sendable {
 
         let buildResult = await buildResultTask
         let yabaiVersionResult = await yabaiVersionTask
-        let yabaiHelpResult = await yabaiHelpTask
         let skhdVersionResult = await skhdVersionTask
         let yabaiDaemonResult = await yabaiDaemonTask
         let skhdDaemonResult = await skhdDaemonTask
         let mruSpacesResult = await mruSpacesTask
         let spansDisplaysResult = await spansDisplaysTask
         let yabaiQueryResult = await yabaiQueryTask
-        let saCheckResult: CommandResult
-        let saCheckWasRun: Bool
-        if supportsCheckSA(yabaiHelpResult: yabaiHelpResult) {
-            saCheckResult = await runner.run(.init("/usr/bin/env", ["yabai", "--check-sa"], timeout: 1.5))
-            saCheckWasRun = true
-        } else {
-            saCheckResult = skippedProbeResult(
-                command: "/usr/bin/env yabai --check-sa",
-                message: "Skipped optional `--check-sa` probe because this yabai version does not list it in `--help`."
-            )
-            saCheckWasRun = false
-        }
-
-        var commandResultsForLogs = [
+        let commandResultsForLogs = [
             buildResult,
             yabaiVersionResult,
             skhdVersionResult,
@@ -160,9 +145,6 @@ final class DoctorService: @unchecked Sendable {
             spansDisplaysResult,
             yabaiQueryResult,
         ]
-        if saCheckWasRun {
-            commandResultsForLogs.append(saCheckResult)
-        }
         let commandLogs = makeCommandLogs(commandResultsForLogs)
 
         let systemVersion = ProcessInfo.processInfo.operatingSystemVersionString
@@ -189,7 +171,6 @@ final class DoctorService: @unchecked Sendable {
             yabaiDaemonResult: yabaiDaemonResult,
             skhdDaemonResult: skhdDaemonResult,
             yabaiQueryResult: yabaiQueryResult,
-            saCheckResult: saCheckResult,
             missionChecks: missionChecks
         )
 
@@ -215,25 +196,6 @@ final class DoctorService: @unchecked Sendable {
         await runner.run(command)
     }
 
-    private func supportsCheckSA(yabaiHelpResult: CommandResult) -> Bool {
-        guard yabaiHelpResult.isSuccess else { return false }
-        let haystack = (yabaiHelpResult.stdout + "\n" + yabaiHelpResult.stderr).lowercased()
-        return haystack.contains("--check-sa")
-    }
-
-    private func skippedProbeResult(command: String, message: String) -> CommandResult {
-        let now = Date()
-        return CommandResult(
-            command: command,
-            startedAt: now,
-            endedAt: now,
-            exitStatus: 0,
-            stdout: message,
-            stderr: "",
-            errorType: .none
-        )
-    }
-
     private func buildCapabilities(
         accessibilityTrusted: Bool,
         yabaiVersionResult: CommandResult,
@@ -241,7 +203,6 @@ final class DoctorService: @unchecked Sendable {
         yabaiDaemonResult: CommandResult,
         skhdDaemonResult: CommandResult,
         yabaiQueryResult: CommandResult,
-        saCheckResult: CommandResult,
         missionChecks: [MissionControlCheck]
     ) -> [CapabilityState] {
         var items: [CapabilityState] = []
@@ -281,8 +242,6 @@ final class DoctorService: @unchecked Sendable {
                 remediationSteps: missionChecks.filter { $0.status == .warning }.map { $0.message }
             )
         )
-
-        items.append(capabilityForScriptingAddition(result: saCheckResult))
         return items
     }
 
@@ -386,60 +345,6 @@ final class DoctorService: @unchecked Sendable {
         return ["Check yabai installation and daemon status, then run Setup Check again."]
     }
 
-    private func capabilityForScriptingAddition(result: CommandResult) -> CapabilityState {
-        if result.isSuccess {
-            let output = (cleanedLine(from: result.stdout) ?? "").lowercased()
-            if output.contains("loaded") || output.contains("installed") || output.contains("yes") {
-                return CapabilityState(
-                    key: "scripting-addition",
-                    status: .available,
-                    reasonCode: nil,
-                    message: "Scripting addition check reports available.",
-                    remediationSteps: []
-                )
-            }
-            return CapabilityState(
-                key: "scripting-addition",
-                status: .unknown,
-                reasonCode: "check-sa-ambiguous",
-                message: "Scripting addition check completed but output was not recognized.",
-                remediationSteps: ["Inspect yabai output in the command log."]
-            )
-        }
-
-        if result.stderr.contains("unrecognized option") || result.stderr.contains("unknown option") {
-            return CapabilityState(
-                key: "scripting-addition",
-                status: .unknown,
-                reasonCode: "check-sa-unsupported-by-version",
-                message: "This yabai version does not support `--check-sa`.",
-                remediationSteps: ["If Desktop shortcuts (switch desktop / move window to desktop) fail, use TilePilot’s “Fix Scripting Addition” action and re-run Setup Check."]
-            )
-        }
-
-        let combined = (result.stdout + " " + result.stderr).lowercased()
-        if combined.contains("not loaded") || combined.contains("not installed") || combined.contains("dock") {
-            return CapabilityState(
-                key: "scripting-addition",
-                status: .degraded,
-                reasonCode: "sa-unavailable",
-                message: "Scripting addition appears unavailable or not loaded.",
-                remediationSteps: [
-                    "Check macOS version compatibility and recent OS updates.",
-                    "Re-run yabai scripting addition installation steps (TilePilot: Fix Scripting Addition) to restore desktop switching and move-window shortcuts."
-                ]
-            )
-        }
-
-        return CapabilityState(
-            key: "scripting-addition",
-            status: .unknown,
-            reasonCode: "sa-status-unknown",
-            message: "Unable to determine scripting addition status.",
-            remediationSteps: ["Check the command log for yabai `--check-sa` output."]
-        )
-    }
-
     private func missionControlCheckForMRUSpaces(_ result: CommandResult) -> MissionControlCheck {
         guard let actual = cleanedLine(from: result.stdout) else {
             return MissionControlCheck(
@@ -508,9 +413,6 @@ final class DoctorService: @unchecked Sendable {
         var warnings: [String] = []
         if missionChecks.contains(where: { $0.status == .warning }) {
             warnings.append("Mission Control settings may reduce predictable space behavior.")
-        }
-        if capabilities.contains(where: { $0.key == "scripting-addition" && ($0.status == .degraded || $0.status == .blocked) }) {
-            warnings.append("Desktop switching and move-window shortcuts may be unavailable until the yabai scripting addition is working.")
         }
         if capabilities.contains(where: { $0.key == "yabai-query" && $0.status != .available }) {
             warnings.append("Live yabai state queries are not currently reliable.")

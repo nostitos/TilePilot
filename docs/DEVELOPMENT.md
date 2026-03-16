@@ -35,12 +35,12 @@ Default behavior:
 Build a release app bundle and package a drag-and-drop DMG:
 
 ```bash
-scripts/build_release_dmg.sh --version v0.2.5
+scripts/build_release_dmg.sh --version v0.2.6
 ```
 
 Output artifact:
 
-- `dist/TilePilot-v0.2.5.dmg`
+- `dist/TilePilot-v0.2.6.dmg`
 
 To notarize the release DMG, first store a `notarytool` keychain profile, then run:
 
@@ -53,7 +53,7 @@ xcrun notarytool store-credentials TilePilot \
 
 TILEPILOT_NOTARY_PROFILE=TilePilot \
 TILEPILOT_NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db" \
-scripts/build_release_dmg.sh --version v0.2.5 --notarize
+scripts/build_release_dmg.sh --version v0.2.6 --notarize
 ```
 
 That will:

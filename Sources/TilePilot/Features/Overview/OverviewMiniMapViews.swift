@@ -126,7 +126,6 @@ struct OverviewDesktopPreviewCard: View {
     let onDesktopTilingChange: (Int, Bool) -> Void
     let onWindowActivate: (Int, Int) -> Void
 
-    @State private var isHoveringTilingToggle = false
     @State private var hoveredBubble: HoveredMiniWindowBubbleState?
 
     var body: some View {
@@ -163,22 +162,17 @@ struct OverviewDesktopPreviewCard: View {
                 .buttonStyle(.plain)
                 .help("Switch to Desktop #\(desktop.desktopIndex).")
 
-                OverviewMiniMapTilingToggle(
-                    isOn: desktop.tilingEnabled,
-                    onSet: { onDesktopTilingChange(desktop.desktopIndex, $0) }
-                )
-                .frame(width: 92)
-                .onHover { hovering in
-                    isHoveringTilingToggle = hovering
-                }
-            }
+                HStack(spacing: 8) {
+                    Text("Tiling")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
-            if isHoveringTilingToggle {
-                Text("Turn tiling on or off.")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .transition(.opacity)
+                    OverviewMiniMapTilingToggle(
+                        isOn: desktop.tilingEnabled,
+                        onSet: { onDesktopTilingChange(desktop.desktopIndex, $0) }
+                    )
+                    .frame(width: 92)
+                }
             }
 
             GeometryReader { proxy in
@@ -242,19 +236,26 @@ private struct OverviewMiniMapTilingToggle: View {
             }
         }
         .padding(2)
-        .background(Color.white.opacity(0.08), in: Capsule())
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.08))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.black.opacity(0.14), lineWidth: 1)
+        )
     }
 
     private func toggleButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(isSelected ? Color.white : Color.black.opacity(0.7))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
                 .background(
                     Capsule()
-                        .fill(isSelected ? Color.white.opacity(0.14) : Color.clear)
+                        .fill(isSelected ? Color.blue.opacity(0.9) : Color.white.opacity(0.82))
                 )
         }
         .buttonStyle(.plain)
@@ -278,7 +279,7 @@ private struct OverviewMiniWindowFrameLayer: View {
             isSelected: isSelected
         )
         let baseLineWidth: CGFloat = isSelected ? 2 : 1.2
-        let lineWidth = isHovered ? baseLineWidth * 2 : baseLineWidth
+        let lineWidth = isHovered ? baseLineWidth * 3 : baseLineWidth
 
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 4)

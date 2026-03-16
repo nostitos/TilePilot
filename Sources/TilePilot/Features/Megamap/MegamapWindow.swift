@@ -673,7 +673,7 @@ private struct MegamapSyntheticDesktopCanvas: View {
                         isFocused: window.focused
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
-                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 2 : baseLineWidth
+                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 3 : baseLineWidth
                     Rectangle()
                         .fill(Color.clear)
                         .overlay(
@@ -785,7 +785,7 @@ private struct MegamapMergedDesktopCanvas: View {
                         isFocused: window.focused
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
-                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 2 : baseLineWidth
+                    let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 3 : baseLineWidth
                     Rectangle()
                         .fill(Color.clear)
                         .overlay(

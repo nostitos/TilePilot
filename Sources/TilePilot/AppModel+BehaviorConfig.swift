@@ -489,8 +489,8 @@ extension AppModel {
     func applyWindowBehaviorRuntime(previous: ManagedWindowBehaviorPolicy, current: ManagedWindowBehaviorPolicy) async {
         var configApplyFailed = false
         let configCommands: [ShellCommand] = [
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "config", "focus_follows_mouse", current.hoverFocusMode.rawValue], timeout: 1.5),
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "config", "mouse_follows_focus", current.mouseFollowsFocusEnabled ? "on" : "off"], timeout: 1.5),
+            yabaiCommand(["-m", "config", "focus_follows_mouse", current.hoverFocusMode.rawValue], timeout: 1.5),
+            yabaiCommand(["-m", "config", "mouse_follows_focus", current.mouseFollowsFocusEnabled ? "on" : "off"], timeout: 1.5),
         ]
         for command in configCommands {
             let result = await doctorService.runSupportCommand(command)
@@ -565,7 +565,7 @@ extension AppModel {
         let openWindows = liveStateSnapshot?.windows ?? []
         for window in openWindows where names.contains(window.app) && !window.floating {
             let result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(window.id), "--toggle", "float"], timeout: 1.5)
+                yabaiCommand(["-m", "window", String(window.id), "--toggle", "float"], timeout: 1.5)
             )
             await MainActor.run {
                 self.appendCommandLog(from: result)

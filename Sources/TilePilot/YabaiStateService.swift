@@ -30,9 +30,9 @@ final class YabaiStateService: @unchecked Sendable {
     }
 
     func pollLiveState() async -> LiveStatePollResult {
-        async let displaysTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--displays"], timeout: 1.5))
-        async let spacesTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--spaces"], timeout: 1.5))
-        async let windowsTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--windows"], timeout: 1.5))
+        async let displaysTask = runner.run(yabaiCommand(["-m", "query", "--displays"], timeout: 1.5))
+        async let spacesTask = runner.run(yabaiCommand(["-m", "query", "--spaces"], timeout: 1.5))
+        async let windowsTask = runner.run(yabaiCommand(["-m", "query", "--windows"], timeout: 1.5))
 
         let timestamp = Date()
         let displaysResult = await displaysTask

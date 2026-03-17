@@ -11,14 +11,14 @@ extension AppModel {
     }
 
     var setupCoreItems: [SetupCheckItem] {
-        setupChecklistItems.filter { ["xcode-clt", "yabai-binary", "skhd-binary"].contains($0.id) }
+        setupChecklistItems.filter { ["bundled-helpers", "yabai-binary", "skhd-binary"].contains($0.id) }
     }
 
     var setupServiceItems: [SetupCheckItem] {
         setupChecklistItems.filter {
             [
-                "brew-service-yabai",
-                "brew-service-skhd",
+                "helper-service-yabai",
+                "helper-service-skhd",
                 "start-at-logon",
                 "accessibility-permission",
             ].contains($0.id)
@@ -34,11 +34,11 @@ extension AppModel {
         let capabilityByKey = Dictionary(uniqueKeysWithValues: (doctorSnapshot?.capabilities ?? []).map { ($0.key, $0) })
         let missionControlChecks = doctorSnapshot?.missionControlChecks ?? []
 
-        let xcode = setupByID["xcode-clt"]
+        let bundledHelpers = setupByID["bundled-helpers"]
         let yabaiBinarySetup = setupByID["yabai-binary"]
         let skhdBinarySetup = setupByID["skhd-binary"]
-        let yabaiServiceSetup = setupByID["brew-service-yabai"]
-        let skhdServiceSetup = setupByID["brew-service-skhd"]
+        let yabaiServiceSetup = setupByID["helper-service-yabai"]
+        let skhdServiceSetup = setupByID["helper-service-skhd"]
         let startAtLogonSetup = setupByID["start-at-logon"]
         let accessibilitySetup = setupByID["accessibility-permission"]
 
@@ -50,34 +50,21 @@ extension AppModel {
         let accessibilityCap = capabilityByKey["accessibility"]
         var rows: [SystemCheckRow] = []
 
-        let xcodeStatus = mappedSystemStatus(from: xcode?.state) ?? .notice
-        let xcodeDetail = externalInstallerStatus.flatMap { status -> String? in
-            switch status.blocker {
-            case .appleDeveloperToolsMissing, .appleDeveloperToolsOutdated:
-                return status.summary
-            default:
-                return nil
-            }
-        }
-        rows.append(SystemCheckRow(
-            id: "xcode-clt",
-            title: "Apple Developer Tools",
-            detail: firstDetail(xcodeDetail, xcode?.detail, fallback: "Needed before TilePilot can install its helper tools on a fresh Mac."),
-            status: xcodeStatus,
-            actions: xcodeStatus == .good ? [.recheck] : [.installCLT, .recheck]
-        ))
-
         let yabaiInstallStatus = mergedSystemStatus([
             mappedSystemStatus(from: yabaiBinarySetup?.state),
             mappedSystemStatus(from: yabaiBinaryCap?.status),
         ])
-        let installHelpersAction: SystemCheckAction = primarySetupAction == .updateAppleDeveloperTools ? .installCLT : .installDependencies
         rows.append(SystemCheckRow(
             id: "yabai-installed",
             title: "yabai Installed",
-            detail: firstDetail(yabaiBinaryCap?.message, yabaiBinarySetup?.detail, fallback: "Install TilePilot helpers to enable desktop and window runtime controls."),
+            detail: firstDetail(
+                yabaiBinaryCap?.message,
+                yabaiBinarySetup?.detail,
+                bundledHelpers?.detail,
+                fallback: "Install TilePilot helpers to enable desktop and window runtime controls."
+            ),
             status: yabaiInstallStatus,
-            actions: yabaiInstallStatus == .good ? [.recheck] : [installHelpersAction, .recheck]
+            actions: yabaiInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
         ))
 
         let skhdInstallStatus = mergedSystemStatus([
@@ -87,9 +74,14 @@ extension AppModel {
         rows.append(SystemCheckRow(
             id: "skhd-installed",
             title: "skhd Installed",
-            detail: firstDetail(skhdBinaryCap?.message, skhdBinarySetup?.detail, fallback: "Install TilePilot helpers to enable keyboard shortcut workflows."),
+            detail: firstDetail(
+                skhdBinaryCap?.message,
+                skhdBinarySetup?.detail,
+                bundledHelpers?.detail,
+                fallback: "Install TilePilot helpers to enable keyboard shortcut workflows."
+            ),
             status: skhdInstallStatus,
-            actions: skhdInstallStatus == .good ? [.recheck] : [installHelpersAction, .recheck]
+            actions: skhdInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
         ))
 
         let yabaiRunningStatus = mergedSystemStatus([
@@ -99,7 +91,7 @@ extension AppModel {
         ])
         let yabaiRunningActions: [SystemCheckAction]
         if yabaiInstallStatus != .good {
-            yabaiRunningActions = [installHelpersAction, .recheck]
+            yabaiRunningActions = [.installDependencies, .recheck]
         } else {
             yabaiRunningActions = yabaiRunningStatus == .good ? [.recheck] : [.startYabai, .restartYabai, .recheck]
         }
@@ -122,7 +114,7 @@ extension AppModel {
         ])
         let skhdRunningActions: [SystemCheckAction]
         if skhdInstallStatus != .good {
-            skhdRunningActions = [installHelpersAction, .recheck]
+            skhdRunningActions = [.installDependencies, .recheck]
         } else {
             skhdRunningActions = skhdRunningStatus == .good ? [.recheck] : [.startSkhd, .restartSkhd, .recheck]
         }
@@ -225,12 +217,10 @@ extension AppModel {
         switch action {
         case .installDependencies:
             performSetupAction(.installHelpers)
-        case .installCLT:
-            performSetupAction(.updateAppleDeveloperTools)
         case .startYabai:
-            startBrewServiceYabai()
+            startHelperServicesBestEffort()
         case .startSkhd:
-            startBrewServiceSkhd()
+            startHelperServicesBestEffort()
         case .enableStartAtLogon:
             enableStartAtLogon()
         case .openLoginItemsSettings:

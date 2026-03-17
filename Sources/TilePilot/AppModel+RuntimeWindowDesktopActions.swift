@@ -170,7 +170,7 @@ extension AppModel {
             guard let self else { return }
             let targetLayout = enabled ? "bsp" : "float"
             let result = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
+                yabaiCommand(["-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
             )
             await MainActor.run {
                 self.appendCommandLog(from: result)
@@ -214,7 +214,7 @@ extension AppModel {
             var successCount = 0
             for spaceIndex in targetSpaces {
                 let result = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/env", ["yabai", "-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
+                    yabaiCommand(["-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
                 )
                 await MainActor.run {
                     self.appendCommandLog(from: result)
@@ -255,7 +255,7 @@ extension AppModel {
         Task { [weak self] in
             guard let self else { return }
             let toggle = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(windowID), "--toggle", "float"], timeout: 1.5)
+                yabaiCommand(["-m", "window", String(windowID), "--toggle", "float"], timeout: 1.5)
             )
             await MainActor.run {
                 self.appendCommandLog(from: toggle)
@@ -326,7 +326,7 @@ extension AppModel {
         guard focused else { return false }
 
         let toggleFocused = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--toggle", "float"], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--toggle", "float"], timeout: 1.5)
         )
         await MainActor.run {
             appendCommandLog(from: toggleFocused)
@@ -419,7 +419,7 @@ extension AppModel {
         }
 
         let result = await self.doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "space", "--focus", String(index)], timeout: 1.5)
+            yabaiCommand(["-m", "space", "--focus", String(index)], timeout: 1.5)
         )
         await MainActor.run {
             self.appendCommandLog(from: result)
@@ -480,7 +480,7 @@ extension AppModel {
 
     private func focusAnyWindowOnDesktop(index: Int) async -> Bool {
         let query = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--windows", "--space", String(index)], timeout: 1.2)
+            yabaiCommand(["-m", "query", "--windows", "--space", String(index)], timeout: 1.2)
         )
         await MainActor.run {
             appendCommandLog(from: query)
@@ -509,7 +509,7 @@ extension AppModel {
         }
 
         let focus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(targetID)], timeout: 1.2)
+            yabaiCommand(["-m", "window", "--focus", String(targetID)], timeout: 1.2)
         )
         await MainActor.run {
             appendCommandLog(from: focus)
@@ -594,7 +594,7 @@ extension AppModel {
 
     func queryCurrentFocusedSpaceIndex() async -> Int? {
         let result = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--spaces", "--space"], timeout: 1.0)
+            yabaiCommand(["-m", "query", "--spaces", "--space"], timeout: 1.0)
         )
         await MainActor.run {
             appendCommandLog(from: result)
@@ -644,7 +644,7 @@ extension AppModel {
 
     private func focusWindowWithRestore(windowID: Int, knownWindow: WindowState) async -> Bool {
         let focus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
         )
         await MainActor.run {
             appendCommandLog(from: focus)
@@ -671,7 +671,7 @@ extension AppModel {
         }
 
         let restore = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--deminimize", String(windowID)], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--deminimize", String(windowID)], timeout: 1.5)
         )
         await MainActor.run {
             appendCommandLog(from: restore)
@@ -686,7 +686,7 @@ extension AppModel {
         }
 
         let refocus = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
         )
         await MainActor.run {
             appendCommandLog(from: refocus)

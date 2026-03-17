@@ -97,15 +97,7 @@ final class CommandRunner: @unchecked Sendable {
     }
 
     private func mergedEnvironmentForGUIApp() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        let preferredPrefix = "/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/sbin:/usr/local/sbin"
-        let existingPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        if existingPath.contains("/opt/homebrew/bin") || existingPath.contains("/usr/local/bin") {
-            env["PATH"] = existingPath
-        } else {
-            env["PATH"] = preferredPrefix + ":" + existingPath
-        }
-        return env
+        ManagedHelperService.shared.environmentWithManagedHelpers()
     }
 }
 
@@ -119,13 +111,13 @@ final class DoctorService: @unchecked Sendable {
 
     func runDoctor() async -> DoctorRunResult {
         async let buildResultTask = runner.run(.init("/usr/bin/sw_vers", ["-buildVersion"], timeout: 1.0))
-        async let yabaiVersionTask = runner.run(.init("/usr/bin/env", ["yabai", "--version"], timeout: 1.2))
-        async let skhdVersionTask = runner.run(.init("/usr/bin/env", ["skhd", "--version"], timeout: 1.2))
+        async let yabaiVersionTask = runner.run(yabaiCommand(["--version"], timeout: 1.2))
+        async let skhdVersionTask = runner.run(skhdCommand(["--version"], timeout: 1.2))
         async let yabaiDaemonTask = runner.run(.init("/usr/bin/pgrep", ["-x", "yabai"], timeout: 1.0))
         async let skhdDaemonTask = runner.run(.init("/usr/bin/pgrep", ["-x", "skhd"], timeout: 1.0))
         async let mruSpacesTask = runner.run(.init("/usr/bin/defaults", ["read", "com.apple.dock", "mru-spaces"], timeout: 1.0))
         async let spansDisplaysTask = runner.run(.init("/usr/bin/defaults", ["read", "com.apple.spaces", "spans-displays"], timeout: 1.0))
-        async let yabaiQueryTask = runner.run(.init("/usr/bin/env", ["yabai", "-m", "query", "--displays"], timeout: 1.5))
+        async let yabaiQueryTask = runner.run(yabaiCommand(["-m", "query", "--displays"], timeout: 1.5))
 
         let buildResult = await buildResultTask
         let yabaiVersionResult = await yabaiVersionTask

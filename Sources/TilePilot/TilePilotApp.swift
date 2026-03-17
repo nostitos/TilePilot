@@ -173,7 +173,7 @@ private struct FirstLaunchGreetingView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to TilePilot")
                         .font(.title2.weight(.semibold))
-                    Text("TilePilot needs two helper tools to manage windows and keyboard shortcuts on your Mac. TilePilot can guide the install and recheck setup when you return.")
+                    Text("TilePilot needs two helper tools to manage windows and keyboard shortcuts on your Mac. TilePilot can install them and recheck setup automatically.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -188,11 +188,6 @@ private struct FirstLaunchGreetingView: View {
                             .font(.subheadline)
                         Text("skhd: the background shortcut helper that listens for global hotkeys.")
                             .font(.subheadline)
-                        if model.primarySetupAction == .updateAppleDeveloperTools {
-                            Text("Apple Developer Tools: required before TilePilot can install its helper tools on a fresh Mac.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
                         Text("Accessibility permission is optional. Core TilePilot setup does not depend on it.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -286,7 +281,7 @@ private struct FirstLaunchGreetingView: View {
                     .buttonStyle(.bordered)
                 }
 
-                Text("TilePilot will still open now. When you come back from Terminal or System Settings, TilePilot will recheck setup automatically.")
+                Text("TilePilot will still open now. Setup will recheck automatically after helper install or settings changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

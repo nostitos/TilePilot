@@ -4,6 +4,10 @@ import Foundation
 
 @MainActor
 extension AppModel {
+    private var helperService: ManagedHelperService {
+        ManagedHelperService.shared
+    }
+
     func exportDiagnostics() {
         guard let snapshot = doctorSnapshot else {
             lastErrorMessage = "Run System Recheck before exporting diagnostics."
@@ -76,39 +80,26 @@ extension AppModel {
         lastActionMessage = "Issue-ready summary copied to clipboard."
     }
 
-    func runSetupInstallerInTerminal() {
+    func installManagedHelpers() {
         guard !isLaunchingSetupInstaller else { return }
         isLaunchingSetupInstaller = true
 
         Task { [weak self] in
             guard let self else { return }
-            defer { Task { @MainActor in self.isLaunchingSetupInstaller = false } }
+            let result = await self.helperService.installBundledHelpers()
 
-            do {
-                let scriptURL = try self.bootstrapService.prepareInstallerScript()
-                let openResult = await self.doctorService.runSupportCommand(
-                    ShellCommand("/usr/bin/open", ["-a", "Terminal", scriptURL.path], timeout: 3.0)
-                )
-
-                await MainActor.run {
-                    self.lastSetupInstallerURL = scriptURL
-                    self.appendCommandLog(from: openResult)
-                    if openResult.isSuccess {
-                        self.lastActionMessage = "Opened TilePilot Helper installer in Terminal."
-                        self.lastErrorMessage = nil
-                        self.scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.5)
-                    } else {
-                        self.lastErrorMessage = "Failed to open installer in Terminal. Try opening \(scriptURL.path) manually."
-                        self.lastActionMessage = nil
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.lastErrorMessage = "Failed to prepare setup installer: \(error.localizedDescription)"
-                    self.lastActionMessage = nil
-                }
+            await MainActor.run {
+                self.isLaunchingSetupInstaller = false
+                self.applyManagedHelperOperationResult(result)
             }
+
+            await self.refreshBootstrapSetup()
+            await self.refreshDoctor()
         }
+    }
+
+    func runSetupInstallerInTerminal() {
+        installManagedHelpers()
     }
 
     func runScriptingAdditionRepairInTerminal() {
@@ -129,16 +120,6 @@ extension AppModel {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:",
         ])
-    }
-
-    func requestXcodeCLTInstallPrompt() {
-        acknowledgeInitialStatusIfNeeded()
-        runSupportCommand(
-            ShellCommand("/usr/bin/xcode-select", ["--install"], timeout: 2.0),
-            successMessage: "Requested Apple Developer Tools installer prompt. If nothing appears, check System Settings > Software Update."
-        )
-        openSoftwareUpdateSettings()
-        scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.5)
     }
 
     func requestAccessibilityAccessPrompt() {
@@ -162,14 +143,6 @@ extension AppModel {
             "x-apple.systempreferences:com.apple.preference.expose",
             "x-apple.systempreferences:",
         ])
-    }
-
-    func openSoftwareUpdateSettings() {
-        openURLCandidates([
-            "x-apple.systempreferences:com.apple.Software-Update-Settings.extension",
-            "x-apple.systempreferences:com.apple.preferences.softwareupdate",
-            "x-apple.systempreferences:",
-        ], updateMessaging: false)
     }
 
     func openMissionControlKeyboardShortcuts() {
@@ -217,52 +190,37 @@ extension AppModel {
 
     func restartYabaiBestEffort() {
         runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--restart-service"], timeout: 2.0),
+            yabaiCommand(["--restart-service"], timeout: 2.0),
             successMessage: "Requested yabai service restart."
         )
     }
 
     func restartSkhdBestEffort() {
         runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0),
+            skhdCommand(["--reload"], timeout: 2.0),
             successMessage: "Requested skhd config reload."
         )
     }
 
     func startBrewServiceYabai() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--start-service"], timeout: 5.0),
-            successMessage: "Requested `yabai --start-service`."
-        )
+        startHelperServicesBestEffort()
     }
 
     func startBrewServiceSkhd() {
-        runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--start-service"], timeout: 5.0),
-            successMessage: "Requested `skhd --start-service`."
-        )
+        startHelperServicesBestEffort()
     }
 
     func startHelperServicesBestEffort() {
         Task { [weak self] in
             guard let self else { return }
-            let yabaiResult = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "--start-service"], timeout: 5.0)
-            )
-            let skhdResult = await self.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["skhd", "--start-service"], timeout: 5.0)
-            )
+            await MainActor.run {
+                self.isLaunchingSetupInstaller = true
+            }
+            let result = await self.helperService.startManagedServices()
 
             await MainActor.run {
-                self.appendCommandLog(from: yabaiResult)
-                self.appendCommandLog(from: skhdResult)
-                if yabaiResult.isSuccess && skhdResult.isSuccess {
-                    self.lastActionMessage = "Requested helper services start."
-                    self.lastErrorMessage = nil
-                } else {
-                    self.lastErrorMessage = "TilePilot could not start one or more helper services automatically."
-                    self.lastActionMessage = nil
-                }
+                self.isLaunchingSetupInstaller = false
+                self.applyManagedHelperOperationResult(result)
             }
 
             await self.refreshBootstrapSetup()
@@ -316,6 +274,18 @@ extension AppModel {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private func applyManagedHelperOperationResult(_ result: ManagedHelperOperationResult) {
+        managedHelperInstallState = result.installState
+        prependCommandLogs(result.commandLogs.reversed())
+        if let errorMessage = result.errorMessage {
+            lastErrorMessage = errorMessage
+            lastActionMessage = nil
+        } else {
+            lastActionMessage = result.successMessage ?? "TilePilot helpers updated."
+            lastErrorMessage = nil
+        }
     }
 
     private func scheduleSetupRefreshAfterExternalHandoff(delaySeconds: Double) {

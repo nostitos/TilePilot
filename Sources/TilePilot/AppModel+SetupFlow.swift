@@ -6,40 +6,17 @@ extension AppModel {
         Dictionary(uniqueKeysWithValues: setupChecklistItems.map { ($0.id, $0) })
     }
 
-    private var capabilitiesByKey: [String: CapabilityState] {
-        Dictionary(uniqueKeysWithValues: (doctorSnapshot?.capabilities ?? []).map { ($0.key, $0) })
-    }
-
     private var helpersInstalledForSetup: Bool {
         setupItemInstalled("yabai-binary") && setupItemInstalled("skhd-binary")
     }
 
     private var helperServicesRunningForSetup: Bool {
-        setupItemInstalled("brew-service-yabai") && setupItemInstalled("brew-service-skhd")
-    }
-
-    private var appleDeveloperToolsNeedAttentionForSetup: Bool {
-        if setupItemMissing("xcode-clt") {
-            return true
-        }
-        guard !helpersInstalledForSetup else { return false }
-        guard let status = externalInstallerStatus else { return false }
-        switch status.blocker {
-        case .appleDeveloperToolsMissing:
-            return setupItemMissing("xcode-clt")
-        case .appleDeveloperToolsOutdated:
-            return true
-        default:
-            return false
-        }
+        setupItemInstalled("helper-service-yabai") && setupItemInstalled("helper-service-skhd")
     }
 
     var primarySetupAction: SetupNextAction {
         if doctorSnapshot == nil || bootstrapSnapshot == nil {
             return .recheck
-        }
-        if appleDeveloperToolsNeedAttentionForSetup {
-            return .updateAppleDeveloperTools
         }
         if !helpersInstalledForSetup {
             return .installHelpers
@@ -55,29 +32,11 @@ extension AppModel {
     }
 
     var primarySetupActionDetail: String {
-        if let status = externalInstallerStatus {
-            switch primarySetupAction {
-            case .updateAppleDeveloperTools:
-                if status.blocker == .appleDeveloperToolsMissing || status.blocker == .appleDeveloperToolsOutdated {
-                    return status.summary
-                }
-            case .installHelpers:
-                if status.recommendedAction == .installHelpers {
-                    return status.summary
-                }
-            case .startHelperServices:
-                if status.blocker == .serviceStartFailed || status.recommendedAction == .startHelperServices {
-                    return status.summary
-                }
-            case .recheck, .ready:
-                break
-            }
-        }
-
         switch primarySetupAction {
-        case .updateAppleDeveloperTools:
-            return "TilePilot needs Apple Developer Tools before it can install its helper tools."
         case .installHelpers:
+            if !setupItemInstalled("bundled-helpers") {
+                return "This TilePilot build does not include bundled helpers. Use the packaged app from /Applications to install them."
+            }
             return "TilePilot needs two helper tools to manage windows and keyboard shortcuts. TilePilot can install them for you."
         case .startHelperServices:
             return "TilePilot helpers are installed, but the background services still need to be started."
@@ -104,7 +63,6 @@ extension AppModel {
 
     var setupRequiredRows: [SystemCheckRow] {
         let requiredIDs: Set<String> = [
-            "xcode-clt",
             "yabai-installed",
             "skhd-installed",
             "yabai-running",
@@ -136,9 +94,11 @@ extension AppModel {
         switch primarySetupAction {
         case .installHelpers:
             return isLaunchingSetupInstaller
+        case .startHelperServices:
+            return isLaunchingSetupInstaller
         case .recheck:
             return isRefreshing || isRefreshingBootstrap
-        default:
+        case .ready:
             return false
         }
     }
@@ -149,10 +109,8 @@ extension AppModel {
 
     func performSetupAction(_ action: SetupNextAction) {
         switch action {
-        case .updateAppleDeveloperTools:
-            requestXcodeCLTInstallPrompt()
         case .installHelpers:
-            runSetupInstallerInTerminal()
+            installManagedHelpers()
         case .startHelperServices:
             startHelperServicesBestEffort()
         case .recheck:
@@ -169,10 +127,6 @@ extension AppModel {
 
     private func setupItemInstalled(_ id: String) -> Bool {
         setupItemsByID[id]?.state == .installed
-    }
-
-    private func setupItemMissing(_ id: String) -> Bool {
-        setupItemsByID[id]?.state == .missing
     }
 
     var setupDisplayRows: [SystemCheckRow] {

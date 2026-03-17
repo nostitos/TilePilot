@@ -99,13 +99,13 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         let previousLabels = ruleLabels(for: previous)
         let currentLabels = ruleLabels(for: current)
         for label in Array(previousLabels.union(currentLabels)).sorted() {
-            commands.append(ShellCommand("/usr/bin/env", ["yabai", "-m", "rule", "--remove", "label=\(label)"], timeout: 1.5))
+            commands.append(yabaiCommand(["-m", "rule", "--remove", "label=\(label)"], timeout: 1.5))
         }
 
         for app in current.alwaysTileApps.map(normalizeAppName).filter({ !$0.isEmpty }).sorted() {
             commands.append(
-                ShellCommand("/usr/bin/env", [
-                    "yabai", "-m", "rule", "--add",
+                yabaiCommand([
+                    "-m", "rule", "--add",
                     "label=\(ruleLabel(prefix: "tp_always", appName: app))",
                     "app=\(escapeRegex(app))",
                     "manage=on",
@@ -114,8 +114,8 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         }
         for app in current.neverTileApps.map(normalizeAppName).filter({ !$0.isEmpty }).sorted() {
             commands.append(
-                ShellCommand("/usr/bin/env", [
-                    "yabai", "-m", "rule", "--add",
+                yabaiCommand([
+                    "-m", "rule", "--add",
                     "label=\(ruleLabel(prefix: "tp_never", appName: app))",
                     "app=\(escapeRegex(app))",
                     "manage=off",
@@ -124,8 +124,8 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         }
         if current.manualTilingModeEnabled {
             commands.append(
-                ShellCommand("/usr/bin/env", [
-                    "yabai", "-m", "rule", "--add",
+                yabaiCommand([
+                    "-m", "rule", "--add",
                     "label=tp_manual_tiling_default",
                     "app=.*",
                     "manage=off",

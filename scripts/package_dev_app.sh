@@ -116,11 +116,29 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 INFO_PLIST="$CONTENTS_DIR/Info.plist"
 EXECUTABLE_PATH="$MACOS_DIR/${APP_NAME}"
+HELPERS_STAGE_DIR=""
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BIN_PATH" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
+
+prepare_bundled_helpers() {
+  echo "Preparing bundled helpers..."
+  HELPERS_STAGE_DIR="$("$ROOT_DIR/scripts/prepare_bundled_helpers.sh")"
+}
+
+copy_bundled_helpers() {
+  [[ -n "$HELPERS_STAGE_DIR" ]] || return 1
+  local destination="$RESOURCES_DIR/Helpers"
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  cp "$HELPERS_STAGE_DIR/yabai" "$destination/yabai"
+  cp "$HELPERS_STAGE_DIR/skhd" "$destination/skhd"
+  cp "$HELPERS_STAGE_DIR/helper-manifest.json" "$destination/helper-manifest.json"
+  chmod 755 "$destination/yabai" "$destination/skhd"
+  xattr -cr "$destination" 2>/dev/null || true
+}
 
 maybe_build_icon() {
   local icon_src="$ROOT_DIR/$ICON_SOURCE"
@@ -167,7 +185,15 @@ resolve_sign_identity() {
 
 sign_app_bundle() {
   local app_path="$1"
+  local helpers_dir="$app_path/Contents/Resources/Helpers"
   if [[ $SIGN_APP -eq 0 ]]; then
+    if [[ -d "$helpers_dir" ]]; then
+      for helper in yabai skhd; do
+        if [[ -f "$helpers_dir/$helper" ]]; then
+          /usr/bin/codesign --force --sign - "$helpers_dir/$helper"
+        fi
+      done
+    fi
     echo "Applying ad-hoc signature (no identity requested)."
     /usr/bin/codesign --force --deep --sign - "$app_path"
     /usr/bin/codesign --verify --deep --strict "$app_path"
@@ -176,16 +202,32 @@ sign_app_bundle() {
   local identity
   identity="$(resolve_sign_identity)"
   if [[ -z "$identity" ]]; then
+    if [[ -d "$helpers_dir" ]]; then
+      for helper in yabai skhd; do
+        if [[ -f "$helpers_dir/$helper" ]]; then
+          /usr/bin/codesign --force --sign - "$helpers_dir/$helper"
+        fi
+      done
+    fi
     echo "No Developer ID Application identity found; applying ad-hoc signature."
     /usr/bin/codesign --force --deep --sign - "$app_path"
     /usr/bin/codesign --verify --deep --strict "$app_path"
     return 0
+  fi
+  if [[ -d "$helpers_dir" ]]; then
+    for helper in yabai skhd; do
+      if [[ -f "$helpers_dir/$helper" ]]; then
+        /usr/bin/codesign --force --options runtime --timestamp --sign "$identity" "$helpers_dir/$helper"
+      fi
+    done
   fi
   echo "Signing app with: $identity"
   /usr/bin/codesign --force --deep --options runtime --timestamp --sign "$identity" "$app_path"
   /usr/bin/codesign --verify --deep --strict "$app_path"
 }
 
+prepare_bundled_helpers
+copy_bundled_helpers
 maybe_build_icon
 
 cat > "$INFO_PLIST" <<EOF
@@ -223,7 +265,7 @@ cat > "$INFO_PLIST" <<EOF
     </dict>
   </array>
   <key>CFBundleShortVersionString</key>
-  <string>0.2.7</string>
+  <string>0.2.8</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

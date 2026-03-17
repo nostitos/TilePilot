@@ -497,11 +497,10 @@ struct NowDashboardView: View {
         let normalized = message.lowercased()
 
         if normalized.contains("not installed yet") || normalized.contains("no such file or directory") {
-            let action = model.primarySetupAction == .updateAppleDeveloperTools ? SetupNextAction.updateAppleDeveloperTools : SetupNextAction.installHelpers
             return LiveStateHelp(
                 message: "TilePilot needs its helper tools before the full Overview can map desktops precisely.",
                 actions: [
-                    .init(label: action.buttonTitle, handler: { model.performSetupAction(action) }),
+                    .init(label: SetupNextAction.installHelpers.buttonTitle, handler: { model.performSetupAction(.installHelpers) }),
                     .init(label: "Recheck", handler: { Task { await model.refreshLiveState() } }),
                 ]
             )

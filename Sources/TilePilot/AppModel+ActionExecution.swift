@@ -136,12 +136,12 @@ extension AppModel {
 
     func runBestEffortSkhdRestart(afterConfigChange: Bool) async {
         let reloadResult = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
+            skhdCommand(["--reload"], timeout: 2.0)
         )
         var result = reloadResult
         if !reloadResult.isSuccess {
             result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+                skhdCommand(["--restart-service"], timeout: 2.0)
             )
         }
         await MainActor.run {
@@ -175,12 +175,12 @@ extension AppModel {
 
     func runBestEffortSkhdRestartAfterRawFileSave() async {
         let reloadResult = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["skhd", "--reload"], timeout: 2.0)
+            skhdCommand(["--reload"], timeout: 2.0)
         )
         var result = reloadResult
         if !reloadResult.isSuccess {
             result = await doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["skhd", "--restart-service"], timeout: 2.0)
+                skhdCommand(["--restart-service"], timeout: 2.0)
             )
         }
         await MainActor.run {

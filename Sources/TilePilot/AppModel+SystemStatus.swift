@@ -173,8 +173,6 @@ extension AppModel {
         }
 
         switch primarySetupAction {
-        case .updateAppleDeveloperTools:
-            return "Update Apple Developer Tools"
         case .installHelpers:
             return "Install TilePilot Helpers"
         case .startHelperServices:

@@ -165,7 +165,7 @@ final class KeepOnTopCoordinator {
         }
 
         let raise = await model.doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", String(windowID), "--raise"], timeout: 1.5)
+            yabaiCommand(["-m", "window", String(windowID), "--raise"], timeout: 1.5)
         )
         model.appendCommandLog(from: raise)
         if !raise.isSuccess {
@@ -176,7 +176,7 @@ final class KeepOnTopCoordinator {
                    let currentSpace = await model.queryCurrentFocusedSpaceIndex(),
                    currentSpace == targetSpace {
                     let focus = await model.doctorService.runSupportCommand(
-                        ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+                        yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
                     )
                     model.appendCommandLog(from: focus)
                     guard focus.isSuccess else { return false }
@@ -193,7 +193,7 @@ final class KeepOnTopCoordinator {
                 return false
             }
             let focus = await model.doctorService.runSupportCommand(
-                ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+                yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
             )
             model.appendCommandLog(from: focus)
             guard focus.isSuccess else { return false }
@@ -209,7 +209,7 @@ final class KeepOnTopCoordinator {
         _ = await raiseWindowOnly(on: model, windowID: windowID, targetSpace: nil, bypassCooldown: true, allowFocusFallback: true)
 
         let focus = await model.doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
         )
         model.appendCommandLog(from: focus)
     }
@@ -294,7 +294,7 @@ final class KeepOnTopCoordinator {
         }
 
         let focus = await model.doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "window", "--focus", String(windowID)], timeout: 1.5)
+            yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
         )
         model.appendCommandLog(from: focus)
         guard focus.isSuccess else { return false }

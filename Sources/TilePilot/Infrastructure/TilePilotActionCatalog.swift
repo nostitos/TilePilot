@@ -109,24 +109,24 @@ enum TilePilotActionCatalog {
     static func commands(for actionID: TilePilotActionID) -> [ShellCommand] {
         switch actionID {
         case .balanceSpace:
-            return [.init("/usr/bin/env", ["yabai", "-m", "space", "--balance"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "space", "--balance"], timeout: 1.5)]
         case .layoutBSPAndBalance:
             return [
-                .init("/usr/bin/env", ["yabai", "-m", "space", "--layout", "bsp"], timeout: 1.5),
-                .init("/usr/bin/env", ["yabai", "-m", "space", "--balance"], timeout: 1.5),
+                yabaiCommand(["-m", "space", "--layout", "bsp"], timeout: 1.5),
+                yabaiCommand(["-m", "space", "--balance"], timeout: 1.5),
             ]
         case .layoutStack:
-            return [.init("/usr/bin/env", ["yabai", "-m", "space", "--layout", "stack"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "space", "--layout", "stack"], timeout: 1.5)]
         case .toggleFloat:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--toggle", "float"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "window", "--toggle", "float"], timeout: 1.5)]
         case .focusWest:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "west"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "window", "--focus", "west"], timeout: 1.5)]
         case .focusEast:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "east"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "window", "--focus", "east"], timeout: 1.5)]
         case .focusNorth:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "north"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "window", "--focus", "north"], timeout: 1.5)]
         case .focusSouth:
-            return [.init("/usr/bin/env", ["yabai", "-m", "window", "--focus", "south"], timeout: 1.5)]
+            return [yabaiCommand(["-m", "window", "--focus", "south"], timeout: 1.5)]
         case .browserReliefPlaceholder:
             return []
         }

@@ -207,7 +207,7 @@ extension AppModel {
     func restartYabaiAfterRawFileEdit() {
         guard selectedEditableFileKind == .yabairc else { return }
         runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "--restart-service"], timeout: 2.0),
+            yabaiCommand(["--restart-service"], timeout: 2.0),
             successMessage: "Requested yabai service restart."
         )
     }

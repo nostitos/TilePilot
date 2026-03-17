@@ -611,7 +611,7 @@ extension AppModel {
 
     private func queryMegamapCaptureTargets(using snapshot: LiveStateSnapshot) async -> [(display: DisplayState, desktopIndex: Int)] {
         let query = await doctorService.runSupportCommand(
-            ShellCommand("/usr/bin/env", ["yabai", "-m", "query", "--spaces"], timeout: 1.5)
+            yabaiCommand(["-m", "query", "--spaces"], timeout: 1.5)
         )
         appendCommandLog(from: query)
 

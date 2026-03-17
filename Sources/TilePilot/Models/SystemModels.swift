@@ -148,7 +148,6 @@ struct SetupBootstrapSnapshot: Codable, Sendable {
 }
 
 enum SetupNextAction: String, Codable, Sendable {
-    case updateAppleDeveloperTools
     case installHelpers
     case startHelperServices
     case recheck
@@ -156,7 +155,6 @@ enum SetupNextAction: String, Codable, Sendable {
 
     var buttonTitle: String {
         switch self {
-        case .updateAppleDeveloperTools: return "Update Apple Developer Tools"
         case .installHelpers: return "Install TilePilot Helpers"
         case .startHelperServices: return "Start Helper Services"
         case .recheck: return "Recheck Setup"
@@ -166,36 +164,12 @@ enum SetupNextAction: String, Codable, Sendable {
 
     var summaryTitle: String {
         switch self {
-        case .updateAppleDeveloperTools: return "Apple Developer Tools Needed"
         case .installHelpers: return "TilePilot Helpers Needed"
         case .startHelperServices: return "Helper Services Needed"
         case .recheck: return "Setup Needs Recheck"
         case .ready: return "Ready"
         }
     }
-}
-
-enum ExternalInstallerOutcome: String, Codable, Sendable {
-    case success
-    case blocked
-    case failed
-}
-
-enum ExternalInstallerBlocker: String, Codable, Sendable {
-    case appleDeveloperToolsMissing = "apple_developer_tools_missing"
-    case appleDeveloperToolsOutdated = "apple_developer_tools_outdated"
-    case homebrewFailed = "homebrew_failed"
-    case helperInstallFailed = "helper_install_failed"
-    case serviceStartFailed = "service_start_failed"
-    case unknown
-}
-
-struct ExternalInstallerStatus: Codable, Sendable {
-    let outcome: ExternalInstallerOutcome
-    let blocker: ExternalInstallerBlocker?
-    let summary: String
-    let recommendedAction: SetupNextAction
-    let updatedAt: Date
 }
 
 enum SystemCheckStatus: String, Sendable {
@@ -225,7 +199,6 @@ enum SystemCheckStatus: String, Sendable {
 
 enum SystemCheckAction: String, Sendable, Hashable {
     case installDependencies
-    case installCLT
     case startYabai
     case startSkhd
     case enableStartAtLogon
@@ -242,7 +215,6 @@ enum SystemCheckAction: String, Sendable, Hashable {
     var label: String {
         switch self {
         case .installDependencies: return "Install Helpers"
-        case .installCLT: return "Update Tools"
         case .startYabai: return "Start yabai"
         case .startSkhd: return "Start skhd"
         case .enableStartAtLogon: return "Enable"

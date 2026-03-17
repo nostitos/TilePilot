@@ -83,7 +83,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
-    @Published private(set) var externalInstallerStatus: ExternalInstallerStatus?
+    @Published var managedHelperInstallState: ManagedHelperInstallState?
     @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
     @Published var megamapDisplaySections: [MegamapDisplaySection] = []
     @Published var isRefreshingMegamap = false
@@ -255,6 +255,7 @@ final class AppModel: ObservableObject {
     @Published var runtimeDiagnostics = RuntimeDiagnostics()
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
+    private var managedHelperAutoUpgradeTask: Task<Void, Never>?
     private var lastLiveStateContentSignature: String?
     var latestLiveStateSnapshot: LiveStateSnapshot?
     private var overviewCachesDirty = true
@@ -344,6 +345,8 @@ final class AppModel: ObservableObject {
         autoRefreshTask = nil
         statePollingTask?.cancel()
         statePollingTask = nil
+        managedHelperAutoUpgradeTask?.cancel()
+        managedHelperAutoUpgradeTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
     }
@@ -370,8 +373,28 @@ final class AppModel: ObservableObject {
 
         let result = await bootstrapService.runBootstrapChecks()
         bootstrapSnapshot = result.snapshot
-        externalInstallerStatus = result.externalInstallerStatus
+        managedHelperInstallState = result.managedHelperInstallState
         prependCommandLogs(result.commandLogs)
+
+        if managedHelperAutoUpgradeTask == nil,
+           !isLaunchingSetupInstaller,
+           ManagedHelperService.shared.managedHelpersNeedUpgrade(currentState: result.managedHelperInstallState) {
+            managedHelperAutoUpgradeTask = Task { [weak self] in
+                guard let self else { return }
+                let upgradeResult = await ManagedHelperService.shared.installBundledHelpers()
+                await MainActor.run {
+                    self.managedHelperInstallState = upgradeResult.installState
+                    self.prependCommandLogs(upgradeResult.commandLogs.reversed())
+                    if let errorMessage = upgradeResult.errorMessage {
+                        self.lastErrorMessage = errorMessage
+                        self.lastActionMessage = nil
+                    }
+                    self.managedHelperAutoUpgradeTask = nil
+                }
+                await self.refreshBootstrapSetup()
+                await self.refreshDoctor()
+            }
+        }
     }
 
     func acknowledgeInitialStatusIfNeeded() {

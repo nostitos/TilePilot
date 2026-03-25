@@ -10,12 +10,11 @@ struct WindowBehaviorDashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     precedenceCard
+                    mouseDraggingCard
                     desktopBehaviorCard
                     defaultBehaviorCard
                     appRulesCard
                     pointerFocusCard
-                    backupCard
-                    diffCard
                 }
                 .padding()
             }
@@ -294,6 +293,55 @@ struct WindowBehaviorDashboardView: View {
         }
     }
 
+    private var mouseDraggingCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Try this on a tiled desktop: hold the modifier key, then drag a window directly.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                behaviorMenuRow(
+                    title: "Modifier Key",
+                    detail: "Hold this key while dragging a window. yabai supports one modifier here, not combinations.",
+                    selection: Binding(
+                        get: { model.windowBehaviorPolicyDraft.mouseModifier },
+                        set: { model.updateMouseModifierDraft($0) }
+                    )
+                )
+
+                behaviorMenuRow(
+                    title: "Hold Modifier + Left Drag",
+                    detail: "While holding the modifier, left-drag a window. Move repositions it. Resize changes its size.",
+                    selection: Binding(
+                        get: { model.windowBehaviorPolicyDraft.mouseAction1 },
+                        set: { model.updateMouseAction1Draft($0) }
+                    )
+                )
+
+                behaviorMenuRow(
+                    title: "Hold Modifier + Right Drag",
+                    detail: "While holding the modifier, right-drag a window. Move repositions it. Resize changes its size.",
+                    selection: Binding(
+                        get: { model.windowBehaviorPolicyDraft.mouseAction2 },
+                        set: { model.updateMouseAction2Draft($0) }
+                    )
+                )
+
+                behaviorMenuRow(
+                    title: "When You Drop One Tiled Window On Another",
+                    detail: "Only applies to tiled windows. Drag one tiled window onto another and release near the center. Swap trades places. Stack puts them into one stack.",
+                    selection: Binding(
+                        get: { model.windowBehaviorPolicyDraft.mouseDropAction },
+                        set: { model.updateMouseDropActionDraft($0) }
+                    )
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Mouse Dragging & Drop", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+    }
+
     private var applyBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -331,47 +379,6 @@ struct WindowBehaviorDashboardView: View {
         }
     }
 
-    private var backupCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                if model.yabaiConfigBackups.isEmpty {
-                    Text("No yabairc backups yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.yabaiConfigBackups.prefix(8)) { backup in
-                        HStack {
-                            Text(URL(fileURLWithPath: backup.path).lastPathComponent)
-                                .font(.caption)
-                            Spacer()
-                            Text(backup.createdAt.formatted(date: .numeric, time: .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("Restore") { model.restoreYabaiConfigBackup(backup) }
-                                .font(.caption)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Backups", systemImage: "clock.arrow.circlepath")
-        }
-    }
-
-    private var diffCard: some View {
-        GroupBox {
-            ScrollView {
-                Text(model.yabaiConfigDiffPreviewText)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(minHeight: 120)
-        } label: {
-            Label("Managed yabairc Diff", systemImage: "doc.text.magnifyingglass")
-        }
-    }
-
     private func listEditor(
         title: String,
         items: [String],
@@ -401,6 +408,34 @@ struct WindowBehaviorDashboardView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func behaviorMenuRow<Value: CaseIterable & Hashable>(
+        title: String,
+        detail: String,
+        selection: Binding<Value>
+    ) -> some View where Value.AllCases: RandomAccessCollection, Value: BehaviorOptionDisplayable {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 360, alignment: .leading)
+
+            Picker("", selection: selection) {
+                ForEach(Array(Value.allCases), id: \.self) { value in
+                    Text(value.displayName).tag(value)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 220, alignment: .leading)
+
+            Spacer(minLength: 0)
         }
     }
 }

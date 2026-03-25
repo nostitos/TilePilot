@@ -1,6 +1,10 @@
 import Foundation
 
-enum HoverFocusMode: String, Codable, CaseIterable, Sendable {
+protocol BehaviorOptionDisplayable {
+    var displayName: String { get }
+}
+
+enum HoverFocusMode: String, Codable, CaseIterable, Sendable, BehaviorOptionDisplayable {
     case off
     case autofocus
     case autoraise
@@ -14,10 +18,58 @@ enum HoverFocusMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum MouseModifierKey: String, Codable, CaseIterable, Sendable, BehaviorOptionDisplayable {
+    case cmd
+    case alt
+    case shift
+    case ctrl
+    case fn
+
+    var displayName: String {
+        switch self {
+        case .cmd: return "Command"
+        case .alt: return "Option"
+        case .shift: return "Shift"
+        case .ctrl: return "Control"
+        case .fn: return "Fn"
+        }
+    }
+}
+
+enum MouseDragAction: String, Codable, CaseIterable, Sendable, BehaviorOptionDisplayable {
+    case move
+    case resize
+
+    var displayName: String {
+        switch self {
+        case .move: return "Move"
+        case .resize: return "Resize"
+        }
+    }
+}
+
+enum MouseDropAction: String, Codable, CaseIterable, Sendable, BehaviorOptionDisplayable {
+    case swap
+    case stack
+
+    var displayName: String {
+        switch self {
+        case .swap: return "Swap"
+        case .stack: return "Stack"
+        }
+    }
+}
+
 struct ManagedWindowBehaviorPolicy: Codable, Sendable, Equatable {
     var manualTilingModeEnabled: Bool
     var hoverFocusMode: HoverFocusMode
     var mouseFollowsFocusEnabled: Bool
+    var outerPadding: Int
+    var windowGap: Int
+    var mouseModifier: MouseModifierKey
+    var mouseAction1: MouseDragAction
+    var mouseAction2: MouseDragAction
+    var mouseDropAction: MouseDropAction
     var neverTileApps: [String]
     var alwaysTileApps: [String]
 
@@ -25,6 +77,12 @@ struct ManagedWindowBehaviorPolicy: Codable, Sendable, Equatable {
         manualTilingModeEnabled: false,
         hoverFocusMode: .off,
         mouseFollowsFocusEnabled: false,
+        outerPadding: 0,
+        windowGap: 0,
+        mouseModifier: .fn,
+        mouseAction1: .move,
+        mouseAction2: .resize,
+        mouseDropAction: .swap,
         neverTileApps: [],
         alwaysTileApps: []
     )

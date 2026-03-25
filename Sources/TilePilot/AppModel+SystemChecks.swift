@@ -48,6 +48,7 @@ extension AppModel {
         let skhdDaemonCap = capabilityByKey["skhd-daemon"]
         let yabaiQueryCap = capabilityByKey["yabai-query"]
         let accessibilityCap = capabilityByKey["accessibility"]
+        let screenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         var rows: [SystemCheckRow] = []
 
         let yabaiInstallStatus = mergedSystemStatus([
@@ -161,6 +162,18 @@ extension AppModel {
             actions: accessibilityStatus == .good ? [.recheck] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
         ))
 
+        rows.append(SystemCheckRow(
+            id: "screen-recording",
+            title: "Screen Recording for MegaMap (Optional)",
+            detail: screenRecordingAuthorized
+                ? "Enabled for real MegaMap screenshots."
+                : "Needed only for real MegaMap screenshots. If TilePilot is not listed yet in Screen Recording settings, use Enable Screen Recording first so macOS can register the request.",
+            status: screenRecordingAuthorized ? .good : .notice,
+            actions: screenRecordingAuthorized
+                ? [.recheck]
+                : [.requestScreenRecordingAccess, .openScreenRecordingSettings, .recheck]
+        ))
+
         let missionWarningCount = missionControlChecks.filter { $0.status == .warning }.count
         let missionUnknownCount = missionControlChecks.filter { $0.status == .unknown }.count
         let missionStatus: SystemCheckStatus
@@ -218,9 +231,11 @@ extension AppModel {
         case .installDependencies:
             performSetupAction(.installHelpers)
         case .startYabai:
-            startHelperServicesBestEffort()
+            startYabaiBestEffort()
         case .startSkhd:
-            startHelperServicesBestEffort()
+            startSkhdBestEffort()
+        case .runGuidedSetup:
+            presentSetupGuide()
         case .enableStartAtLogon:
             enableStartAtLogon()
         case .openLoginItemsSettings:
@@ -229,6 +244,10 @@ extension AppModel {
             openAccessibilitySettings()
         case .requestAccessibilityAccess:
             requestAccessibilityAccessPrompt()
+        case .requestScreenRecordingAccess:
+            requestScreenRecordingAccessPrompt()
+        case .openScreenRecordingSettings:
+            openScreenRecordingSettings()
         case .fixScriptingAddition:
             runScriptingAdditionRepairInTerminal()
         case .openMissionControlSettings:

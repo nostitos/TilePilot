@@ -28,6 +28,7 @@ extension AppModel {
             backgroundPollingSeconds: performanceBackgroundPollingSeconds,
             keepOnTopEnforcementSeconds: performanceKeepOnTopEnforcementSeconds,
             miniMapHoverTitlesEnabled: miniMapHoverTitlesEnabled,
+            hideMinimizedHelperWindowsInMaps: hideMinimizedHelperWindowsInMaps,
             fastLiveRefreshEnabled: performanceFastLiveRefreshEnabled,
             keepOnTopEnforcementEnabled: keepOnTopEnforcementEnabled
         )
@@ -78,13 +79,13 @@ extension AppModel {
             ("Recent shortcuts rebuilds (10s)", "\(runtimeDiagnostics.recentShortcutsCacheRebuildCount)"),
             ("Recent keep-on-top passes (10s)", "\(runtimeDiagnostics.recentKeepOnTopEnforcementPassCount)"),
             ("Recent overlay updates (10s)", "\(runtimeDiagnostics.recentOverlayPanelUpdateCount)"),
-            ("Megamap refreshes", "\(runtimeDiagnostics.megamapRefreshCount)"),
-            ("Megamap first switch", runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds)) ms" : "—"),
-            ("Megamap avg switch verify", runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds)) ms" : "—"),
-            ("Megamap avg capture", runtimeDiagnostics.megamapAverageCaptureMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageCaptureMilliseconds)) ms" : "—"),
-            ("Megamap total sweep", runtimeDiagnostics.megamapTotalSweepMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapTotalSweepMilliseconds)) ms" : "—"),
-            ("Megamap desktops captured", "\(runtimeDiagnostics.megamapCapturedDesktopCount)"),
-            ("Megamap desktops failed", "\(runtimeDiagnostics.megamapFailedDesktopCount)"),
+            ("MegaMap refreshes", "\(runtimeDiagnostics.megamapRefreshCount)"),
+            ("MegaMap first switch", runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapFirstSwitchLatencyMilliseconds)) ms" : "—"),
+            ("MegaMap avg switch verify", runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageSwitchVerificationMilliseconds)) ms" : "—"),
+            ("MegaMap avg capture", runtimeDiagnostics.megamapAverageCaptureMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapAverageCaptureMilliseconds)) ms" : "—"),
+            ("MegaMap total sweep", runtimeDiagnostics.megamapTotalSweepMilliseconds > 0 ? "\(Int(runtimeDiagnostics.megamapTotalSweepMilliseconds)) ms" : "—"),
+            ("MegaMap desktops captured", "\(runtimeDiagnostics.megamapCapturedDesktopCount)"),
+            ("MegaMap desktops failed", "\(runtimeDiagnostics.megamapFailedDesktopCount)"),
         ]
     }
 
@@ -95,9 +96,13 @@ extension AppModel {
         performanceBackgroundPollingSeconds = defaults.backgroundPollingSeconds
         performanceKeepOnTopEnforcementSeconds = defaults.keepOnTopEnforcementSeconds
         miniMapHoverTitlesEnabled = defaults.miniMapHoverTitlesEnabled
+        hideMinimizedHelperWindowsInMaps = defaults.hideMinimizedHelperWindowsInMaps
         performanceFastLiveRefreshEnabled = defaults.fastLiveRefreshEnabled
         keepOnTopEnforcementEnabled = defaults.keepOnTopEnforcementEnabled
         persistPerformanceSettings()
+        invalidateOverviewCaches()
+        ensureOverviewCachesIfNeeded()
+        rebuildMegamapSections()
         if !showWindowBadgeOverlay && !showWindowOutlineOverlay {
             windowBadges = []
         } else {
@@ -131,6 +136,14 @@ extension AppModel {
         markPerformanceSettingsCustomAndPersist()
     }
 
+    func setHideMinimizedHelperWindowsInMaps(_ enabled: Bool) {
+        hideMinimizedHelperWindowsInMaps = enabled
+        invalidateOverviewCaches()
+        ensureOverviewCachesIfNeeded()
+        rebuildMegamapSections()
+        markPerformanceSettingsCustomAndPersist()
+    }
+
     func setPerformanceFastLiveRefreshEnabled(_ enabled: Bool) {
         performanceFastLiveRefreshEnabled = enabled
         markPerformanceSettingsCustomAndPersist()
@@ -155,19 +168,22 @@ extension AppModel {
     func setWindowBadgeOverlayEnabled(_ enabled: Bool) {
         guard showWindowBadgeOverlay != enabled else { return }
         showWindowBadgeOverlay = enabled
-        performancePreset = .custom
         UserDefaults.standard.set(enabled, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
         refreshWindowBadges()
-        persistPerformanceSettings()
     }
 
     func setWindowOutlineOverlayEnabled(_ enabled: Bool) {
         guard showWindowOutlineOverlay != enabled else { return }
         showWindowOutlineOverlay = enabled
-        performancePreset = .custom
         UserDefaults.standard.set(enabled, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
         refreshWindowBadges()
-        persistPerformanceSettings()
+    }
+
+    func setWindowOutlineOverlayBaseWidth(_ value: Double) {
+        let clamped = min(max(value, 1.0), 6.0)
+        guard abs(windowOutlineOverlayBaseWidth - clamped) > 0.001 else { return }
+        windowOutlineOverlayBaseWidth = clamped
+        UserDefaults.standard.set(clamped, forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
     }
 
     func incrementMiniMapHoverUpdates() {
@@ -225,6 +241,7 @@ extension AppModel {
         defaults.set(performanceBackgroundPollingSeconds, forKey: AppModel.performanceBackgroundPollingSecondsDefaultsKey)
         defaults.set(performanceKeepOnTopEnforcementSeconds, forKey: AppModel.performanceKeepOnTopSecondsDefaultsKey)
         defaults.set(miniMapHoverTitlesEnabled, forKey: AppModel.performanceMiniMapHoverTitlesEnabledDefaultsKey)
+        defaults.set(hideMinimizedHelperWindowsInMaps, forKey: AppModel.performanceHideMinimizedHelperWindowsInMapsDefaultsKey)
         defaults.set(performanceFastLiveRefreshEnabled, forKey: AppModel.performanceFastLiveRefreshEnabledDefaultsKey)
         defaults.set(keepOnTopEnforcementEnabled, forKey: AppModel.performanceKeepOnTopEnforcementEnabledDefaultsKey)
     }

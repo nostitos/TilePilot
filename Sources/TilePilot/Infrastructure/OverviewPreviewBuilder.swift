@@ -8,14 +8,9 @@ enum OverviewPreviewBuilder {
     ) -> [OverviewDisplayPreview] {
         guard snapshot.source == .yabai, !snapshot.degraded else { return [] }
 
-        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
-            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-            return lhs.id < rhs.id
-        }
+        let sortedDisplays = OverviewDisplayOrdering.verticallyOrdered(snapshot.displays)
         let windows = snapshot.windows.filter { window in
-            !isExcluded(window) &&
-                !window.isMinimized &&
-                !window.isHidden
+            !isExcluded(window)
         }
         let windowsBySpace = Dictionary(grouping: windows, by: \.space)
         let spacesByDisplay = Dictionary(grouping: snapshot.spaces, by: \.displayId)
@@ -78,6 +73,7 @@ enum OverviewPreviewBuilder {
             desktopIndex: desktopIndex,
             floating: window.floating,
             runtimeManageable: window.isRuntimeManageable,
+            usesLimitedVisualStyle: window.usesLimitedVisualStyle,
             focused: window.focused,
             visible: window.isVisible,
             normalizedX: left,
@@ -85,6 +81,28 @@ enum OverviewPreviewBuilder {
             normalizedW: right - left,
             normalizedH: bottom - top
         )
+    }
+}
+
+enum OverviewDisplayOrdering {
+    static func verticallyOrdered(_ displays: [DisplayState]) -> [DisplayState] {
+        displays.sorted(by: verticalSort)
+    }
+
+    // For now the Overview only preserves above/below placement. Displays in the same
+    // vertical band still fall back to focus/id ordering because left/right layout is unsupported.
+    private static func verticalSort(_ lhs: DisplayState, _ rhs: DisplayState) -> Bool {
+        let lhsMidY = lhs.frameY + (lhs.frameH / 2)
+        let rhsMidY = rhs.frameY + (rhs.frameH / 2)
+        let tolerance = max(40, min(lhs.frameH, rhs.frameH) * 0.18)
+
+        if abs(lhsMidY - rhsMidY) > tolerance {
+            return lhsMidY < rhsMidY
+        }
+        if lhs.focused != rhs.focused {
+            return lhs.focused && !rhs.focused
+        }
+        return lhs.id < rhs.id
     }
 }
 

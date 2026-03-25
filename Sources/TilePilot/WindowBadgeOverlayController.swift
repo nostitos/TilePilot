@@ -13,6 +13,7 @@ final class WindowBadgeOverlayController {
     private struct OverlayUpdateSignature: Equatable {
         let showBadges: Bool
         let showOutlines: Bool
+        let outlineBaseWidth: Double
         let refreshPolicy: OverlayRefreshPolicy
         let badgeTargets: [WindowBadgeState]
         let outlineTargets: [WindowBadgeState]
@@ -49,6 +50,15 @@ final class WindowBadgeOverlayController {
             .store(in: &cancellables)
 
         model.$showWindowOutlineOverlay
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleOverlayUpdate(with: self.pendingBadges)
+            }
+            .store(in: &cancellables)
+
+        model.$windowOutlineOverlayBaseWidth
+            .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -144,9 +154,10 @@ final class WindowBadgeOverlayController {
         return OverlayUpdateSignature(
             showBadges: model.showWindowBadgeOverlay,
             showOutlines: model.showWindowOutlineOverlay,
+            outlineBaseWidth: model.windowOutlineOverlayBaseWidth,
             refreshPolicy: policy,
             badgeTargets: model.showWindowBadgeOverlay ? normalized(badgeTargets(from: badges), for: policy) : [],
-            outlineTargets: model.showWindowOutlineOverlay ? normalized(badges, for: policy) : []
+            outlineTargets: model.showWindowOutlineOverlay ? badges : []
         )
     }
 
@@ -162,6 +173,7 @@ final class WindowBadgeOverlayController {
                 isFloating: badge.isFloating,
                 isFocused: badge.isFocused,
                 isRuntimeManageable: badge.isRuntimeManageable,
+                usesLimitedVisualStyle: badge.usesLimitedVisualStyle,
                 frameX: rounded(badge.frameX, quantum: quantum),
                 frameY: rounded(badge.frameY, quantum: quantum),
                 frameW: rounded(badge.frameW, quantum: quantum),
@@ -281,11 +293,11 @@ final class WindowBadgeOverlayController {
         let targetWindowRect = resolvedGlobalRect(for: badge)
         let hostScreen = bestScreen(for: targetWindowRect)
         let scale = max(1.0, hostScreen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0)
-        let lineWidth: CGFloat = scale >= 2.0 ? 1.5 : 1.0
-        let outlineRect = targetWindowRect.insetBy(dx: lineWidth * 0.5, dy: lineWidth * 0.5)
+        let lineWidth: CGFloat = CGFloat(model.windowOutlineOverlayBaseWidth / scale)
+        let outlineRect = targetWindowRect.integral
 
         let outlineView = WindowFrameOutlineView(
-            strokeColor: !badge.isRuntimeManageable ? .gray : (badge.isFloating ? .orange : .blue),
+            strokeColor: badge.usesLimitedVisualStyle ? .gray : (badge.isFloating ? .orange : .blue),
             lineWidth: lineWidth
         )
         panel.ignoresMouseEvents = true
@@ -379,7 +391,7 @@ private struct WindowFrameOutlineView: View {
 
     var body: some View {
         Rectangle()
-            .stroke(strokeColor.opacity(0.85), lineWidth: lineWidth)
+            .strokeBorder(strokeColor.opacity(0.85), lineWidth: lineWidth)
             .background(Color.clear)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

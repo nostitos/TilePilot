@@ -7,13 +7,19 @@ final class MegamapScreenshotCache {
     static let shared = MegamapScreenshotCache()
 
     private let cache = NSCache<NSString, NSImage>()
-    private var keysByPath: [String: [NSString]] = [:]
+    private var keysByPath: [String: Set<String>] = [:]
+
+    private init() {
+        cache.countLimit = 24
+        cache.totalCostLimit = 128 * 1024 * 1024
+    }
 
     func image(for path: String, idealSize: CGSize) -> NSImage? {
         let maxDimension = max(idealSize.width, idealSize.height)
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         let targetPixelSize = max(512, Int((maxDimension * scale).rounded(.up)))
-        let cacheKey = "\(path)|\(targetPixelSize)" as NSString
+        let cacheKeyString = "\(path)|\(targetPixelSize)"
+        let cacheKey = cacheKeyString as NSString
         if let cached = cache.object(forKey: cacheKey) {
             return cached
         }
@@ -37,15 +43,16 @@ final class MegamapScreenshotCache {
         }
 
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        cache.setObject(image, forKey: cacheKey)
-        keysByPath[path, default: []].append(cacheKey)
+        let cost = max(1, cgImage.bytesPerRow * cgImage.height)
+        cache.setObject(image, forKey: cacheKey, cost: cost)
+        keysByPath[path, default: []].insert(cacheKeyString)
         return image
     }
 
     func removeImage(at path: String) {
         guard let keys = keysByPath.removeValue(forKey: path) else { return }
         for key in keys {
-            cache.removeObject(forKey: key)
+            cache.removeObject(forKey: key as NSString)
         }
     }
 

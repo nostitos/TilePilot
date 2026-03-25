@@ -26,12 +26,58 @@ extension AppModel {
     }
 
     func isOverviewExcludedWindow(_ window: WindowState, in snapshot: LiveStateSnapshot) -> Bool {
+        let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSubrole = window.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
+
         if window.app == "zoom.us" {
             guard !window.canResize else { return false }
             let tiny = window.frameW <= 140 || window.frameH <= 60
             guard tiny else { return false }
-            let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return normalizedTitle.isEmpty || normalizedTitle == "window"
+            return normalizedTitle.lowercased().isEmpty || normalizedTitle.lowercased() == "window"
+        }
+
+        guard hideMinimizedHelperWindowsInMaps else {
+            return false
+        }
+
+        if window.usesLimitedVisualStyle {
+            return true
+        }
+
+        if window.isMinimized || window.isHidden {
+            return true
+        }
+
+        if isBackdropSurfaceWindow(
+            window,
+            normalizedTitle: normalizedTitle,
+            normalizedRole: normalizedRole,
+            normalizedSubrole: normalizedSubrole,
+            in: snapshot
+        ) {
+            return true
+        }
+
+        if normalizedTitle.isEmpty,
+           !window.isMinimized,
+           !window.isHidden,
+           !window.hasAXReference,
+           !window.canMove,
+           !window.canResize {
+            let hasDescriptiveSiblingOnSameDesktop = snapshot.windows.contains { sibling in
+                sibling.id != window.id &&
+                    sibling.pid == window.pid &&
+                    sibling.space == window.space &&
+                    (!sibling.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                     sibling.hasAXReference ||
+                     sibling.canMove ||
+                     sibling.canResize ||
+                     sibling.isVisible)
+            }
+            if hasDescriptiveSiblingOnSameDesktop {
+                return true
+            }
         }
 
         if !window.isVisible,
@@ -54,6 +100,34 @@ extension AppModel {
         }
 
         return false
+    }
+
+    func isBackdropSurfaceWindow(
+        _ window: WindowState,
+        normalizedTitle: String,
+        normalizedRole: String,
+        normalizedSubrole: String,
+        in snapshot: LiveStateSnapshot
+    ) -> Bool {
+        guard normalizedTitle.isEmpty else { return false }
+        guard !window.hasWindowServerMatch else { return false }
+        guard !window.isMinimized && !window.isHidden else { return false }
+
+        let overlayLikeSubrole = normalizedSubrole == "AXSystemDialog" || normalizedSubrole == "AXDialog"
+        let overlayLikeRole = normalizedRole == "AXSystemDialog" || normalizedRole == "AXDialog"
+        guard overlayLikeSubrole || overlayLikeRole else { return false }
+
+        guard let display = snapshot.displays.first(where: { $0.id == window.display }) else { return false }
+        let widthCoverage = window.frameW / max(display.frameW, 1)
+        let heightCoverage = window.frameH / max(display.frameH, 1)
+        guard widthCoverage >= 0.96, heightCoverage >= 0.96 else { return false }
+
+        return snapshot.windows.contains { sibling in
+            sibling.id != window.id &&
+                sibling.pid == window.pid &&
+                sibling.frameW < (window.frameW * 0.9) &&
+                sibling.frameH < (window.frameH * 0.9)
+        }
     }
 
     func buildOverviewPreviews(from snapshot: LiveStateSnapshot) -> [OverviewDisplayPreview] {
@@ -80,7 +154,20 @@ extension AppModel {
             return
         }
 
-        let sizeFiltered = snapshot.windows.filter { window in
+        let overlayEligibleWindows = snapshot.windows.filter { window in
+            let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedSubrole = window.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: normalizedTitle,
+                normalizedRole: normalizedRole,
+                normalizedSubrole: normalizedSubrole,
+                in: snapshot
+            )
+        }
+
+        let sizeFiltered = overlayEligibleWindows.filter { window in
             guard !window.isMinimized && !window.isHidden else { return false }
             if window.focused { return true }
             return window.frameW > 40 && window.frameH > 24
@@ -90,32 +177,24 @@ extension AppModel {
             return
         }
 
-        let activeSpaceIndex: Int? =
-            sizeFiltered.first(where: \.focused)?.space
-            ?? snapshot.spaces.first(where: \.focused)?.index
-            ?? snapshot.spaces.first(where: \.visible)?.index
-        let activeSpaceCandidates: [WindowState]
-        if let activeSpaceIndex {
-            activeSpaceCandidates = sizeFiltered.filter { $0.space == activeSpaceIndex }
+        let visibleSpaceIndexes = Set(snapshot.spaces.filter(\.visible).map(\.index))
+        let visibleSpaceCandidates: [WindowState]
+        if visibleSpaceIndexes.isEmpty {
+            visibleSpaceCandidates = sizeFiltered
         } else {
-            activeSpaceCandidates = sizeFiltered
+            visibleSpaceCandidates = sizeFiltered.filter { visibleSpaceIndexes.contains($0.space) }
         }
-        guard !activeSpaceCandidates.isEmpty else {
+        guard !visibleSpaceCandidates.isEmpty else {
             applyWindowBadgeState([], hoveredWindowID: nil)
             return
         }
 
-        var selectedWindows = activeSpaceCandidates.filter(\.isVisible)
+        let visibleCandidates = visibleSpaceCandidates.filter(\.isVisible)
+        var selectedWindows = visibleCandidates
         let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
-        let frontmostCandidate = activeSpaceCandidates
-            .filter { $0.pid == frontmostPID }
-            .sorted { lhs, rhs in
-                let lhsArea = lhs.frameW * lhs.frameH
-                let rhsArea = rhs.frameW * rhs.frameH
-                if lhsArea != rhsArea { return lhsArea > rhsArea }
-                return lhs.id < rhs.id
-            }
-            .first
+        let frontmostAppCandidates = visibleSpaceCandidates.filter { $0.pid == frontmostPID }
+        let frontmostCandidate = topmostOnScreenBadgeCandidate(from: frontmostAppCandidates)
+            ?? preferredFrontmostBadgeCandidate(from: visibleCandidates.filter { $0.pid == frontmostPID })
 
         if let frontmostCandidate,
            !selectedWindows.contains(where: { $0.id == frontmostCandidate.id }) {
@@ -131,8 +210,7 @@ extension AppModel {
         let explicitFocused = sortedSelected.first(where: \.focused)
         let effectiveFocusedID: Int? = {
             if let frontmostCandidate {
-                if explicitFocused == nil { return frontmostCandidate.id }
-                if explicitFocused?.pid != frontmostCandidate.pid { return frontmostCandidate.id }
+                return frontmostCandidate.id
             }
             return explicitFocused?.id
         }()
@@ -146,6 +224,7 @@ extension AppModel {
                 isFloating: window.floating,
                 isFocused: window.id == effectiveFocusedID,
                 isRuntimeManageable: window.isRuntimeManageable,
+                usesLimitedVisualStyle: window.usesLimitedVisualStyle,
                 frameX: window.frameX,
                 frameY: window.frameY,
                 frameW: window.frameW,
@@ -160,7 +239,19 @@ extension AppModel {
             applyWindowBadgeState(windowBadges, hoveredWindowID: nil)
             return
         }
-        let windows = candidates ?? snapshot.windows.filter { $0.isVisible && !$0.isMinimized && !$0.isHidden }
+        let windows = (candidates ?? snapshot.windows).filter { window in
+            guard window.isVisible && !window.isMinimized && !window.isHidden else { return false }
+            let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedSubrole = window.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: normalizedTitle,
+                normalizedRole: normalizedRole,
+                normalizedSubrole: normalizedSubrole,
+                in: snapshot
+            )
+        }
         guard !windows.isEmpty else {
             applyWindowBadgeState(windowBadges, hoveredWindowID: nil)
             return
@@ -218,5 +309,42 @@ extension AppModel {
         if hoveredWindowIDForBadges != hoveredWindowID {
             hoveredWindowIDForBadges = hoveredWindowID
         }
+    }
+
+    private func preferredFrontmostBadgeCandidate(from windows: [WindowState]) -> WindowState? {
+        windows.sorted { lhs, rhs in
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            if lhs.isRuntimeManageable != rhs.isRuntimeManageable { return lhs.isRuntimeManageable && !rhs.isRuntimeManageable }
+            let lhsArea = lhs.frameW * lhs.frameH
+            let rhsArea = rhs.frameW * rhs.frameH
+            if lhsArea != rhsArea { return lhsArea > rhsArea }
+            return lhs.id < rhs.id
+        }
+        .first
+    }
+
+    private func topmostOnScreenBadgeCandidate(from windows: [WindowState]) -> WindowState? {
+        guard !windows.isEmpty else { return nil }
+        let windowIDs = Set(windows.map(\.id))
+        guard let rawInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+              !rawInfo.isEmpty else {
+            return nil
+        }
+
+        for info in rawInfo {
+            let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+            guard layer == 0 else { continue }
+            let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            guard alpha > 0.01 else { continue }
+            guard let number = (info[kCGWindowNumber as String] as? NSNumber)?.intValue,
+                  windowIDs.contains(number) else {
+                continue
+            }
+            if let match = windows.first(where: { $0.id == number }) {
+                return match
+            }
+        }
+
+        return nil
     }
 }

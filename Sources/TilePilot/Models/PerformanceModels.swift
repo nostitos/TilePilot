@@ -66,6 +66,7 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
     var backgroundPollingSeconds: Double
     var keepOnTopEnforcementSeconds: Double
     var miniMapHoverTitlesEnabled: Bool
+    var hideMinimizedHelperWindowsInMaps: Bool
     var fastLiveRefreshEnabled: Bool
     var keepOnTopEnforcementEnabled: Bool
 
@@ -75,6 +76,7 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
         backgroundPollingSeconds: 5.0,
         keepOnTopEnforcementSeconds: 2.5,
         miniMapHoverTitlesEnabled: true,
+        hideMinimizedHelperWindowsInMaps: true,
         fastLiveRefreshEnabled: false,
         keepOnTopEnforcementEnabled: true
     )
@@ -85,6 +87,7 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
         backgroundPollingSeconds: 2.0,
         keepOnTopEnforcementSeconds: 0.8,
         miniMapHoverTitlesEnabled: true,
+        hideMinimizedHelperWindowsInMaps: true,
         fastLiveRefreshEnabled: true,
         keepOnTopEnforcementEnabled: true
     )
@@ -95,6 +98,7 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
         backgroundPollingSeconds: 10.0,
         keepOnTopEnforcementSeconds: 2.5,
         miniMapHoverTitlesEnabled: false,
+        hideMinimizedHelperWindowsInMaps: true,
         fastLiveRefreshEnabled: false,
         keepOnTopEnforcementEnabled: true
     )
@@ -105,9 +109,53 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
         backgroundPollingSeconds: 10.0,
         keepOnTopEnforcementSeconds: 3.0,
         miniMapHoverTitlesEnabled: false,
+        hideMinimizedHelperWindowsInMaps: true,
         fastLiveRefreshEnabled: false,
         keepOnTopEnforcementEnabled: false
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case preset
+        case foregroundPollingSeconds
+        case backgroundPollingSeconds
+        case keepOnTopEnforcementSeconds
+        case miniMapHoverTitlesEnabled
+        case hideMinimizedHelperWindowsInMaps
+        case fastLiveRefreshEnabled
+        case keepOnTopEnforcementEnabled
+    }
+
+    init(
+        preset: PerformancePreset,
+        foregroundPollingSeconds: Double,
+        backgroundPollingSeconds: Double,
+        keepOnTopEnforcementSeconds: Double,
+        miniMapHoverTitlesEnabled: Bool,
+        hideMinimizedHelperWindowsInMaps: Bool,
+        fastLiveRefreshEnabled: Bool,
+        keepOnTopEnforcementEnabled: Bool
+    ) {
+        self.preset = preset
+        self.foregroundPollingSeconds = foregroundPollingSeconds
+        self.backgroundPollingSeconds = backgroundPollingSeconds
+        self.keepOnTopEnforcementSeconds = keepOnTopEnforcementSeconds
+        self.miniMapHoverTitlesEnabled = miniMapHoverTitlesEnabled
+        self.hideMinimizedHelperWindowsInMaps = hideMinimizedHelperWindowsInMaps
+        self.fastLiveRefreshEnabled = fastLiveRefreshEnabled
+        self.keepOnTopEnforcementEnabled = keepOnTopEnforcementEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preset = try container.decode(PerformancePreset.self, forKey: .preset)
+        foregroundPollingSeconds = try container.decode(Double.self, forKey: .foregroundPollingSeconds)
+        backgroundPollingSeconds = try container.decode(Double.self, forKey: .backgroundPollingSeconds)
+        keepOnTopEnforcementSeconds = try container.decode(Double.self, forKey: .keepOnTopEnforcementSeconds)
+        miniMapHoverTitlesEnabled = try container.decode(Bool.self, forKey: .miniMapHoverTitlesEnabled)
+        hideMinimizedHelperWindowsInMaps = try container.decodeIfPresent(Bool.self, forKey: .hideMinimizedHelperWindowsInMaps) ?? true
+        fastLiveRefreshEnabled = try container.decode(Bool.self, forKey: .fastLiveRefreshEnabled)
+        keepOnTopEnforcementEnabled = try container.decode(Bool.self, forKey: .keepOnTopEnforcementEnabled)
+    }
 
     static func defaults(for preset: PerformancePreset) -> PerformanceSettings {
         switch preset {
@@ -130,6 +178,7 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
             backgroundPollingSeconds == base.backgroundPollingSeconds &&
             keepOnTopEnforcementSeconds == base.keepOnTopEnforcementSeconds &&
             miniMapHoverTitlesEnabled == base.miniMapHoverTitlesEnabled &&
+            hideMinimizedHelperWindowsInMaps == base.hideMinimizedHelperWindowsInMaps &&
             fastLiveRefreshEnabled == base.fastLiveRefreshEnabled &&
             keepOnTopEnforcementEnabled == base.keepOnTopEnforcementEnabled
     }

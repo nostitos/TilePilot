@@ -5,10 +5,7 @@ enum OverviewSectionsBuilder {
         snapshot: LiveStateSnapshot,
         isExcluded: (WindowState) -> Bool
     ) -> [OverviewDisplaySection] {
-        let sortedDisplays = snapshot.displays.sorted { lhs, rhs in
-            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
-            return lhs.id < rhs.id
-        }
+        let sortedDisplays = OverviewDisplayOrdering.verticallyOrdered(snapshot.displays)
 
         let allWindows = snapshot.windows.filter { !isExcluded($0) }
         let visibleWindows = allWindows.filter { $0.isVisible && !$0.isMinimized && !$0.isHidden }

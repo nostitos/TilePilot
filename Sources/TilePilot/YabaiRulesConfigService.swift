@@ -20,6 +20,19 @@ enum YabaiRulesConfigServiceError: LocalizedError {
 final class YabaiRulesConfigService: @unchecked Sendable {
     let beginMarker = "# >>> TILEPILOT YABAI CONFIG BEGIN"
     let endMarker = "# <<< TILEPILOT YABAI CONFIG END"
+    private let runtimeConfigKeys = [
+        "focus_follows_mouse",
+        "mouse_follows_focus",
+        "mouse_modifier",
+        "mouse_action1",
+        "mouse_action2",
+        "mouse_drop_action",
+        "top_padding",
+        "bottom_padding",
+        "left_padding",
+        "right_padding",
+        "window_gap",
+    ]
 
     func loadConfigDocument() async throws -> YabaiConfigDocumentState {
         try await withCheckedThrowingContinuation { continuation in
@@ -78,6 +91,15 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         lines.append("# Managed by TilePilot. Unknown lines outside this block are preserved.")
         lines.append("yabai -m config focus_follows_mouse \(policy.hoverFocusMode.rawValue)")
         lines.append("yabai -m config mouse_follows_focus \(policy.mouseFollowsFocusEnabled ? "on" : "off")")
+        lines.append("yabai -m config mouse_modifier \(policy.mouseModifier.rawValue)")
+        lines.append("yabai -m config mouse_action1 \(policy.mouseAction1.rawValue)")
+        lines.append("yabai -m config mouse_action2 \(policy.mouseAction2.rawValue)")
+        lines.append("yabai -m config mouse_drop_action \(policy.mouseDropAction.rawValue)")
+        lines.append("yabai -m config top_padding \(policy.outerPadding)")
+        lines.append("yabai -m config bottom_padding \(policy.outerPadding)")
+        lines.append("yabai -m config left_padding \(policy.outerPadding)")
+        lines.append("yabai -m config right_padding \(policy.outerPadding)")
+        lines.append("yabai -m config window_gap \(policy.windowGap)")
 
         for app in policy.alwaysTileApps.map(normalizeAppName).filter({ !$0.isEmpty }).sorted() {
             let label = ruleLabel(prefix: "tp_always", appName: app)
@@ -136,48 +158,9 @@ final class YabaiRulesConfigService: @unchecked Sendable {
     }
 
     func parsePolicy(fromManagedBody body: String) -> ManagedWindowBehaviorPolicy {
-        var policy = ManagedWindowBehaviorPolicy.default
-        let lines = body.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-
-            if trimmed.contains("config focus_follows_mouse ") {
-                if trimmed.contains(" autoraise") {
-                    policy.hoverFocusMode = .autoraise
-                } else if trimmed.contains(" autofocus") {
-                    policy.hoverFocusMode = .autofocus
-                } else if trimmed.contains(" off") {
-                    policy.hoverFocusMode = .off
-                }
-                continue
-            }
-            if trimmed.contains("config mouse_follows_focus ") {
-                if trimmed.contains(" on") || trimmed.contains(" true") || trimmed.contains(" 1") {
-                    policy.mouseFollowsFocusEnabled = true
-                } else if trimmed.contains(" off") || trimmed.contains(" false") || trimmed.contains(" 0") {
-                    policy.mouseFollowsFocusEnabled = false
-                }
-                continue
-            }
-
-            if trimmed.contains(#"rule --add label=tp_manual_tiling_default app=".*" manage=off"#) ||
-               trimmed.contains(#"rule --add app=".*" manage=off"#) {
-                policy.manualTilingModeEnabled = true
-                continue
-            }
-
-            guard trimmed.contains("rule --add"), let app = parseAppPattern(fromRuleLine: trimmed) else { continue }
-            if trimmed.contains("manage=off") {
-                if app != ".*" { policy.neverTileApps.append(app) }
-            } else if trimmed.contains("manage=on") {
-                policy.alwaysTileApps.append(app)
-            }
-        }
-
-        policy.neverTileApps = Array(Set(policy.neverTileApps)).sorted()
-        policy.alwaysTileApps = Array(Set(policy.alwaysTileApps)).sorted()
-        return policy
+        let managed = parseManagedPolicyComponents(from: body)
+        let runtimeFallback = runtimeConfigAssignments(missingKeys: managed.missingRuntimeKeys)
+        return resolvePolicy(managed: managed, fileFallback: .empty, runtimeFallback: runtimeFallback)
     }
 
     private func loadConfigDocumentSync() throws -> YabaiConfigDocumentState {
@@ -185,15 +168,20 @@ final class YabaiRulesConfigService: @unchecked Sendable {
         let fileExists = FileManager.default.fileExists(atPath: path)
         let content = fileExists ? (try readTextFile(path: path)) : ""
         let extracted = try extractManagedSection(from: content)
-        let managedBody = extracted?.body ?? renderManagedBody(for: .default)
+        let managedBody = extracted?.body ?? ""
+        let managed = parseManagedPolicyComponents(from: managedBody)
+        let fileFallback = parseConfigAssignments(from: content)
+        let runtimeFallback = runtimeConfigAssignments(missingKeys: managed.missingRuntimeKeys(in: fileFallback))
+        let resolvedPolicy = resolvePolicy(managed: managed, fileFallback: fileFallback, runtimeFallback: runtimeFallback)
+        let displayedManagedBody = extracted?.body ?? renderManagedBody(for: resolvedPolicy)
         return YabaiConfigDocumentState(
             filePath: path,
             fileExists: fileExists,
             fullContent: content,
-            managedSectionBody: managedBody,
+            managedSectionBody: displayedManagedBody,
             hasManagedSection: extracted != nil,
             backups: listBackups(),
-            policy: parsePolicy(fromManagedBody: managedBody)
+            policy: resolvedPolicy
         )
     }
 
@@ -306,6 +294,157 @@ final class YabaiRulesConfigService: @unchecked Sendable {
 
     private func normalizeAppName(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolvePolicy(
+        managed: ParsedManagedPolicy,
+        fileFallback: ParsedConfigAssignments,
+        runtimeFallback: ParsedConfigAssignments
+    ) -> ManagedWindowBehaviorPolicy {
+        var policy = ManagedWindowBehaviorPolicy.default
+        policy.manualTilingModeEnabled = managed.manualTilingModeEnabled
+        policy.neverTileApps = Array(Set(managed.neverTileApps)).sorted()
+        policy.alwaysTileApps = Array(Set(managed.alwaysTileApps)).sorted()
+        policy.hoverFocusMode = managed.hoverFocusMode
+            ?? fileFallback.hoverFocusMode
+            ?? runtimeFallback.hoverFocusMode
+            ?? policy.hoverFocusMode
+        policy.mouseFollowsFocusEnabled = managed.mouseFollowsFocusEnabled
+            ?? fileFallback.mouseFollowsFocusEnabled
+            ?? runtimeFallback.mouseFollowsFocusEnabled
+            ?? policy.mouseFollowsFocusEnabled
+        policy.outerPadding = managed.outerPadding
+            ?? fileFallback.outerPadding
+            ?? runtimeFallback.outerPadding
+            ?? policy.outerPadding
+        policy.windowGap = managed.windowGap
+            ?? fileFallback.windowGap
+            ?? runtimeFallback.windowGap
+            ?? policy.windowGap
+        policy.mouseModifier = managed.mouseModifier
+            ?? fileFallback.mouseModifier
+            ?? runtimeFallback.mouseModifier
+            ?? policy.mouseModifier
+        policy.mouseAction1 = managed.mouseAction1
+            ?? fileFallback.mouseAction1
+            ?? runtimeFallback.mouseAction1
+            ?? policy.mouseAction1
+        policy.mouseAction2 = managed.mouseAction2
+            ?? fileFallback.mouseAction2
+            ?? runtimeFallback.mouseAction2
+            ?? policy.mouseAction2
+        policy.mouseDropAction = managed.mouseDropAction
+            ?? fileFallback.mouseDropAction
+            ?? runtimeFallback.mouseDropAction
+            ?? policy.mouseDropAction
+        return policy
+    }
+
+    private func parseManagedPolicyComponents(from body: String) -> ParsedManagedPolicy {
+        var managed = ParsedManagedPolicy()
+        let lines = body.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+
+            if let assignment = parseConfigAssignment(from: trimmed) {
+                managed.apply(key: assignment.key, rawValue: assignment.value)
+                continue
+            }
+
+            if trimmed.contains(#"rule --add label=tp_manual_tiling_default app=".*" manage=off"#) ||
+               trimmed.contains(#"rule --add app=".*" manage=off"#) {
+                managed.manualTilingModeEnabled = true
+                continue
+            }
+
+            guard trimmed.contains("rule --add"), let app = parseAppPattern(fromRuleLine: trimmed) else { continue }
+            if trimmed.contains("manage=off") {
+                if app != ".*" { managed.neverTileApps.append(app) }
+            } else if trimmed.contains("manage=on") {
+                managed.alwaysTileApps.append(app)
+            }
+        }
+        return managed
+    }
+
+    private func parseConfigAssignments(from content: String) -> ParsedConfigAssignments {
+        var assignments = ParsedConfigAssignments.empty
+        let lines = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let assignment = parseConfigAssignment(from: trimmed) else { continue }
+            assignments.apply(key: assignment.key, rawValue: assignment.value)
+        }
+        return assignments
+    }
+
+    private func parseConfigAssignment(from trimmedLine: String) -> (key: String, value: String)? {
+        guard !trimmedLine.isEmpty, !trimmedLine.hasPrefix("#") else { return nil }
+        guard let configRange = trimmedLine.range(of: "config ") else { return nil }
+        let remainder = trimmedLine[configRange.upperBound...]
+        let parts = remainder.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+        guard parts.count >= 2 else { return nil }
+        let key = String(parts[0])
+        let value = sanitizedConfigValue(String(parts[1]))
+        return (key, value)
+    }
+
+    private func sanitizedConfigValue(_ raw: String) -> String {
+        raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"';"))
+    }
+
+    private func runtimeConfigAssignments(missingKeys: Set<String>) -> ParsedConfigAssignments {
+        guard !missingKeys.isEmpty else { return .empty }
+        var assignments = ParsedConfigAssignments.empty
+        for key in runtimeConfigKeys where missingKeys.contains(key) {
+            guard let rawValue = runtimeConfigValue(for: key) else { continue }
+            assignments.apply(key: key, rawValue: rawValue)
+        }
+        return assignments
+    }
+
+    private func runtimeConfigValue(for key: String) -> String? {
+        let command = yabaiCommand(["-m", "config", key], timeout: 1.0)
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
+        process.environment = ManagedHelperService.shared.environmentWithManagedHelpers()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(command.timeout)
+        while process.isRunning {
+            if Date() >= deadline {
+                process.terminate()
+                Thread.sleep(forTimeInterval: 0.05)
+                if process.isRunning {
+                    process.interrupt()
+                }
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        if process.isRunning {
+            process.waitUntilExit()
+        }
+
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0, stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func ruleLabels(for policy: ManagedWindowBehaviorPolicy) -> Set<String> {
@@ -425,5 +564,141 @@ final class YabaiRulesConfigService: @unchecked Sendable {
 
     private func backupsDirectoryPath() -> String {
         NSString(string: "~/.config/tilepilot/backups/yabairc").expandingTildeInPath
+    }
+}
+
+private struct ParsedManagedPolicy {
+    var hoverFocusMode: HoverFocusMode?
+    var mouseFollowsFocusEnabled: Bool?
+    var outerPadding: Int?
+    var windowGap: Int?
+    var mouseModifier: MouseModifierKey?
+    var mouseAction1: MouseDragAction?
+    var mouseAction2: MouseDragAction?
+    var mouseDropAction: MouseDropAction?
+    var manualTilingModeEnabled = false
+    var neverTileApps: [String] = []
+    var alwaysTileApps: [String] = []
+
+    var missingRuntimeKeys: Set<String> {
+        missingRuntimeKeys(in: .empty)
+    }
+
+    func missingRuntimeKeys(in fileFallback: ParsedConfigAssignments) -> Set<String> {
+        var missing = Set<String>()
+        if hoverFocusMode == nil, fileFallback.hoverFocusMode == nil { missing.insert("focus_follows_mouse") }
+        if mouseFollowsFocusEnabled == nil, fileFallback.mouseFollowsFocusEnabled == nil { missing.insert("mouse_follows_focus") }
+        if mouseModifier == nil, fileFallback.mouseModifier == nil { missing.insert("mouse_modifier") }
+        if mouseAction1 == nil, fileFallback.mouseAction1 == nil { missing.insert("mouse_action1") }
+        if mouseAction2 == nil, fileFallback.mouseAction2 == nil { missing.insert("mouse_action2") }
+        if mouseDropAction == nil, fileFallback.mouseDropAction == nil { missing.insert("mouse_drop_action") }
+        if outerPadding == nil, fileFallback.outerPadding == nil {
+            missing.formUnion(["top_padding", "bottom_padding", "left_padding", "right_padding"])
+        }
+        if windowGap == nil, fileFallback.windowGap == nil { missing.insert("window_gap") }
+        return missing
+    }
+
+    mutating func apply(key: String, rawValue: String) {
+        switch key {
+        case "focus_follows_mouse":
+            hoverFocusMode = HoverFocusMode(rawValue: rawValue)
+        case "mouse_follows_focus":
+            mouseFollowsFocusEnabled = Self.parseBool(rawValue)
+        case "mouse_modifier":
+            mouseModifier = MouseModifierKey(rawValue: rawValue)
+        case "mouse_action1":
+            mouseAction1 = MouseDragAction(rawValue: rawValue)
+        case "mouse_action2":
+            mouseAction2 = MouseDragAction(rawValue: rawValue)
+        case "mouse_drop_action":
+            mouseDropAction = MouseDropAction(rawValue: rawValue)
+        case "top_padding", "bottom_padding", "left_padding", "right_padding":
+            if let value = Int(rawValue) {
+                outerPadding = value
+            }
+        case "window_gap":
+            if let value = Int(rawValue) {
+                windowGap = value
+            }
+        default:
+            break
+        }
+    }
+
+    private static func parseBool(_ rawValue: String) -> Bool? {
+        switch rawValue.lowercased() {
+        case "on", "true", "1":
+            return true
+        case "off", "false", "0":
+            return false
+        default:
+            return nil
+        }
+    }
+}
+
+private struct ParsedConfigAssignments {
+    var hoverFocusMode: HoverFocusMode?
+    var mouseFollowsFocusEnabled: Bool?
+    var mouseModifier: MouseModifierKey?
+    var mouseAction1: MouseDragAction?
+    var mouseAction2: MouseDragAction?
+    var mouseDropAction: MouseDropAction?
+    var topPadding: Int?
+    var bottomPadding: Int?
+    var leftPadding: Int?
+    var rightPadding: Int?
+    var windowGap: Int?
+
+    static let empty = ParsedConfigAssignments()
+
+    var outerPadding: Int? {
+        let values = [topPadding, bottomPadding, leftPadding, rightPadding].compactMap { $0 }
+        guard !values.isEmpty else { return nil }
+        if values.count == 4, Set(values).count == 1 {
+            return values[0]
+        }
+        return topPadding ?? bottomPadding ?? leftPadding ?? rightPadding
+    }
+
+    mutating func apply(key: String, rawValue: String) {
+        switch key {
+        case "focus_follows_mouse":
+            hoverFocusMode = HoverFocusMode(rawValue: rawValue)
+        case "mouse_follows_focus":
+            mouseFollowsFocusEnabled = Self.parseBool(rawValue)
+        case "mouse_modifier":
+            mouseModifier = MouseModifierKey(rawValue: rawValue)
+        case "mouse_action1":
+            mouseAction1 = MouseDragAction(rawValue: rawValue)
+        case "mouse_action2":
+            mouseAction2 = MouseDragAction(rawValue: rawValue)
+        case "mouse_drop_action":
+            mouseDropAction = MouseDropAction(rawValue: rawValue)
+        case "top_padding":
+            topPadding = Int(rawValue)
+        case "bottom_padding":
+            bottomPadding = Int(rawValue)
+        case "left_padding":
+            leftPadding = Int(rawValue)
+        case "right_padding":
+            rightPadding = Int(rawValue)
+        case "window_gap":
+            windowGap = Int(rawValue)
+        default:
+            break
+        }
+    }
+
+    private static func parseBool(_ rawValue: String) -> Bool? {
+        switch rawValue.lowercased() {
+        case "on", "true", "1":
+            return true
+        case "off", "false", "0":
+            return false
+        default:
+            return nil
+        }
     }
 }

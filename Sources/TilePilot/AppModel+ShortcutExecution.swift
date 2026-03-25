@@ -29,8 +29,28 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         bringFloatingWindowsToFrontCurrentDesktop()
         return
     }
+    if featureID.rawValue == "screen.set-floating-all-visible" {
+        setVisibleWindowsFloatingCurrentDesktop()
+        return
+    }
+    if featureID.rawValue == "screen.set-tiled-all-visible" {
+        setVisibleWindowsTiledCurrentDesktop()
+        return
+    }
+    if featureID.rawValue == "screen.grid-floating" {
+        applyFloatingGridToCurrentDesktop()
+        return
+    }
+    if featureID.rawValue == "screen.grid-auto-tiled" {
+        rebuildTileLayoutCurrentDesktop()
+        return
+    }
     if featureID.rawValue == "app.open-megamap" {
         presentMegamap()
+        return
+    }
+    if featureID.rawValue == "app.run-guided-setup" {
+        presentSetupGuide()
         return
     }
     if featureID.rawValue == "app.refresh-megamap" {

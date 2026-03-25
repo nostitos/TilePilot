@@ -78,7 +78,7 @@ extension AppModel {
     }
 
     var runtimeActivityMode: RuntimeActivityMode {
-        let tilePilotWindowVisible = hasVisibleTilePilotWindow
+        let tilePilotWindowVisible = hasOnScreenTilePilotWindow
         let overviewVisible = tilePilotWindowVisible && currentVisibleTab == .now
         let overlaysActive = hasActiveOverlayTargets
         let keepOnTopActive = hasActiveKeepOnTopWindows
@@ -97,6 +97,10 @@ extension AppModel {
     }
 
     func currentPollingIntervalSeconds() -> Double {
+        if hasBackgroundVisibleNowView {
+            let keepOnTopInterval = currentKeepOnTopEnforcementIntervalSeconds()
+            return keepOnTopInterval > 0 ? min(2.0, keepOnTopInterval) : 2.0
+        }
         switch runtimeActivityMode {
         case .overview, .overlays, .keepOnTop, .mixed:
             let baseInterval = overlayRefreshPolicy == .reduced
@@ -219,9 +223,20 @@ extension AppModel {
     }
 
     var hasVisibleTilePilotWindow: Bool {
-        NSApp.windows.contains { window in
-            window.isVisible && window.title == "TilePilot"
-        }
+        NSApp.isActive && hasOnScreenTilePilotWindow
+    }
+
+    var hasOnScreenTilePilotWindow: Bool {
+        return NSApp.windows.contains(where: { window in
+            guard window.title == "TilePilot" else { return false }
+            guard window.isVisible, !window.isMiniaturized else { return false }
+            guard window.alphaValue > 0.01 else { return false }
+            return window.occlusionState.contains(NSWindow.OcclusionState.visible)
+        })
+    }
+
+    var hasBackgroundVisibleNowView: Bool {
+        hasOnScreenTilePilotWindow && !NSApp.isActive && currentVisibleTab == .now
     }
 
     var hasActiveOverlayTargets: Bool {

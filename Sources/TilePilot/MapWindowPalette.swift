@@ -52,11 +52,11 @@ enum MapWindowPalette {
     static func colors(
         windowID: Int,
         isFloating: Bool,
-        isRuntimeManageable: Bool,
+        usesLimitedVisualStyle: Bool,
         isFocused: Bool,
         isSelected: Bool = false
     ) -> MapWindowPaletteColors {
-        if !isRuntimeManageable {
+        if usesLimitedVisualStyle {
             let family = warmFamilies[paletteIndex(for: windowID)]
             return MapWindowPaletteColors(
                 border: family.limitedBorder,

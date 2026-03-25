@@ -55,6 +55,7 @@ final class AppModel: ObservableObject {
     private static let shortcutsCustomOrderDefaultsKey = "TilePilot.shortcutsCustomOrderIDs"
     static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
+    static let windowOutlineOverlayBaseWidthDefaultsKey = "TilePilot.windowOutlineOverlayBaseWidth"
     static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
     static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
     static let performancePresetDefaultsKey = "TilePilot.performancePreset"
@@ -62,6 +63,7 @@ final class AppModel: ObservableObject {
     static let performanceBackgroundPollingSecondsDefaultsKey = "TilePilot.performanceBackgroundPollingSeconds"
     static let performanceKeepOnTopSecondsDefaultsKey = "TilePilot.performanceKeepOnTopSeconds"
     static let performanceMiniMapHoverTitlesEnabledDefaultsKey = "TilePilot.performanceMiniMapHoverTitlesEnabled"
+    static let performanceHideMinimizedHelperWindowsInMapsDefaultsKey = "TilePilot.performanceHideMinimizedHelperWindowsInMaps"
     static let performanceFastLiveRefreshEnabledDefaultsKey = "TilePilot.performanceFastLiveRefreshEnabled"
     static let performanceKeepOnTopEnforcementEnabledDefaultsKey = "TilePilot.performanceKeepOnTopEnforcementEnabled"
     static let megamapCacheArmedDefaultsKey = "TilePilot.megamapCacheArmed"
@@ -93,6 +95,8 @@ final class AppModel: ObservableObject {
     @Published var megamapLastActionMessage: String?
     @Published var megamapLastErrorMessage: String?
     @Published var megamapCacheArmed: Bool = UserDefaults.standard.bool(forKey: AppModel.megamapCacheArmedDefaultsKey)
+    @Published var setupGuidePresentationState: SetupGuidePresentationState = .hidden
+    @Published var helperMigrationPrompt: HelperMigrationPromptState?
     @Published var windowBadges: [WindowBadgeState] = []
     @Published var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
@@ -198,6 +202,13 @@ final class AppModel: ObservableObject {
         }
         return defaults.bool(forKey: AppModel.performanceMiniMapHoverTitlesEnabledDefaultsKey)
     }()
+    @Published var hideMinimizedHelperWindowsInMaps: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.performanceHideMinimizedHelperWindowsInMapsDefaultsKey) == nil {
+            return PerformanceSettings.balanced.hideMinimizedHelperWindowsInMaps
+        }
+        return defaults.bool(forKey: AppModel.performanceHideMinimizedHelperWindowsInMapsDefaultsKey)
+    }()
     @Published var performanceFastLiveRefreshEnabled: Bool = {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: AppModel.performanceFastLiveRefreshEnabledDefaultsKey) == nil {
@@ -225,6 +236,13 @@ final class AppModel: ObservableObject {
             return false
         }
         return defaults.bool(forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
+    }()
+    @Published var windowOutlineOverlayBaseWidth: Double = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey) == nil {
+            return 2.0
+        }
+        return defaults.double(forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
     }()
 
     let doctorService = DoctorService()
@@ -256,6 +274,7 @@ final class AppModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var managedHelperAutoUpgradeTask: Task<Void, Never>?
+    var hasDismissedAutomaticSetupGuideThisSession = false
     private var lastLiveStateContentSignature: String?
     var latestLiveStateSnapshot: LiveStateSnapshot?
     private var overviewCachesDirty = true
@@ -280,7 +299,6 @@ final class AppModel: ObservableObject {
     var scriptHeaderDescriptionCache: [String: String?] = [:]
     var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
     private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
-    private let firstLaunchGreetingShownDefaultsKey = "TilePilot.firstLaunchGreetingShown"
     let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
     var hasAttemptedReleaseDefaultsInitialization = false
     var windowBehaviorAutoSaveTask: Task<Void, Never>?
@@ -359,6 +377,7 @@ final class AppModel: ObservableObject {
         let result = await doctorService.runDoctor()
         doctorSnapshot = result.snapshot
         prependCommandLogs(result.commandLogs)
+        refreshSetupGuidePresentationAfterStateChange()
         // Pinned menus depend on feature disabled/enabled state from doctorSnapshot
         // even when the Shortcuts tab has never been opened.
         rebuildShortcutPresentationCaches()
@@ -375,6 +394,8 @@ final class AppModel: ObservableObject {
         bootstrapSnapshot = result.snapshot
         managedHelperInstallState = result.managedHelperInstallState
         prependCommandLogs(result.commandLogs)
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        refreshSetupGuidePresentationAfterStateChange()
 
         if managedHelperAutoUpgradeTask == nil,
            !isLaunchingSetupInstaller,
@@ -442,20 +463,9 @@ final class AppModel: ObservableObject {
         return true
     }
 
-    var shouldShowFirstLaunchGreeting: Bool {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: firstLaunchGreetingShownDefaultsKey) else { return false }
-        guard bootstrapSnapshot != nil, doctorSnapshot != nil else { return false }
-        return primarySetupAction != .ready
-    }
-
-    func dismissFirstLaunchGreeting() {
-        UserDefaults.standard.set(true, forKey: firstLaunchGreetingShownDefaultsKey)
-    }
-
     func publishLiveStateSnapshotIfNeeded(_ snapshot: LiveStateSnapshot? = nil, force: Bool = false) {
         let target = snapshot ?? latestLiveStateSnapshot
-        guard force || hasVisibleTilePilotWindow else { return }
+        guard force || hasOnScreenTilePilotWindow else { return }
         guard liveStateSnapshot != target else { return }
         liveStateSnapshot = target
     }
@@ -529,7 +539,10 @@ final class AppModel: ObservableObject {
     }
 
     func shortcutExplanation(_ entry: ShortcutEntry) -> String {
-        shortcutExplanation(combo: entry.combo, command: entry.command, category: entry.category)
+        if let feature = featureDefinition(for: entry) {
+            return feature.description
+        }
+        return shortcutExplanation(combo: entry.combo, command: entry.command, category: entry.category)
     }
 
     func shortcutTitle(_ entry: ShortcutEntry) -> String {
@@ -1040,10 +1053,13 @@ final class AppModel: ObservableObject {
                         canMove: $0.canMove,
                         canResize: $0.canResize,
                         title: $0.title,
+                        role: $0.role,
+                        subrole: $0.subrole,
                         focused: $0.focused,
                         isVisible: $0.isVisible,
                         isMinimized: $0.isMinimized,
                         isHidden: $0.isHidden,
+                        hasWindowServerMatch: $0.hasWindowServerMatch,
                         source: .stale,
                         lastUpdatedAt: previous.lastUpdatedAt
                     )
@@ -1150,14 +1166,14 @@ final class AppModel: ObservableObject {
     func ensureOverviewCachesIfNeeded() {
         publishLiveStateSnapshotIfNeeded(force: true)
         guard overviewCachesDirty, let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot else { return }
-        guard hasVisibleTilePilotWindow, currentVisibleTab == .now else { return }
+        guard hasOnScreenTilePilotWindow, currentVisibleTab == .now else { return }
         rebuildOverviewCaches(from: snapshot)
     }
 
     func ensureShortcutPresentationCachesIfNeeded() {
         publishLiveStateSnapshotIfNeeded(force: true)
         guard shortcutPresentationCachesDirty else { return }
-        guard hasVisibleTilePilotWindow, currentVisibleTab == .actions else { return }
+        guard hasOnScreenTilePilotWindow, currentVisibleTab == .actions else { return }
         rebuildShortcutPresentationCaches()
     }
 
@@ -1170,7 +1186,7 @@ final class AppModel: ObservableObject {
     }
 
     private func updateOverviewCachesForCurrentVisibility(with snapshot: LiveStateSnapshot) {
-        if hasVisibleTilePilotWindow && currentVisibleTab == .now {
+        if hasOnScreenTilePilotWindow && currentVisibleTab == .now {
             rebuildOverviewCaches(from: snapshot)
         } else {
             invalidateOverviewCaches()
@@ -1182,12 +1198,20 @@ final class AppModel: ObservableObject {
             refreshWindowBadges()
             return
         }
-        guard hasActiveOverlayConsumer else { return }
+        guard hasActiveOverlayConsumer else {
+            if !windowBadges.isEmpty {
+                windowBadges = []
+            }
+            if hoveredWindowIDForBadges != nil {
+                hoveredWindowIDForBadges = nil
+            }
+            return
+        }
         refreshWindowBadges()
     }
 
     var hasActiveOverlayConsumer: Bool {
-        hasVisibleTilePilotWindow || currentVisibleTab == .now || hasVisibleWindowBadgePanels
+        hasVisibleTilePilotWindow || hasVisibleWindowBadgePanels
     }
 
     var hasVisibleWindowBadgePanels = false
@@ -1246,7 +1270,7 @@ final class AppModel: ObservableObject {
             "\($0.index)|\($0.label ?? "")|\($0.displayId)|\($0.focused)|\($0.visible)|\($0.layout ?? "")|\($0.windowCount)|\($0.source.rawValue)"
         }.joined(separator: "||")
         let windows = snapshot.windows.map {
-            "\($0.id)|\($0.pid)|\($0.app)|\($0.space)|\($0.display)|\($0.frameX)|\($0.frameY)|\($0.frameW)|\($0.frameH)|\($0.floating)|\($0.hasAXReference)|\($0.canMove)|\($0.canResize)|\($0.title)|\($0.focused)|\($0.isVisible)|\($0.isMinimized)|\($0.isHidden)|\($0.source.rawValue)"
+            "\($0.id)|\($0.pid)|\($0.app)|\($0.space)|\($0.display)|\($0.frameX)|\($0.frameY)|\($0.frameW)|\($0.frameH)|\($0.floating)|\($0.hasAXReference)|\($0.canMove)|\($0.canResize)|\($0.title)|\($0.focused)|\($0.isVisible)|\($0.isMinimized)|\($0.isHidden)|\($0.hasWindowServerMatch)|\($0.source.rawValue)"
         }.joined(separator: "||")
         let fallbackDisplays = snapshot.fallbackDisplays.map {
             "\($0.id)|\($0.name)|\($0.windowCount)|\($0.source.rawValue)"

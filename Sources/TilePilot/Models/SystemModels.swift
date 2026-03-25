@@ -147,6 +147,129 @@ struct SetupBootstrapSnapshot: Codable, Sendable {
     let brewPrefix: String?
 }
 
+enum SetupGuideStepCategory: String, Sendable {
+    case essential
+    case recommended
+    case featureOptional
+
+    var title: String {
+        switch self {
+        case .essential: return "Required"
+        case .recommended: return "Recommended"
+        case .featureOptional: return "Optional"
+        }
+    }
+}
+
+enum SetupGuideStepKind: String, CaseIterable, Identifiable, Sendable {
+    case installHelpers
+    case startHelperServices
+    case accessibility
+    case startAtLogon
+    case missionControl
+    case screenRecording
+
+    var id: String { rawValue }
+}
+
+enum SetupGuidePresentationSource: String, Sendable {
+    case automatic
+    case manual
+}
+
+struct SetupGuidePresentationState: Equatable, Sendable {
+    var isPresented: Bool
+    var source: SetupGuidePresentationSource
+    var selectedStepKind: SetupGuideStepKind?
+
+    static let hidden = SetupGuidePresentationState(isPresented: false, source: .manual, selectedStepKind: nil)
+}
+
+struct SetupGuideStep: Identifiable, Sendable {
+    let kind: SetupGuideStepKind
+    let category: SetupGuideStepCategory
+    let title: String
+    let summary: String
+    let whyItMatters: String
+    let whatToDo: String
+    let detail: String?
+    let verificationText: String?
+    let status: SystemCheckStatus
+    let isBlocking: Bool
+    let isSkippable: Bool
+    let primaryAction: SystemCheckAction?
+    let secondaryActions: [SystemCheckAction]
+
+    var id: SetupGuideStepKind { kind }
+
+    var isSatisfied: Bool {
+        status == .good
+    }
+}
+
+enum ExistingHelperInstallSource: String, Sendable {
+    case homebrew
+    case launchAgent
+    case binaryOnly
+
+    var title: String {
+        switch self {
+        case .homebrew:
+            return "Homebrew"
+        case .launchAgent:
+            return "LaunchAgent"
+        case .binaryOnly:
+            return "External Binary"
+        }
+    }
+}
+
+struct ExistingHelperInstall: Identifiable, Sendable {
+    let helper: ManagedHelperKind
+    let binaryPath: String?
+    let runningExternally: Bool
+    let source: ExistingHelperInstallSource
+    let launchAgentPath: String?
+
+    var id: String { helper.rawValue }
+
+    var summaryLine: String {
+        var parts = [helper.displayName]
+        if let binaryPath {
+            parts.append(binaryPath)
+        } else {
+            parts.append(source.title)
+        }
+        if runningExternally {
+            parts.append("running")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct HelperMigrationPromptState: Identifiable, Sendable {
+    let installs: [ExistingHelperInstall]
+
+    var id: String {
+        installs.map(\.id).joined(separator: "-")
+    }
+
+    var title: String {
+        "Existing Helper Install Detected"
+    }
+
+    var message: String {
+        let details = installs.map(\.summaryLine).joined(separator: "\n")
+        return """
+        TilePilot found an existing yabai/skhd setup.
+
+        \(details)
+
+        Choose whether to keep using that install or replace it with TilePilot-managed helpers.
+        """
+    }
+}
+
 enum SetupNextAction: String, Codable, Sendable {
     case installHelpers
     case startHelperServices
@@ -201,10 +324,13 @@ enum SystemCheckAction: String, Sendable, Hashable {
     case installDependencies
     case startYabai
     case startSkhd
+    case runGuidedSetup
     case enableStartAtLogon
     case openLoginItemsSettings
     case openAccessibilitySettings
     case requestAccessibilityAccess
+    case requestScreenRecordingAccess
+    case openScreenRecordingSettings
     case fixScriptingAddition
     case openMissionControlSettings
     case openMissionControlKeyboardShortcuts
@@ -217,10 +343,13 @@ enum SystemCheckAction: String, Sendable, Hashable {
         case .installDependencies: return "Install Helpers"
         case .startYabai: return "Start yabai"
         case .startSkhd: return "Start skhd"
+        case .runGuidedSetup: return "Run Guided Setup"
         case .enableStartAtLogon: return "Enable"
         case .openLoginItemsSettings: return "Login Items"
         case .openAccessibilitySettings: return "Open Settings"
         case .requestAccessibilityAccess: return "Request Access"
+        case .requestScreenRecordingAccess: return "Enable Screen Recording"
+        case .openScreenRecordingSettings: return "Open Settings"
         case .fixScriptingAddition: return "Fix"
         case .openMissionControlSettings: return "Mission Control"
         case .openMissionControlKeyboardShortcuts: return "Keyboard Shortcuts"

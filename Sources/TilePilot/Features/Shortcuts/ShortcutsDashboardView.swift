@@ -163,70 +163,106 @@ struct ShortcutsDashboardView: View {
     }
 
     private var shortcutsListCard: some View {
-        Group {
-            reorderControlBar
-            if filteredItems.isEmpty {
-                EmptyStateView(
-                    title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
-                    systemImage: "keyboard",
-                    message: model.shortcutEntries.isEmpty
-                        ? "Reload after creating `skhdrc`, or check shortcut parse issues."
-                        : "Try a broader search query."
-                )
-                .frame(minHeight: 160)
-                if model.shortcutEntries.isEmpty {
-                    HStack {
-                        Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
-                            Task { await model.refreshShortcuts() }
-                        }
-                        .disabled(model.isRefreshingShortcuts)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        Spacer(minLength: 0)
-                    }
-                }
-            } else {
-                if reorderEnabled {
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(filteredItems) { item in
-                                flatShortcutsRow(item)
-                                    .background(
-                                        GeometryReader { proxy in
-                                            Color.clear
-                                                .preference(
-                                                    key: ShortcutsRowFramePreferenceKey.self,
-                                                    value: [item.id: proxy.frame(in: .named("shortcuts-reorder-space"))]
-                                                )
-                                        }
-                                    )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                quickMenuCard
+                reorderControlBar
+
+                if filteredItems.isEmpty {
+                    EmptyStateView(
+                        title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
+                        systemImage: "keyboard",
+                        message: model.shortcutEntries.isEmpty
+                            ? "Reload after creating `skhdrc`, or check shortcut parse issues."
+                            : "Try a broader search query."
+                    )
+                    .frame(minHeight: 160)
+
+                    if model.shortcutEntries.isEmpty {
+                        HStack {
+                            Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
+                                Task { await model.refreshShortcuts() }
                             }
-                            if reorderInsertionIndex == reorderDraftIDs.count, draggedItemID != nil {
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.9))
-                                    .frame(height: 2)
-                                    .padding(.leading, 22)
-                            }
+                            .disabled(model.isRefreshingShortcuts)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            Spacer(minLength: 0)
                         }
-                        .padding(.vertical, 2)
-                    }
-                    .coordinateSpace(name: "shortcuts-reorder-space")
-                    .onPreferenceChange(ShortcutsRowFramePreferenceKey.self) { frames in
-                        rowFramesByID = frames
                     }
                 } else {
-                    List {
+                    LazyVStack(spacing: 4) {
                         ForEach(filteredItems) { item in
                             flatShortcutsRow(item)
-                                .listRowInsets(.init(top: 2, leading: 0, bottom: 2, trailing: 0))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
+                                .background(reorderRowFrameReader(for: item))
+                        }
+
+                        if reorderInsertionIndex == reorderDraftIDs.count, draggedItemID != nil {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.9))
+                                .frame(height: 2)
+                                .padding(.leading, 22)
                         }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
+                    .padding(.vertical, 2)
                 }
             }
+        }
+        .coordinateSpace(name: "shortcuts-reorder-space")
+        .onPreferenceChange(ShortcutsRowFramePreferenceKey.self) { frames in
+            rowFramesByID = reorderEnabled ? frames : [:]
+        }
+    }
+
+    private var quickMenuCard: some View {
+        let pinnedItems = model.pinnedShortcutContextItems
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Label("Right-Click Menu", systemImage: "pin.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Text("Right-click the TilePilot menu bar icon")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(
+                pinnedItems.isEmpty
+                    ? "Pin items below to make them appear when you right-click the TilePilot menu bar icon."
+                    : "These pinned items appear when you right-click the TilePilot menu bar icon, in the same order shown here."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if pinnedItems.isEmpty {
+                Text("Nothing is pinned yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(pinnedItems) { item in
+                        quickMenuPinnedItemRow(item)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func reorderRowFrameReader(for item: ShortcutsDisplayItem) -> some View {
+        if reorderEnabled {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: ShortcutsRowFramePreferenceKey.self,
+                        value: [item.id: proxy.frame(in: .named("shortcuts-reorder-space"))]
+                    )
+            }
+        } else {
+            EmptyView()
         }
     }
 
@@ -286,6 +322,108 @@ struct ShortcutsDashboardView: View {
             jumpDesktopFamilyCard(entries)
         case .desktopMoveFamily:
             EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func quickMenuPinnedItemRow(_ item: PinnedShortcutContextItem) -> some View {
+        switch item {
+        case .feature(let row):
+            quickMenuFeatureRow(row)
+        case .directional(let group, let bindings):
+            if let summary = directionalSummary(group: group, bindings: bindings) {
+                directionalShortcutFamilyCard(summary)
+            }
+        case .shortcut(let entry):
+            quickMenuShortcutRow(entry)
+        }
+    }
+
+    private func quickMenuFeatureRow(_ row: FeatureControlRow) -> some View {
+        let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+
+        return HStack(alignment: .center, spacing: 8) {
+            if let featureID = row.featureID {
+                Button {
+                    model.toggleFeaturePinned(featureID)
+                } label: {
+                    Image(systemName: model.isFeaturePinned(featureID) ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help(model.isFeaturePinned(featureID) ? "Unpin from Quick Menu" : "Pin to Quick Menu")
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(row.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            quickMenuComboView(comboRaw: comboRaw)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.0001), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func quickMenuShortcutRow(_ entry: ShortcutEntry) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button {
+                model.toggleShortcutPinned(entry)
+            } label: {
+                Image(systemName: model.isShortcutPinned(entry) ? "pin.fill" : "pin")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .help(model.isShortcutPinned(entry) ? "Unpin from Quick Menu" : "Pin to Quick Menu")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.shortcutTitle(entry))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if let secondaryText = model.shortcutSecondaryText(entry) {
+                    Text(secondaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            quickMenuComboView(comboRaw: entry.combo)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.0001), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func quickMenuComboView(comboRaw: String?) -> some View {
+        if let comboRaw, !comboRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(model.displayShortcutComboSymbols(from: comboRaw))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(model.displayShortcutComboWords(from: comboRaw))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } else {
+            Text("No shortcut")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

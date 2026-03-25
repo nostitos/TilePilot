@@ -44,6 +44,13 @@ final class ManagedHelperService: @unchecked Sendable {
         managedBinDirectory().appendingPathComponent(helper.executableName)
     }
 
+    func hasManagedHelperInstall() -> Bool {
+        if let state = loadInstallState(), !state.helpers.isEmpty {
+            return true
+        }
+        return ManagedHelperKind.allCases.contains { FileManager.default.isExecutableFile(atPath: managedHelperURL(for: $0).path) }
+    }
+
     func resolvedHelperURL(for helper: ManagedHelperKind, bundle: Bundle = .main) -> URL? {
         let managedURL = managedHelperURL(for: helper)
         if FileManager.default.isExecutableFile(atPath: managedURL.path) {
@@ -136,6 +143,60 @@ final class ManagedHelperService: @unchecked Sendable {
                 errorMessage: "TilePilot could not install bundled helpers: \(error.localizedDescription)"
             )
         }
+    }
+
+    func detectExistingExternalHelpers() async -> [ExistingHelperInstall] {
+        guard !hasManagedHelperInstall() else { return [] }
+
+        var installs: [ExistingHelperInstall] = []
+        for helper in ManagedHelperKind.allCases {
+            let binaryURL = externalHelperURL(for: helper)
+            let processResult = await runner.run(.init("/usr/bin/pgrep", ["-x", helper.executableName], timeout: 1.0))
+            let running = processResult.isSuccess
+            let homebrewAgent = homebrewLaunchAgentURL(for: helper)
+            let externalAgent = externalLaunchAgentURL(for: helper)
+            let source: ExistingHelperInstallSource
+            if homebrewAgent != nil || isHomebrewPath(binaryURL?.path) {
+                source = .homebrew
+            } else if externalAgent != nil {
+                source = .launchAgent
+            } else {
+                source = .binaryOnly
+            }
+
+            guard binaryURL != nil || running || homebrewAgent != nil || externalAgent != nil else { continue }
+
+            installs.append(
+                ExistingHelperInstall(
+                    helper: helper,
+                    binaryPath: binaryURL?.path,
+                    runningExternally: running,
+                    source: source,
+                    launchAgentPath: homebrewAgent?.path ?? externalAgent?.path
+                )
+            )
+        }
+
+        return installs
+    }
+
+    func installBundledHelpersReplacingExternalServices(bundle: Bundle = .main) async -> ManagedHelperOperationResult {
+        let existingInstalls = await detectExistingExternalHelpers()
+        let stopLogs = await stopExternalHelperServices(existingInstalls)
+        let installResult = await installBundledHelpers(bundle: bundle)
+        let successMessage: String?
+        if installResult.errorMessage == nil, !existingInstalls.isEmpty {
+            successMessage = "Stopped external helper services and installed TilePilot helpers."
+        } else {
+            successMessage = installResult.successMessage
+        }
+
+        return ManagedHelperOperationResult(
+            installState: installResult.installState,
+            commandLogs: stopLogs + installResult.commandLogs,
+            successMessage: successMessage,
+            errorMessage: installResult.errorMessage
+        )
     }
 
     func startManagedServices() async -> ManagedHelperOperationResult {
@@ -274,6 +335,28 @@ final class ManagedHelperService: @unchecked Sendable {
             .appendingPathComponent("\(helper.launchAgentLabel).plist")
     }
 
+    private func homebrewLaunchAgentURL(for helper: ManagedHelperKind) -> URL? {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent("homebrew.mxcl.\(helper.executableName).plist")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func externalLaunchAgentURL(for helper: ManagedHelperKind) -> URL? {
+        let launchAgentsDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: launchAgentsDirectory, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+
+        return entries.first { url in
+            let name = url.lastPathComponent.lowercased()
+            return name.contains(helper.executableName) &&
+                !name.contains("com.klode.tilepilot.") &&
+                name.hasSuffix(".plist")
+        }
+    }
+
     private func ensureManagedDirectories() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: managedBinDirectory(), withIntermediateDirectories: true)
@@ -372,6 +455,36 @@ final class ManagedHelperService: @unchecked Sendable {
         "gui/\(getuid())"
     }
 
+    private func stopExternalHelperServices(_ installs: [ExistingHelperInstall]) async -> [CommandLogEntry] {
+        var logs: [CommandLogEntry] = []
+        let domain = launchctlDomain()
+
+        for install in installs {
+            if install.source == .homebrew {
+                let brewStop = await runner.run(.init("/usr/bin/env", ["brew", "services", "stop", install.helper.executableName], timeout: 12.0))
+                logs.append(makeLog(from: brewStop))
+            }
+
+            if let launchAgentPath = install.launchAgentPath {
+                let bootout = await runner.run(.init("/bin/launchctl", ["bootout", domain, launchAgentPath], timeout: 3.0))
+                if bootout.errorType != .none {
+                    logs.append(makeLog(from: CommandResult(command: bootout.command, startedAt: bootout.startedAt, endedAt: bootout.endedAt, exitStatus: 0, stdout: bootout.stdout, stderr: "", errorType: .none)))
+                } else {
+                    logs.append(makeLog(from: bootout))
+                }
+            }
+
+            let kill = await runner.run(.init("/usr/bin/pkill", ["-x", install.helper.executableName], timeout: 2.0))
+            if kill.errorType != .none {
+                logs.append(makeLog(from: CommandResult(command: kill.command, startedAt: kill.startedAt, endedAt: kill.endedAt, exitStatus: 0, stdout: kill.stdout, stderr: "", errorType: .none)))
+            } else {
+                logs.append(makeLog(from: kill))
+            }
+        }
+
+        return logs
+    }
+
     private func writeInstallState(_ state: ManagedHelperInstallState) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -422,6 +535,11 @@ final class ManagedHelperService: @unchecked Sendable {
             }
         }
         return result
+    }
+
+    private func isHomebrewPath(_ path: String?) -> Bool {
+        guard let path else { return false }
+        return path.hasPrefix("/opt/homebrew/") || path.hasPrefix("/usr/local/")
     }
 }
 

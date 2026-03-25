@@ -35,7 +35,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
 
         let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1600, height: 900)
         let window = MegamapWindow(contentViewController: hosting)
-        window.title = "Megamap"
+        window.title = "MegaMap"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -296,10 +296,10 @@ private struct MegamapDashboardView: View {
 
     private var emptyState: some View {
         VStack(spacing: 14) {
-            Text(bridge.screenRecordingAuthorized ? "No Megamap capture yet" : "Screen Recording is off")
+            Text(bridge.screenRecordingAuthorized ? "No MegaMap capture yet" : "Screen Recording is off")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
-            Text(bridge.screenRecordingAuthorized ? "Use Refresh to capture all desktops." : "Megamap is showing the synthetic fallback until macOS allows screenshots for TilePilot.")
+            Text(bridge.screenRecordingAuthorized ? "Use Refresh to capture all desktops." : "MegaMap is showing the synthetic fallback until macOS allows screenshots for TilePilot.")
                 .font(.body)
                 .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
@@ -311,7 +311,7 @@ private struct MegamapDashboardView: View {
                 .disabled(bridge.isRefreshing)
 
                 if !bridge.screenRecordingAuthorized {
-                    Button("Open Screen Recording Settings") {
+                    Button("Enable Screen Recording") {
                         bridge.openScreenRecordingSettings()
                     }
                     .buttonStyle(.bordered)
@@ -365,7 +365,7 @@ private struct MegamapDashboardView: View {
     private var inlineControls: some View {
         HStack(spacing: 10) {
             if !bridge.screenRecordingAuthorized {
-                Button("Open Screen Recording Settings") {
+                Button("Enable Screen Recording") {
                     bridge.openScreenRecordingSettings()
                 }
                 .buttonStyle(MegamapHudButtonStyle(prominent: false))
@@ -403,7 +403,7 @@ private struct MegamapDashboardView: View {
 
             if bridge.isRefreshing {
                 MegamapHudNotice(
-                    text: "Refreshing Megamap…",
+                    text: "Refreshing MegaMap…",
                     foreground: .white,
                     background: Color.blue.opacity(0.88)
                 )
@@ -577,23 +577,22 @@ private struct MegamapDesktopTile: View {
     }
 
     private var desktopButtonTile: some View {
-        Button(action: onSelect) {
-            tileChrome {
-                switch desktop.contentMode {
-                case .screenshot:
-                    if let screenshotPath = desktop.screenshotPath {
-                        MegamapCachedScreenshotView(path: screenshotPath)
-                    } else {
-                        unavailablePlaceholder
-                    }
-                case .syntheticFallback:
-                    unavailablePlaceholder
-                case .unavailable:
+        tileChrome {
+            switch desktop.contentMode {
+            case .screenshot:
+                if let screenshotPath = desktop.screenshotPath {
+                    MegamapCachedScreenshotView(path: screenshotPath)
+                } else {
                     unavailablePlaceholder
                 }
+            case .syntheticFallback:
+                unavailablePlaceholder
+            case .unavailable:
+                unavailablePlaceholder
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 
     private func tileChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -620,7 +619,7 @@ private struct MegamapDesktopTile: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if desktop.contentMode == .screenshot && bridge.screenRecordingAuthorized {
+            if bridge.screenRecordingAuthorized {
                 Button {
                     bridge.refreshDesktop(desktop)
                 } label: {
@@ -669,7 +668,7 @@ private struct MegamapSyntheticDesktopCanvas: View {
                     let palette = MapWindowPalette.colors(
                         windowID: window.id,
                         isFloating: window.floating,
-                        isRuntimeManageable: window.runtimeManageable,
+                        usesLimitedVisualStyle: window.usesLimitedVisualStyle,
                         isFocused: window.focused
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
@@ -690,7 +689,7 @@ private struct MegamapSyntheticDesktopCanvas: View {
                     let iconFrame = OverviewMiniMapGeometry.iconFrame(for: window, iconSize: iconSize, inset: 4, in: size)
                     let runtimeEnabled = bridge.runtimeCommandsEnabled
                     let runtimeDisabledReason = bridge.runtimeDisabledReason ?? "Unavailable"
-                    let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
+                    let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? window.app : window.title
                     Button {
                         onWindowSelect(window)
                     } label: {
@@ -781,7 +780,7 @@ private struct MegamapMergedDesktopCanvas: View {
                     let palette = MapWindowPalette.colors(
                         windowID: window.id,
                         isFloating: window.floating,
-                        isRuntimeManageable: window.runtimeManageable,
+                        usesLimitedVisualStyle: window.usesLimitedVisualStyle,
                         isFocused: window.focused
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
@@ -802,7 +801,7 @@ private struct MegamapMergedDesktopCanvas: View {
                     let iconFrame = MegamapOverlayGeometry.iconFrame(for: window, desktop: desktop, iconSize: iconSize, inset: 4, in: size)
                     let runtimeEnabled = bridge.runtimeCommandsEnabled
                     let runtimeDisabledReason = bridge.runtimeDisabledReason ?? "Unavailable"
-                    let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
+                    let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? window.app : window.title
                     Button {
                         onWindowSelect(window)
                     } label: {
@@ -901,6 +900,12 @@ private struct MegamapCachedScreenshotView: View {
             .task(id: cacheTaskID(for: proxy.size)) {
                 guard proxy.size.width > 0, proxy.size.height > 0 else { return }
                 image = MegamapScreenshotCache.shared.image(for: path, idealSize: proxy.size)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .tilePilotHideMegamap)) { _ in
+                image = nil
+            }
+            .onDisappear {
+                image = nil
             }
         }
     }

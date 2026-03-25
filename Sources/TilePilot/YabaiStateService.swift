@@ -29,6 +29,11 @@ final class YabaiStateService: @unchecked Sendable {
         let frame: CGRect
     }
 
+    private struct OnScreenWindowDescriptor: Sendable {
+        let bounds: CGRect
+        let title: String
+    }
+
     func pollLiveState() async -> LiveStatePollResult {
         async let displaysTask = runner.run(yabaiCommand(["-m", "query", "--displays"], timeout: 1.5))
         async let spacesTask = runner.run(yabaiCommand(["-m", "query", "--spaces"], timeout: 1.5))
@@ -68,12 +73,14 @@ final class YabaiStateService: @unchecked Sendable {
 
         do {
             let screenDescriptors = await cachedCurrentScreenDescriptors(at: timestamp)
+            let onScreenWindowDescriptors = currentOnScreenWindowDescriptors()
             let parsed = try parseYabaiState(
                 displaysJSON: displaysResult.stdout,
                 spacesJSON: spacesResult.stdout,
                 windowsJSON: windowsResult.stdout,
                 timestamp: timestamp,
-                screenDescriptors: screenDescriptors
+                screenDescriptors: screenDescriptors,
+                onScreenWindowDescriptors: onScreenWindowDescriptors
             )
 
             return LiveStatePollResult(
@@ -141,30 +148,57 @@ final class YabaiStateService: @unchecked Sendable {
         spacesJSON: String,
         windowsJSON: String,
         timestamp: Date,
-        screenDescriptors: [ScreenDescriptor]
+        screenDescriptors: [ScreenDescriptor],
+        onScreenWindowDescriptors: [Int: OnScreenWindowDescriptor]
     ) throws -> (displays: [DisplayState], spaces: [SpaceState], windows: [WindowState]) {
         let displayRows = try jsonArray(from: displaysJSON)
         let spaceRows = try jsonArray(from: spacesJSON)
         let windowRows = try jsonArray(from: windowsJSON)
 
+        let rawDisplays: [(id: Int, frame: CGRect)] = displayRows.compactMap { row in
+            guard let id = int(from: row["index"]) ?? int(from: row["id"]) else {
+                return nil
+            }
+            let frame = yabaiFrame(from: row["frame"]) ?? .zero
+            return (id: id, frame: frame)
+        }
+
         let windows: [WindowState] = windowRows.compactMap { row in
             guard let id = int(from: row["id"]),
                   let pid = int(from: row["pid"]),
                   let space = int(from: row["space"]),
-                  let display = int(from: row["display"]) else {
+                  let declaredDisplay = int(from: row["display"]) else {
                 return nil
             }
             if isInternalTilePilotOverlayWindow(row) {
                 return nil
             }
-            let frame = yabaiFrame(from: row["frame"]) ?? .zero
+            let yabaiFrame = yabaiFrame(from: row["frame"]) ?? .zero
+            let onScreenDescriptor = onScreenWindowDescriptors[id]
+            let frame = preferredWindowFrame(
+                forWindowID: id,
+                yabaiFrame: yabaiFrame,
+                onScreenWindowDescriptors: onScreenWindowDescriptors
+            )
+            let resolvedDisplay = bestDisplayID(for: frame, displays: rawDisplays) ?? declaredDisplay
+            let rawTitle = string(from: row["title"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let role = string(from: row["role"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let subrole = string(from: row["subrole"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let effectiveTitle = preferredWindowTitle(
+                yabaiTitle: rawTitle,
+                onScreenWindowDescriptor: onScreenDescriptor
+            )
+            let effectiveVisibility = preferredWindowVisibility(
+                yabaiVisible: bool(from: row["is-visible"]) ?? true,
+                onScreenWindowDescriptor: onScreenDescriptor
+            )
 
             return WindowState(
                 id: id,
                 pid: pid,
                 app: string(from: row["app"]) ?? "Unknown",
                 space: space,
-                display: display,
+                display: resolvedDisplay,
                 frameX: frame.origin.x,
                 frameY: frame.origin.y,
                 frameW: frame.size.width,
@@ -173,11 +207,14 @@ final class YabaiStateService: @unchecked Sendable {
                 hasAXReference: bool(from: row["has-ax-reference"]) ?? true,
                 canMove: bool(from: row["can-move"]) ?? true,
                 canResize: bool(from: row["can-resize"]) ?? true,
-                title: string(from: row["title"]) ?? "",
+                title: effectiveTitle,
+                role: role,
+                subrole: subrole,
                 focused: bool(from: row["has-focus"]) ?? false,
-                isVisible: bool(from: row["is-visible"]) ?? true,
+                isVisible: effectiveVisibility,
                 isMinimized: bool(from: row["is-minimized"]) ?? false,
                 isHidden: bool(from: row["is-hidden"]) ?? false,
+                hasWindowServerMatch: onScreenDescriptor != nil,
                 source: .yabai,
                 lastUpdatedAt: timestamp
             )
@@ -299,6 +336,23 @@ final class YabaiStateService: @unchecked Sendable {
         return best
     }
 
+    private func bestDisplayID(for rect: CGRect, displays: [(id: Int, frame: CGRect)]) -> Int? {
+        var bestID: Int?
+        var bestArea: CGFloat = 0
+
+        for display in displays {
+            let intersection = rect.intersection(display.frame)
+            if intersection.isNull || intersection.isEmpty { continue }
+            let area = intersection.width * intersection.height
+            if area > bestArea {
+                bestArea = area
+                bestID = display.id
+            }
+        }
+
+        return bestID
+    }
+
     private func jsonArray(from string: String) throws -> [[String: Any]] {
         let data = Data(string.utf8)
         let value = try JSONSerialization.jsonObject(with: data)
@@ -375,13 +429,16 @@ final class YabaiStateService: @unchecked Sendable {
     private func userFacingLiveStateError(from raw: String) -> String {
         let normalized = raw.lowercased()
         if normalized.contains("env: yabai: no such file or directory") || normalized.contains("not found") {
-            return "yabai is not installed yet. Use System to install TilePilot Helpers, then return to Overview."
+            return "TilePilot helpers are not installed yet. Run Guided Setup to install them, then return to Overview."
         }
-        if normalized.contains("could not connect") || normalized.contains("message socket") {
-            return "yabai is installed but not running. Start the yabai service in Setup or use Restart yabai."
+        if normalized.contains("could not connect")
+            || normalized.contains("message socket")
+            || normalized.contains("failed to connect to socket")
+            || normalized.contains("socket unavailable") {
+            return "TilePilot could not talk to yabai yet. On a new Mac or migrated setup, run Guided Setup, re-enable TilePilot, yabai, and skhd in Accessibility if they appear there, then start helper services and recheck."
         }
         if normalized.contains("permission") && normalized.contains("denied") {
-            return "yabai query failed due to permissions. Check setup/health guidance and retry."
+            return "yabai query failed due to permissions. Open Guided Setup, review Accessibility for TilePilot and its helpers, then retry."
         }
         return raw
     }
@@ -485,5 +542,67 @@ final class YabaiStateService: @unchecked Sendable {
             }
         }
         return bestIndex
+    }
+
+    private func currentOnScreenWindowDescriptors() -> [Int: OnScreenWindowDescriptor] {
+        let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        guard !infoList.isEmpty else { return [:] }
+
+        var descriptors: [Int: OnScreenWindowDescriptor] = [:]
+        for info in infoList {
+            let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+            if layer != 0 { continue }
+
+            let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            if alpha <= 0.01 { continue }
+
+            guard let number = (info[kCGWindowNumber as String] as? NSNumber)?.intValue,
+                  let boundsValue = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsValue) else {
+                continue
+            }
+
+            let area = bounds.width * bounds.height
+            if area < 400 {
+                continue
+            }
+
+            let title = (info[kCGWindowName as String] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            descriptors[number] = OnScreenWindowDescriptor(
+                bounds: bounds,
+                title: title
+            )
+        }
+        return descriptors
+    }
+
+    private func preferredWindowFrame(
+        forWindowID id: Int,
+        yabaiFrame: CGRect,
+        onScreenWindowDescriptors: [Int: OnScreenWindowDescriptor]
+    ) -> CGRect {
+        onScreenWindowDescriptors[id]?.bounds ?? yabaiFrame
+    }
+
+    private func preferredWindowTitle(
+        yabaiTitle: String,
+        onScreenWindowDescriptor: OnScreenWindowDescriptor?
+    ) -> String {
+        guard yabaiTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return yabaiTitle
+        }
+        return onScreenWindowDescriptor?.title ?? ""
+    }
+
+    private func preferredWindowVisibility(
+        yabaiVisible: Bool,
+        onScreenWindowDescriptor: OnScreenWindowDescriptor?
+    ) -> Bool {
+        if onScreenWindowDescriptor != nil {
+            return true
+        }
+        return yabaiVisible
     }
 }

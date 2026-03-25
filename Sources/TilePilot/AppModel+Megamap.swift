@@ -10,6 +10,7 @@ enum MegamapCaptureReason: String, Sendable {
     case manualRefresh
     case beforeTilePilotDesktopSwitch
     case afterTilePilotDesktopSwitch
+    case onMegamapPresent
 }
 
 @MainActor
@@ -26,14 +27,14 @@ extension AppModel {
         acknowledgeInitialStatusIfNeeded()
         NSApp.activate(ignoringOtherApps: true)
         megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
-        rebuildMegamapSections()
-        NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
         Task { [weak self] in
             guard let self else { return }
             await self.refreshLiveState()
+            await self.captureCurrentDesktopForMegamapPresentationIfPossible()
             await MainActor.run {
                 self.megamapScreenRecordingAuthorized = self.megamapCaptureService.screenRecordingAuthorized()
                 self.rebuildMegamapSections()
+                NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
             }
         }
     }
@@ -41,7 +42,7 @@ extension AppModel {
     func refreshMegamap() {
         acknowledgeInitialStatusIfNeeded()
         NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
-        megamapLastActionMessage = "Refreshing Megamap…"
+        megamapLastActionMessage = "Refreshing MegaMap…"
         megamapLastErrorMessage = nil
         megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         if !megamapScreenRecordingAuthorized {
@@ -75,14 +76,14 @@ extension AppModel {
     }
 
     func requestMegamapScreenRecordingAccess() {
-        let granted = megamapCaptureService.requestScreenRecordingAccess()
-        megamapScreenRecordingAuthorized = granted || megamapCaptureService.screenRecordingAuthorized()
+        requestScreenRecordingAccessPrompt()
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         if megamapScreenRecordingAuthorized {
             megamapLastActionMessage = "Screen Recording access confirmed."
             megamapLastErrorMessage = nil
         } else {
-            megamapLastErrorMessage = "TilePilot could not confirm Screen Recording yet. If you just granted it, reopen TilePilot and refresh Megamap."
-            megamapLastActionMessage = nil
+            megamapLastActionMessage = "Opened Screen Recording settings."
+            megamapLastErrorMessage = "If TilePilot is not listed yet, macOS has not registered the capture request. Reopen TilePilot and try Enable Screen Recording again."
         }
         rebuildMegamapSections()
     }
@@ -117,9 +118,10 @@ extension AppModel {
     func captureMegamapDesktopIfNeeded(
         spaceIndex: Int,
         reason: MegamapCaptureReason,
-        minimumAgeSeconds: TimeInterval = 1.0
+        minimumAgeSeconds: TimeInterval = 1.0,
+        requireCacheArmed: Bool = true
     ) async {
-        guard megamapCacheArmed, !isRefreshingMegamap else { return }
+        guard (!requireCacheArmed || megamapCacheArmed), !isRefreshingMegamap else { return }
         let screenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         guard screenRecordingAuthorized else {
             megamapScreenRecordingAuthorized = false
@@ -169,6 +171,37 @@ extension AppModel {
         }
     }
 
+    private func captureCurrentDesktopForMegamapPresentationIfPossible() async {
+        guard !isRefreshingMegamap else { return }
+        let screenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        guard screenRecordingAuthorized else {
+            megamapScreenRecordingAuthorized = false
+            return
+        }
+        megamapScreenRecordingAuthorized = true
+
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        let targetSpaceIndex: Int?
+        if let snapshot {
+            if let activeSpace = activeSpaceIndex(in: snapshot) {
+                targetSpaceIndex = activeSpace
+            } else {
+                targetSpaceIndex = await queryCurrentFocusedSpaceIndex()
+            }
+        } else {
+            targetSpaceIndex = await queryCurrentFocusedSpaceIndex()
+        }
+
+        guard let targetSpaceIndex else { return }
+
+        await captureMegamapDesktopIfNeeded(
+            spaceIndex: targetSpaceIndex,
+            reason: .onMegamapPresent,
+            minimumAgeSeconds: 0.0,
+            requireCacheArmed: false
+        )
+    }
+
     private func refreshSingleMegamapDesktop(spaceIndex: Int) async {
         guard !isRefreshingMegamap else { return }
         isRefreshingMegamap = true
@@ -177,7 +210,7 @@ extension AppModel {
         megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         guard megamapScreenRecordingAuthorized else {
             megamapLastActionMessage = nil
-            megamapLastErrorMessage = "Screen Recording is needed for real Megamap screenshots."
+            megamapLastErrorMessage = "Screen Recording is needed for real MegaMap screenshots."
             rebuildMegamapSections()
             NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
             return
@@ -211,7 +244,6 @@ extension AppModel {
         }
 
         let desktopID = megamapDesktopID(displayID: display.id, desktopIndex: spaceIndex)
-        let originalSpace = await queryCurrentFocusedSpaceIndex() ?? activeSpaceIndex(in: snapshot)
         let resolvedDisplaysByID = megamapCaptureService.resolveScreenDescriptors(for: [display])
 
         guard let resolvedDisplay = resolvedDisplaysByID[display.id] else {
@@ -259,11 +291,6 @@ extension AppModel {
                 : "Desktop \(spaceIndex) could not be captured just now."
         }
 
-        if let originalSpace, originalSpace != spaceIndex {
-            _ = await focusDesktopForMegamapCapture(index: originalSpace)
-            try? await Task.sleep(for: .milliseconds(30))
-        }
-
         rebuildMegamapSections()
         NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
         Task { [weak self] in
@@ -276,7 +303,16 @@ extension AppModel {
     }
 
     func openMegamapScreenRecordingSettings() {
-        megamapCaptureService.openScreenRecordingSettings()
+        requestScreenRecordingAccessPrompt()
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        if megamapScreenRecordingAuthorized {
+            megamapLastActionMessage = "Screen Recording access confirmed."
+            megamapLastErrorMessage = nil
+        } else {
+            megamapLastActionMessage = "Opened Screen Recording settings."
+            megamapLastErrorMessage = "If TilePilot is not listed yet, macOS has not registered the capture request. Reopen TilePilot and try Enable Screen Recording again."
+        }
+        rebuildMegamapSections()
     }
 
     private func refreshMegamapCaptureSweep() async {
@@ -305,7 +341,7 @@ extension AppModel {
         guard let snapshot,
               snapshot.source == .yabai,
               !snapshot.degraded else {
-            megamapLastErrorMessage = "Live desktop data is unavailable right now, so Megamap could not start a fresh sweep."
+            megamapLastErrorMessage = "Live desktop data is unavailable right now, so MegaMap could not start a fresh sweep."
             megamapLastActionMessage = nil
             rebuildMegamapSections()
             NotificationCenter.default.post(name: .tilePilotOpenMegamap, object: nil)
@@ -448,10 +484,10 @@ extension AppModel {
             failedDesktopCount: failureCount
         )
         if successCount > 0 && failureCount == 0 {
-            megamapLastActionMessage = "Megamap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
+            megamapLastActionMessage = "MegaMap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
             megamapLastErrorMessage = nil
         } else if successCount > 0 {
-            megamapLastActionMessage = "Megamap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
+            megamapLastActionMessage = "MegaMap refreshed for \(successCount) desktop\(successCount == 1 ? "" : "s")."
             megamapLastErrorMessage = megamapSweepFailureSummary(
                 switchFailures: switchFailureDesktopIndexes,
                 captureFailures: captureFailureDesktopIndexes,
@@ -487,12 +523,12 @@ extension AppModel {
 
         if parts.isEmpty {
             return allFailed
-                ? "Megamap could not refresh any desktops in this sweep."
+                ? "MegaMap could not refresh any desktops in this sweep."
                 : "Some desktops could not be refreshed. Last screenshots were kept where available."
         }
 
         let suffix = allFailed
-            ? " Megamap kept any last screenshots that were already available."
+            ? " MegaMap kept any last screenshots that were already available."
             : " Last screenshots were kept where available."
         return parts.joined(separator: " ") + suffix
     }
@@ -657,7 +693,7 @@ extension AppModel {
 
     private var isMegamapVisible: Bool {
         NSApp.windows.contains { window in
-            window.title == "Megamap" && window.isVisible
+            window.title == "MegaMap" && window.isVisible
         }
     }
 }

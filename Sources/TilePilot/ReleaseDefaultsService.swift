@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.5-defaults.1"
+    static let currentProfileVersion = "v0.2.9-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -10,23 +10,42 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             profileVersion: Self.currentProfileVersion,
             userState: ReleaseDefaultsUserState(
                 pinnedFeatureControlIDs: [
+                    "app.keep-on-top-when-floating",
                     "screen.set-floating-all-visible",
-                    "screen.set-tiled-all-visible",
-                    "screen.grid-floating",
                     "screen.grid-auto-tiled",
+                    "screen.grid-floating",
+                    "screen.rotate-layout",
                     "screen.balance-current-desktop",
+                    "screen.bring-floating-front",
                 ],
                 pinnedDirectionalGroupIDs: [],
-                shortcutsCustomOrderIDs: [],
+                shortcutsCustomOrderIDs: [
+                    "directional.moveWindow",
+                    "directional.resizeWindow",
+                    "directional.focusWindow",
+                ],
                 showWindowBadgeOverlay: true,
-                showWindowOutlineOverlay: false,
+                showWindowOutlineOverlay: true,
+                windowOutlineOverlayBaseWidth: 1.0,
                 raiseOnFloatToggleEnabled: true,
                 appForegroundPolicyByName: [:],
-                performanceSettings: .balanced
+                performanceSettings: .responsive
             ),
             configState: ReleaseDefaultsConfigState(
                 managedSkhdSectionBody: defaultManagedSkhdSectionBody(),
-                windowBehaviorPolicy: .default
+                windowBehaviorPolicy: ManagedWindowBehaviorPolicy(
+                    manualTilingModeEnabled: true,
+                    hoverFocusMode: .off,
+                    mouseFollowsFocusEnabled: false,
+                    outerPadding: 0,
+                    windowGap: 0,
+                    mouseModifier: .alt,
+                    mouseAction1: .move,
+                    mouseAction2: .resize,
+                    mouseDropAction: .swap,
+                    neverTileApps: [],
+                    alwaysTileApps: []
+                )
             )
         )
     }
@@ -60,9 +79,10 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             "TilePilot.shortcutsCustomOrderIDs",
             "TilePilot.showWindowBadgeOverlay",
             "TilePilot.showWindowOutlineOverlay",
+            "TilePilot.windowOutlineOverlayBaseWidth",
             "TilePilot.raiseOnFloatToggle",
             "TilePilot.appForegroundPolicyByName",
-            "TilePilot.initialSetupLandingShown",
+            "TilePilot.performanceHideMinimizedHelperWindowsInMaps",
         ]
         return keys.contains { defaults.object(forKey: $0) != nil }
     }
@@ -72,13 +92,15 @@ final class ReleaseDefaultsService: @unchecked Sendable {
         # Managed by TilePilot. Unknown lines outside this block are preserved.
         # Release default shortcuts:
         # TILEPILOT_FEATURE screen.set-floating-all-visible
-        ctrl + shift + alt - d : ~/.config/yabai/scripts/disable-tiling-all-visible.sh
+        ctrl + shift + alt - d : \(featureCommand("screen.set-floating-all-visible"))
         # TILEPILOT_FEATURE screen.set-tiled-all-visible
-        ctrl + shift + alt - e : ~/.config/yabai/scripts/enable-tiling-all-visible.sh
+        ctrl + shift + alt - e : \(featureCommand("screen.set-tiled-all-visible"))
         # TILEPILOT_FEATURE screen.grid-floating
-        ctrl + shift + alt - p : ~/.config/yabai/scripts/grid-tiling-floating.sh
+        ctrl + shift + alt - p : \(featureCommand("screen.grid-floating"))
         # TILEPILOT_FEATURE screen.grid-auto-tiled
-        ctrl + shift + alt - o : ~/.config/yabai/scripts/rebuild-balanced-tile-layout.sh
+        ctrl + shift + alt - o : \(featureCommand("screen.grid-auto-tiled"))
+        # TILEPILOT_FEATURE screen.rotate-layout
+        shift + alt - r : \(featureCommand("screen.rotate-layout"))
         # TILEPILOT_FEATURE screen.layout-bsp-balance
         ctrl + shift + alt - g : yabai -m space --layout bsp; yabai -m space --balance
         # TILEPILOT_FEATURE screen.balance-current-desktop
@@ -86,6 +108,10 @@ final class ReleaseDefaultsService: @unchecked Sendable {
         # TILEPILOT_FEATURE action.toggle-float
         ctrl + shift + alt - ~ : yabai -m window --toggle float
         """
+    }
+
+    private func featureCommand(_ featureID: String) -> String {
+        "/usr/bin/open -g \"tilepilot://feature/\(featureID)\""
     }
 
     private func defaultsDirectoryURL() -> URL {

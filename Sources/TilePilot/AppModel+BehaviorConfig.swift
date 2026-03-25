@@ -158,6 +158,42 @@ extension AppModel {
         scheduleDebouncedWindowBehaviorSave(reason: "mouse-follows-focus")
     }
 
+    func updateOuterPaddingDraft(_ value: Int) {
+        windowBehaviorPolicyDraft.outerPadding = clampedGlobalSpacingValue(value)
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "outer-padding")
+    }
+
+    func updateWindowGapDraft(_ value: Int) {
+        windowBehaviorPolicyDraft.windowGap = clampedGlobalSpacingValue(value)
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "window-gap")
+    }
+
+    func updateMouseModifierDraft(_ value: MouseModifierKey) {
+        windowBehaviorPolicyDraft.mouseModifier = value
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "mouse-modifier")
+    }
+
+    func updateMouseAction1Draft(_ value: MouseDragAction) {
+        windowBehaviorPolicyDraft.mouseAction1 = value
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "mouse-action1")
+    }
+
+    func updateMouseAction2Draft(_ value: MouseDragAction) {
+        windowBehaviorPolicyDraft.mouseAction2 = value
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "mouse-action2")
+    }
+
+    func updateMouseDropActionDraft(_ value: MouseDropAction) {
+        windowBehaviorPolicyDraft.mouseDropAction = value
+        recomputeYabaiConfigDiffPreview()
+        scheduleDebouncedWindowBehaviorSave(reason: "mouse-drop-action")
+    }
+
     func disableHoverFocus() {
         windowBehaviorPolicyDraft.hoverFocusMode = .off
         recomputeYabaiConfigDiffPreview()
@@ -491,6 +527,15 @@ extension AppModel {
         let configCommands: [ShellCommand] = [
             yabaiCommand(["-m", "config", "focus_follows_mouse", current.hoverFocusMode.rawValue], timeout: 1.5),
             yabaiCommand(["-m", "config", "mouse_follows_focus", current.mouseFollowsFocusEnabled ? "on" : "off"], timeout: 1.5),
+            yabaiCommand(["-m", "config", "mouse_modifier", current.mouseModifier.rawValue], timeout: 1.5),
+            yabaiCommand(["-m", "config", "mouse_action1", current.mouseAction1.rawValue], timeout: 1.5),
+            yabaiCommand(["-m", "config", "mouse_action2", current.mouseAction2.rawValue], timeout: 1.5),
+            yabaiCommand(["-m", "config", "mouse_drop_action", current.mouseDropAction.rawValue], timeout: 1.5),
+            yabaiCommand(["-m", "config", "top_padding", String(current.outerPadding)], timeout: 1.5),
+            yabaiCommand(["-m", "config", "bottom_padding", String(current.outerPadding)], timeout: 1.5),
+            yabaiCommand(["-m", "config", "left_padding", String(current.outerPadding)], timeout: 1.5),
+            yabaiCommand(["-m", "config", "right_padding", String(current.outerPadding)], timeout: 1.5),
+            yabaiCommand(["-m", "config", "window_gap", String(current.windowGap)], timeout: 1.5),
         ]
         for command in configCommands {
             let result = await doctorService.runSupportCommand(command)
@@ -590,5 +635,9 @@ extension AppModel {
             }
         }
         return nil
+    }
+
+    private func clampedGlobalSpacingValue(_ value: Int) -> Int {
+        min(max(value, 0), 100)
     }
 }

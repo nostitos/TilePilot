@@ -131,36 +131,35 @@ struct OverviewDesktopPreviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Button {
-                    onDesktopSelect(desktop.desktopIndex)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("#\(desktop.desktopIndex)")
-                            .font(.caption.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text("#\(desktop.desktopIndex)")
+                        .font(.caption.weight(.semibold))
 
-                        if desktop.focused {
-                            Text("Focused")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.12), in: Capsule())
-                        } else if desktop.visible {
-                            Text("Visible")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.12), in: Capsule())
-                        }
-
-                        Spacer(minLength: 0)
+                    Button("Jump") {
+                        onDesktopSelect(desktop.desktopIndex)
                     }
-                    .contentShape(Rectangle())
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help("Switch to Desktop #\(desktop.desktopIndex).")
+
+                    if desktop.focused {
+                        Text("Focused")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.12), in: Capsule())
+                    } else if desktop.visible {
+                        Text("Visible")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Switch to Desktop #\(desktop.desktopIndex).")
+
+                Spacer(minLength: 0)
 
                 HStack(spacing: 8) {
                     Text("Tiling")
@@ -274,7 +273,7 @@ private struct OverviewMiniWindowFrameLayer: View {
         let palette = MapWindowPalette.colors(
             windowID: window.id,
             isFloating: window.floating,
-            isRuntimeManageable: window.runtimeManageable,
+            usesLimitedVisualStyle: window.usesLimitedVisualStyle,
             isFocused: window.focused,
             isSelected: isSelected
         )
@@ -323,7 +322,7 @@ private struct OverviewMiniWindowIconButton: View {
         )
         let runtimeEnabled = model.canRunYabaiRuntimeCommands
         let runtimeDisabledReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
-        let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : window.title
+        let hoverTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? window.app : window.title
 
         Button {
             onActivate(window.id, window.desktopIndex)

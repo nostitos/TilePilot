@@ -43,13 +43,13 @@ struct NowDashboardView: View {
                                 if snapshot.degraded, let reason = snapshot.degradedReason {
                                     degradedBanner(reason: reason)
                                 }
-                                desktopPreviewUnavailableCard
+                                desktopPreviewUnavailableCard(snapshot)
                                 fallbackMapCard(snapshot)
                             } else {
                                 if snapshot.degraded, let reason = snapshot.degradedReason {
                                     degradedBanner(reason: reason)
                                 }
-                                desktopPreviewUnavailableCard
+                                desktopPreviewUnavailableCard(snapshot)
                                 fallbackMapCard(snapshot)
                             }
                         } else {
@@ -77,12 +77,33 @@ struct NowDashboardView: View {
         }
     }
 
-    private var desktopPreviewUnavailableCard: some View {
+    private func desktopPreviewUnavailableCard(_ snapshot: LiveStateSnapshot) -> some View {
         GroupBox {
-            Text("Desktop mini-map unavailable in fallback/degraded mode.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Desktop mini-map unavailable in fallback/degraded mode.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if snapshot.degraded {
+                    Text("Run Guided Setup for a step-by-step fix.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        liveStateActionButton(.init(label: "Run Guided Setup", prominent: true, handler: {
+                            presentOverviewRecoveryGuide(for: snapshot.degradedReason)
+                        }))
+
+                        if needsAccessibilityRecoveryHint(for: snapshot.degradedReason) {
+                            liveStateActionButton(.init(label: "Open Accessibility Settings", prominent: false, handler: {
+                                model.openAccessibilitySettings()
+                            }))
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             Label("Desktop Mini-map", systemImage: "square.grid.3x3")
         }
@@ -111,11 +132,11 @@ struct NowDashboardView: View {
         return GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 12) {
-                    Text("Need a higher-resolution view? Megamap captures real desktop screenshots with a manual sweep.")
+                    Text("Need a higher-resolution view? MegaMap captures real desktop screenshots with a manual sweep.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    Button("Open Megamap") {
+                    Button("Open MegaMap") {
                         model.presentMegamap()
                     }
                     .buttonStyle(.bordered)
@@ -187,9 +208,7 @@ struct NowDashboardView: View {
                             .foregroundStyle(.secondary)
                         HStack(spacing: 8) {
                             ForEach(liveStateHelp.actions, id: \.label) { action in
-                                Button(action.label, action: action.handler)
-                                    .font(.caption)
-                                    .buttonStyle(.borderless)
+                                liveStateActionButton(action)
                             }
                         }
                     }
@@ -217,9 +236,7 @@ struct NowDashboardView: View {
                 if let liveStateHelp = liveStateHelp(for: reason) {
                     HStack(spacing: 8) {
                         ForEach(liveStateHelp.actions, id: \.label) { action in
-                            Button(action.label, action: action.handler)
-                                .font(.caption)
-                                .buttonStyle(.borderless)
+                            liveStateActionButton(action)
                         }
                     }
                 }
@@ -341,6 +358,12 @@ struct NowDashboardView: View {
                 Text("Desktop/window mapping is hidden in fallback mode to avoid misleading precision.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if snapshot.degraded {
+                    liveStateActionButton(.init(label: "Run Guided Setup", prominent: true, handler: {
+                        presentOverviewRecoveryGuide(for: snapshot.degradedReason)
+                    }))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
@@ -365,6 +388,7 @@ struct NowDashboardView: View {
         runtimeDisabledReason: String
     ) -> some View {
         let defaultBehavior = defaultBehaviorBadge(for: window.app, desktopTilingEnabled: desktopTilingEnabled)
+        let trimmedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return HStack(alignment: .center, spacing: 8) {
             OverviewWindowIconControl(
                 window: window,
@@ -375,10 +399,12 @@ struct NowDashboardView: View {
             Text(window.app)
                 .font(.caption.weight(.semibold))
 
-            Text(window.title.isEmpty ? "Untitled" : window.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            if !trimmedTitle.isEmpty {
+                Text(trimmedTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 8)
 
@@ -485,6 +511,7 @@ struct NowDashboardView: View {
 
     private struct InlineAction {
         let label: String
+        let prominent: Bool
         let handler: () -> Void
     }
 
@@ -498,31 +525,83 @@ struct NowDashboardView: View {
 
         if normalized.contains("not installed yet") || normalized.contains("no such file or directory") {
             return LiveStateHelp(
-                message: "TilePilot needs its helper tools before the full Overview can map desktops precisely.",
+                message: "TilePilot cannot show the full desktop map until its bundled helpers are installed. Run Guided Setup to install them from inside the app.",
                 actions: [
-                    .init(label: SetupNextAction.installHelpers.buttonTitle, handler: { model.performSetupAction(.installHelpers) }),
-                    .init(label: "Recheck", handler: { Task { await model.refreshLiveState() } }),
+                    .init(label: "Run Guided Setup", prominent: true, handler: { model.presentSetupGuide() }),
+                    .init(label: "Recheck", prominent: false, handler: { Task { await model.refreshLiveState() } }),
                 ]
             )
         }
 
-        if normalized.contains("not running") || normalized.contains("message socket") || normalized.contains("could not connect") {
+        if normalized.contains("not running")
+            || normalized.contains("message socket")
+            || normalized.contains("could not connect")
+            || normalized.contains("failed to connect to socket")
+            || normalized.contains("socket is unavailable")
+            || normalized.contains("socket unavailable") {
             return LiveStateHelp(
-                message: "TilePilot helpers look installed, but yabai is not responding yet.",
+                message: "TilePilot cannot talk to yabai yet. On a new Mac or migrated setup, the usual fixes are to re-enable TilePilot, yabai, and skhd in Accessibility if they appear there, then start helper services again.",
                 actions: [
-                    .init(label: model.primarySetupAction == .startHelperServices ? model.primarySetupActionLabel : "Start Helper Services", handler: {
+                    .init(label: "Run Guided Setup", prominent: true, handler: {
+                        presentOverviewRecoveryGuide(for: message)
+                    }),
+                    .init(label: "Open Accessibility Settings", prominent: false, handler: {
+                        model.openAccessibilitySettings()
+                    }),
+                    .init(label: model.primarySetupAction == .startHelperServices ? model.primarySetupActionLabel : "Start Helper Services", prominent: false, handler: {
                         if model.primarySetupAction == .startHelperServices {
                             model.performPrimarySetupAction()
                         } else {
                             model.startHelperServicesBestEffort()
                         }
                     }),
-                    .init(label: "Recheck", handler: { Task { await model.refreshLiveState() } }),
+                    .init(label: "Recheck", prominent: false, handler: { Task { await model.refreshLiveState() } }),
+                ]
+            )
+        }
+
+        if normalized.contains("permission") && normalized.contains("denied") {
+            return LiveStateHelp(
+                message: "macOS denied a helper permission TilePilot needs. Open Guided Setup, then review Accessibility permissions for TilePilot and its helpers on this Mac.",
+                actions: [
+                    .init(label: "Run Guided Setup", prominent: true, handler: {
+                        presentOverviewRecoveryGuide(for: message)
+                    }),
+                    .init(label: "Open Accessibility Settings", prominent: false, handler: {
+                        model.openAccessibilitySettings()
+                    }),
+                    .init(label: "Recheck", prominent: false, handler: { Task { await model.refreshLiveState() } }),
                 ]
             )
         }
 
         return nil
+    }
+
+    private func needsAccessibilityRecoveryHint(for message: String?) -> Bool {
+        guard let message else { return false }
+        let normalized = message.lowercased()
+        return normalized.contains("socket")
+            || normalized.contains("could not connect")
+            || normalized.contains("failed to connect")
+            || normalized.contains("permission")
+    }
+
+    private func presentOverviewRecoveryGuide(for degradedReason: String?) {
+        if needsAccessibilityRecoveryHint(for: degradedReason) {
+            if model.hasIncompleteEssentialSetupGuideSteps {
+                model.presentSetupGuide(source: .manual, startingAt: .startHelperServices)
+            } else {
+                model.presentSetupGuide(source: .manual, startingAt: .accessibility)
+            }
+            return
+        }
+
+        if model.hasIncompleteEssentialSetupGuideSteps {
+            model.presentSetupGuide(source: .manual, startingAt: .startHelperServices)
+        } else {
+            model.presentSetupGuide()
+        }
     }
 
     private func previewDesktopCardMinimumWidth(for display: OverviewDisplayPreview, maxDisplayArea: Double) -> CGFloat {
@@ -533,5 +612,20 @@ struct NowDashboardView: View {
         let minWidth: Double = 240
         let maxWidth: Double = 340
         return CGFloat(minWidth + (maxWidth - minWidth) * scale)
+    }
+
+    @ViewBuilder
+    private func liveStateActionButton(_ action: InlineAction) -> some View {
+        if action.prominent {
+            Button(action.label, action: action.handler)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        } else {
+            Button(action.label, action: action.handler)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
     }
 }

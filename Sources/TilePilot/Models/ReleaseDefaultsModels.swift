@@ -11,6 +11,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let shortcutsCustomOrderIDs: [String]
     let showWindowBadgeOverlay: Bool
     let showWindowOutlineOverlay: Bool
+    let windowOutlineOverlayBaseWidth: Double
     let raiseOnFloatToggleEnabled: Bool
     let appForegroundPolicyByName: [String: AppForegroundPolicy]
     let performanceSettings: PerformanceSettings
@@ -21,6 +22,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         shortcutsCustomOrderIDs: [String] = [],
         showWindowBadgeOverlay: Bool,
         showWindowOutlineOverlay: Bool,
+        windowOutlineOverlayBaseWidth: Double,
         raiseOnFloatToggleEnabled: Bool,
         appForegroundPolicyByName: [String: AppForegroundPolicy],
         performanceSettings: PerformanceSettings
@@ -30,6 +32,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.shortcutsCustomOrderIDs = shortcutsCustomOrderIDs
         self.showWindowBadgeOverlay = showWindowBadgeOverlay
         self.showWindowOutlineOverlay = showWindowOutlineOverlay
+        self.windowOutlineOverlayBaseWidth = windowOutlineOverlayBaseWidth
         self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
         self.appForegroundPolicyByName = appForegroundPolicyByName
         self.performanceSettings = performanceSettings
@@ -41,6 +44,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case shortcutsCustomOrderIDs
         case showWindowBadgeOverlay
         case showWindowOutlineOverlay
+        case windowOutlineOverlayBaseWidth
         case raiseOnFloatToggleEnabled
         case appForegroundPolicyByName
         case performanceSettings
@@ -53,6 +57,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         shortcutsCustomOrderIDs = try container.decodeIfPresent([String].self, forKey: .shortcutsCustomOrderIDs) ?? []
         showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
         showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
+        windowOutlineOverlayBaseWidth = try container.decodeIfPresent(Double.self, forKey: .windowOutlineOverlayBaseWidth) ?? 2.0
         raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
         appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
         performanceSettings = try container.decodeIfPresent(PerformanceSettings.self, forKey: .performanceSettings) ?? .balanced

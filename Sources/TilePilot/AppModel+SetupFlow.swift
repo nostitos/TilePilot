@@ -75,6 +75,7 @@ extension AppModel {
         let optionalIDs: Set<String> = [
             "start-at-logon",
             "accessibility",
+            "screen-recording",
             "mission-control",
         ]
         return systemCheckRows.filter { optionalIDs.contains($0.id) }

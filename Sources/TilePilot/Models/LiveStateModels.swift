@@ -49,10 +49,13 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
     let canMove: Bool
     let canResize: Bool
     let title: String
+    let role: String
+    let subrole: String
     let focused: Bool
     let isVisible: Bool
     let isMinimized: Bool
     let isHidden: Bool
+    let hasWindowServerMatch: Bool
     let source: StateSourceQuality
     let lastUpdatedAt: Date
 
@@ -62,6 +65,114 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
 
     var isRuntimeManageable: Bool {
         (hasAXReference && canMove) || supportsFocusedFloatToggleFallback
+    }
+
+    var usesLimitedVisualStyle: Bool {
+        !isRuntimeManageable
+    }
+
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case pid
+        case app
+        case space
+        case display
+        case frameX
+        case frameY
+        case frameW
+        case frameH
+        case floating
+        case hasAXReference
+        case canMove
+        case canResize
+        case title
+        case role
+        case subrole
+        case focused
+        case isVisible
+        case isMinimized
+        case isHidden
+        case hasWindowServerMatch
+        case source
+        case lastUpdatedAt
+    }
+
+    init(
+        id: Int,
+        pid: Int,
+        app: String,
+        space: Int,
+        display: Int,
+        frameX: Double,
+        frameY: Double,
+        frameW: Double,
+        frameH: Double,
+        floating: Bool,
+        hasAXReference: Bool,
+        canMove: Bool,
+        canResize: Bool,
+        title: String,
+        role: String,
+        subrole: String,
+        focused: Bool,
+        isVisible: Bool,
+        isMinimized: Bool,
+        isHidden: Bool,
+        hasWindowServerMatch: Bool,
+        source: StateSourceQuality,
+        lastUpdatedAt: Date
+    ) {
+        self.id = id
+        self.pid = pid
+        self.app = app
+        self.space = space
+        self.display = display
+        self.frameX = frameX
+        self.frameY = frameY
+        self.frameW = frameW
+        self.frameH = frameH
+        self.floating = floating
+        self.hasAXReference = hasAXReference
+        self.canMove = canMove
+        self.canResize = canResize
+        self.title = title
+        self.role = role
+        self.subrole = subrole
+        self.focused = focused
+        self.isVisible = isVisible
+        self.isMinimized = isMinimized
+        self.isHidden = isHidden
+        self.hasWindowServerMatch = hasWindowServerMatch
+        self.source = source
+        self.lastUpdatedAt = lastUpdatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        pid = try container.decode(Int.self, forKey: .pid)
+        app = try container.decode(String.self, forKey: .app)
+        space = try container.decode(Int.self, forKey: .space)
+        display = try container.decode(Int.self, forKey: .display)
+        frameX = try container.decode(Double.self, forKey: .frameX)
+        frameY = try container.decode(Double.self, forKey: .frameY)
+        frameW = try container.decode(Double.self, forKey: .frameW)
+        frameH = try container.decode(Double.self, forKey: .frameH)
+        floating = try container.decode(Bool.self, forKey: .floating)
+        hasAXReference = try container.decode(Bool.self, forKey: .hasAXReference)
+        canMove = try container.decode(Bool.self, forKey: .canMove)
+        canResize = try container.decode(Bool.self, forKey: .canResize)
+        title = try container.decode(String.self, forKey: .title)
+        role = try container.decodeIfPresent(String.self, forKey: .role) ?? ""
+        subrole = try container.decodeIfPresent(String.self, forKey: .subrole) ?? ""
+        focused = try container.decode(Bool.self, forKey: .focused)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        isMinimized = try container.decode(Bool.self, forKey: .isMinimized)
+        isHidden = try container.decode(Bool.self, forKey: .isHidden)
+        hasWindowServerMatch = try container.decodeIfPresent(Bool.self, forKey: .hasWindowServerMatch) ?? false
+        source = try container.decode(StateSourceQuality.self, forKey: .source)
+        lastUpdatedAt = try container.decode(Date.self, forKey: .lastUpdatedAt)
     }
 }
 
@@ -79,6 +190,7 @@ struct WindowBadgeState: Identifiable, Sendable, Equatable {
     let isFloating: Bool
     let isFocused: Bool
     let isRuntimeManageable: Bool
+    let usesLimitedVisualStyle: Bool
     let frameX: Double
     let frameY: Double
     let frameW: Double
@@ -142,6 +254,7 @@ struct OverviewWindowPreview: Identifiable, Sendable, Equatable {
     let desktopIndex: Int
     let floating: Bool
     let runtimeManageable: Bool
+    let usesLimitedVisualStyle: Bool
     let focused: Bool
     let visible: Bool
     let normalizedX: Double

@@ -7,7 +7,19 @@ extension AppModel {
         let normalized = normalizedFeatureMatchCommand(c)
 
         if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
-            return "One-time action: raises all floating windows on the current desktop."
+            return "Raises floating windows above the other windows on the current desktop."
+        }
+        if normalized.contains("tilepilot://feature/screen.set-floating-all-visible") {
+            return "Stops tiling the windows on this desktop so you can move and overlap them freely."
+        }
+        if normalized.contains("tilepilot://feature/screen.set-tiled-all-visible") {
+            return "Puts the windows on this desktop back into tiles and evens out their sizes."
+        }
+        if normalized.contains("tilepilot://feature/screen.grid-floating") {
+            return "Places the windows on this desktop into a simple row-and-column grid and leaves them floating."
+        }
+        if normalized.contains("tilepilot://feature/screen.grid-auto-tiled") {
+            return "Retiles the windows on this desktop and rebuilds them into a more even layout."
         }
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Toggles keep-on-top for the focused app when floating."
@@ -15,24 +27,27 @@ extension AppModel {
         if normalized.contains("tilepilot://feature/app.open-megamap") {
             return "Opens the large screenshot-based view of all desktops."
         }
+        if normalized.contains("tilepilot://feature/app.run-guided-setup") {
+            return "Opens the step-by-step setup assistant."
+        }
         if normalized.contains("tilepilot://feature/app.refresh-megamap") {
-            return "Visibly sweeps desktops and captures fresh Megamap screenshots."
+            return "Visibly sweeps desktops and captures fresh MegaMap screenshots."
         }
         if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
             return "Brings TilePilot to the front."
         }
 
         if c.contains("grid-tiling-floating.sh") {
-            return "Applies grid tiling on the current desktop and keeps those windows floating."
+            return "Places the windows on this desktop into a simple row-and-column grid and leaves them floating."
         }
         if c.contains("rebuild-balanced-tile-layout.sh") {
-            return "Rebuilds the current desktop into a more even tiled BSP layout."
+            return "Retiles the windows on this desktop and rebuilds them into a more even layout."
         }
         if c.contains("grid-tiling-auto-tiled.sh") {
-            return "Rebuilds the current desktop into a more even tiled BSP layout."
+            return "Retiles the windows on this desktop and rebuilds them into a more even layout."
         }
         if c.contains("grid-pack-toggle.sh") {
-            return "Legacy grid tiling toggle helper."
+            return "Legacy helper for arranging the windows on this desktop into a floating grid."
         }
 
         if c.contains("yabai -m window --space"), c.contains("yabai -m space --focus") {
@@ -71,7 +86,7 @@ extension AppModel {
         if c.contains("yabai -m window --resize top:") { return "Resizes the focused window from the top edge (up)." }
         if c.contains("yabai -m window --resize bottom:") { return "Resizes the focused window from the bottom edge (down)." }
         if c.contains("yabai -m window --resize") { return "Resizes the focused window." }
-        if c.contains("yabai -m space --balance") { return "Balances the tiles on the current desktop." }
+        if c.contains("yabai -m space --balance") { return "Redistributes space so tiled windows on the current desktop are closer in size." }
         if c.contains("yabai -m space --rotate") {
             if let degrees = firstInteger(after: "--rotate", in: c) {
                 return "Rotates the current desktop layout by \(degrees) degrees."
@@ -128,36 +143,54 @@ extension AppModel {
     }
 
     func shortcutTitle(for entry: ShortcutEntry) -> String {
+        if let feature = featureDefinition(for: entry) {
+            return feature.title
+        }
         let c = entry.command.lowercased()
         let normalized = normalizedFeatureMatchCommand(c)
 
         if normalized.contains("tilepilot://feature/screen.bring-floating-front") {
             return "Bring Floating Windows to Front"
         }
+        if normalized.contains("tilepilot://feature/screen.set-floating-all-visible") {
+            return "Float Windows on This Desktop"
+        }
+        if normalized.contains("tilepilot://feature/screen.set-tiled-all-visible") {
+            return "Tile Windows on This Desktop"
+        }
+        if normalized.contains("tilepilot://feature/screen.grid-floating") {
+            return "Arrange Windows in Floating Grid"
+        }
+        if normalized.contains("tilepilot://feature/screen.grid-auto-tiled") {
+            return "Retile and Rebalance Windows"
+        }
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Keep App on Top"
         }
         if normalized.contains("tilepilot://feature/app.open-megamap") {
-            return "Open Megamap"
+            return "Open MegaMap"
+        }
+        if normalized.contains("tilepilot://feature/app.run-guided-setup") {
+            return "Run Guided Setup"
         }
         if normalized.contains("tilepilot://feature/app.refresh-megamap") {
-            return "Refresh Megamap"
+            return "Refresh MegaMap"
         }
         if normalized.contains("open -a \"tilepilot\"") || normalized.contains("open -a tilepilot") {
             return "Open TilePilot"
         }
 
         if c.contains("grid-tiling-floating.sh") {
-            return "Grid Tiling"
+            return "Arrange Windows in Floating Grid"
         }
         if c.contains("rebuild-balanced-tile-layout.sh") {
-            return "Rebuild Tile Layout"
+            return "Retile and Rebalance Windows"
         }
         if c.contains("grid-tiling-auto-tiled.sh") {
-            return "Rebuild Tile Layout"
+            return "Retile and Rebalance Windows"
         }
         if c.contains("grid-pack-toggle.sh") {
-            return "Grid Tiling (Legacy Toggle)"
+            return "Arrange Windows in Floating Grid (Legacy)"
         }
         if c.contains("auto-layout-current-desktop.sh") || c.contains("readable-current-space.sh") {
             return "Auto Layout (Current Desktop)"
@@ -184,9 +217,9 @@ extension AppModel {
         if c.contains("yabai -m window --resize top:") { return "Resize Up" }
         if c.contains("yabai -m window --resize bottom:") { return "Resize Down" }
         if c.contains("yabai -m window --toggle float") { return "Toggle Float/Tile" }
-        if c.contains("yabai -m space --layout bsp"), c.contains("yabai -m space --balance") { return "Set Tile Layout" }
+        if c.contains("yabai -m space --layout bsp"), c.contains("yabai -m space --balance") { return "Switch to Tiled Layout" }
         if c.contains("yabai -m space --layout stack") { return "Stack Layout" }
-        if c.contains("yabai -m space --balance") { return "Balance Tiles" }
+        if c.contains("yabai -m space --balance") { return "Even Out Tile Sizes" }
         if c.contains("yabai -m space --rotate") { return "Rotate Layout" }
 
         if let scriptPath = scriptPath(from: entry.command) {

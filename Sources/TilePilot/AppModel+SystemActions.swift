@@ -81,21 +81,62 @@ extension AppModel {
     }
 
     func installManagedHelpers() {
-        guard !isLaunchingSetupInstaller else { return }
-        isLaunchingSetupInstaller = true
-
         Task { [weak self] in
             guard let self else { return }
-            let result = await self.helperService.installBundledHelpers()
+            let existingInstalls = await self.helperService.detectExistingExternalHelpers()
 
-            await MainActor.run {
-                self.isLaunchingSetupInstaller = false
-                self.applyManagedHelperOperationResult(result)
+            if !existingInstalls.isEmpty {
+                await MainActor.run {
+                    self.helperMigrationPrompt = HelperMigrationPromptState(installs: existingInstalls)
+                    self.lastErrorMessage = nil
+                    self.lastActionMessage = "TilePilot found an existing yabai/skhd install. Choose whether to keep it or replace it."
+                }
+                return
             }
 
-            await self.refreshBootstrapSetup()
-            await self.refreshDoctor()
+            await self.performManagedHelperInstall(replacingExternalInstall: false)
         }
+    }
+
+    func keepExistingHelperInstall() {
+        helperMigrationPrompt = nil
+        lastErrorMessage = nil
+        lastActionMessage = "Keeping the existing yabai/skhd install. TilePilot will use the external binaries."
+        Task { [weak self] in
+            await self?.refreshBootstrapSetup()
+            await self?.refreshDoctor()
+        }
+    }
+
+    func replaceWithManagedHelpers() {
+        guard !isLaunchingSetupInstaller else { return }
+        helperMigrationPrompt = nil
+        Task { [weak self] in
+            guard let self else { return }
+            await self.performManagedHelperInstall(replacingExternalInstall: true)
+        }
+    }
+
+    func dismissHelperMigrationPrompt() {
+        helperMigrationPrompt = nil
+    }
+
+    private func performManagedHelperInstall(replacingExternalInstall: Bool) async {
+        await MainActor.run {
+            self.isLaunchingSetupInstaller = true
+        }
+
+        let result = replacingExternalInstall
+            ? await self.helperService.installBundledHelpersReplacingExternalServices()
+            : await self.helperService.installBundledHelpers()
+
+        await MainActor.run {
+            self.isLaunchingSetupInstaller = false
+            self.applyManagedHelperOperationResult(result)
+        }
+
+        await self.refreshBootstrapSetup()
+        await self.refreshDoctor()
     }
 
     func runSetupInstallerInTerminal() {
@@ -135,6 +176,38 @@ extension AppModel {
         _ = AXIsProcessTrustedWithOptions(options)
         lastActionMessage = "Requested Accessibility access prompt. If no prompt appears, open Accessibility Settings manually."
         lastErrorMessage = nil
+        scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.0)
+    }
+
+    func requestScreenRecordingAccessPrompt() {
+        acknowledgeInitialStatusIfNeeded()
+        let alreadyAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        if alreadyAuthorized {
+            megamapScreenRecordingAuthorized = true
+            lastActionMessage = "Screen Recording access is already granted."
+            lastErrorMessage = nil
+            return
+        }
+
+        _ = megamapCaptureService.requestScreenRecordingAccess()
+        megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
+        megamapCaptureService.openScreenRecordingSettings()
+        if megamapScreenRecordingAuthorized {
+            lastActionMessage = "Screen Recording access confirmed."
+            lastErrorMessage = nil
+        } else {
+            lastActionMessage = "Opened Screen Recording settings."
+            lastErrorMessage = "If TilePilot is not listed yet, macOS has not registered the capture request. Reopen TilePilot and try Enable Screen Recording again."
+        }
+        scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.0)
+    }
+
+    func openScreenRecordingSettings() {
+        acknowledgeInitialStatusIfNeeded()
+        _ = megamapCaptureService.requestScreenRecordingAccess()
+        megamapCaptureService.openScreenRecordingSettings()
+        lastActionMessage = "Opened Screen Recording settings."
+        lastErrorMessage = "If TilePilot is not listed yet, macOS has not registered the capture request. Reopen TilePilot and try Enable Screen Recording again."
         scheduleSetupRefreshAfterExternalHandoff(delaySeconds: 1.0)
     }
 
@@ -189,25 +262,94 @@ extension AppModel {
     }
 
     func restartYabaiBestEffort() {
-        runSupportCommand(
-            yabaiCommand(["--restart-service"], timeout: 2.0),
-            successMessage: "Requested yabai service restart."
-        )
+        if helperService.hasManagedHelperInstall() {
+            runSupportCommand(
+                yabaiCommand(["--restart-service"], timeout: 2.0),
+                successMessage: "Requested yabai service restart."
+            )
+        } else {
+            runSupportCommand(
+                yabaiCommand(["--start-service"], timeout: 2.0),
+                successMessage: "Requested yabai service start."
+            )
+        }
     }
 
     func restartSkhdBestEffort() {
-        runSupportCommand(
-            skhdCommand(["--reload"], timeout: 2.0),
-            successMessage: "Requested skhd config reload."
-        )
+        Task { [weak self] in
+            guard let self else { return }
+            let reloadResult = await self.doctorService.runSupportCommand(
+                skhdCommand(["--reload"], timeout: 2.0)
+            )
+            var fallbackResult: CommandResult?
+
+            if !reloadResult.isSuccess {
+                let fallbackCommand = helperService.hasManagedHelperInstall()
+                    ? skhdCommand(["--restart-service"], timeout: 2.0)
+                    : skhdCommand(["--start-service"], timeout: 2.0)
+                fallbackResult = await self.doctorService.runSupportCommand(fallbackCommand)
+            }
+
+            await MainActor.run {
+                self.appendCommandLog(from: reloadResult)
+                if let fallbackResult {
+                    self.appendCommandLog(from: fallbackResult)
+                }
+
+                if reloadResult.isSuccess {
+                    self.lastActionMessage = "Requested skhd config reload."
+                    self.lastErrorMessage = nil
+                } else if fallbackResult?.isSuccess == true {
+                    self.lastActionMessage = helperService.hasManagedHelperInstall()
+                        ? "Requested skhd service restart."
+                        : "Requested skhd service start."
+                    self.lastErrorMessage = nil
+                } else {
+                    let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stderrFallback = fallbackResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let stderr = [stderrReload, stderrFallback].filter { !$0.isEmpty }.joined(separator: " | ")
+                    self.lastErrorMessage = stderr.isEmpty
+                        ? "Could not restart skhd."
+                        : "skhd reload/start failed: \(trimForUI(stderr))"
+                    self.lastActionMessage = nil
+                }
+            }
+
+            await self.refreshBootstrapSetup()
+            await self.refreshDoctor()
+        }
     }
 
     func startBrewServiceYabai() {
-        startHelperServicesBestEffort()
+        startYabaiBestEffort()
     }
 
     func startBrewServiceSkhd() {
-        startHelperServicesBestEffort()
+        startSkhdBestEffort()
+    }
+
+    func startYabaiBestEffort() {
+        if helperService.hasManagedHelperInstall() {
+            startHelperServicesBestEffort()
+            return
+        }
+
+        runSupportCommand(
+            yabaiCommand(["--start-service"], timeout: 2.0),
+            successMessage: "Requested yabai service start."
+        )
+    }
+
+    func startSkhdBestEffort() {
+        if helperService.hasManagedHelperInstall() {
+            startHelperServicesBestEffort()
+            return
+        }
+
+        runSupportCommand(
+            skhdCommand(["--start-service"], timeout: 2.0),
+            successMessage: "Requested skhd service start."
+        )
     }
 
     func startHelperServicesBestEffort() {

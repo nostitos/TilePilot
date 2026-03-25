@@ -7,6 +7,13 @@ private enum MegamapDesktopSwitchCapturePolicy {
     case incremental
 }
 
+private enum VisibleWindowsLayoutOperation {
+    case floatAll
+    case tileAll
+    case gridFloating
+    case rebuildTileLayout
+}
+
 @MainActor
 extension AppModel {
     func bringFloatingWindowsToFrontCurrentDesktop() {
@@ -57,6 +64,30 @@ extension AppModel {
             return
         }
         toggleWindowFloating(windowID: focused.id, bringToFrontOnFloat: true)
+    }
+
+    func setVisibleWindowsFloatingCurrentDesktop() {
+        Task { [weak self] in
+            await self?.applyVisibleWindowsLayoutOperation(.floatAll)
+        }
+    }
+
+    func setVisibleWindowsTiledCurrentDesktop() {
+        Task { [weak self] in
+            await self?.applyVisibleWindowsLayoutOperation(.tileAll)
+        }
+    }
+
+    func applyFloatingGridToCurrentDesktop() {
+        Task { [weak self] in
+            await self?.applyVisibleWindowsLayoutOperation(.gridFloating)
+        }
+    }
+
+    func rebuildTileLayoutCurrentDesktop() {
+        Task { [weak self] in
+            await self?.applyVisibleWindowsLayoutOperation(.rebuildTileLayout)
+        }
     }
 
     func focusWindow(windowID: Int) {
@@ -334,6 +365,282 @@ extension AppModel {
         guard toggleFocused.isSuccess else { return false }
 
         return true
+    }
+
+    private func applyVisibleWindowsLayoutOperation(_ operation: VisibleWindowsLayoutOperation) async {
+        guard canRunYabaiRuntimeCommands else {
+            await MainActor.run {
+                self.lastErrorMessage = self.yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        guard var state = await currentDesktopVisibleWindowsForBulkLayout() else { return }
+        let totalVisibleCount = state.windows.count
+        let limitedCount = state.windows.filter { !$0.isRuntimeManageable }.count
+
+        if totalVisibleCount == 0 {
+            await MainActor.run {
+                self.lastErrorMessage = "No visible windows on the current desktop."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        switch operation {
+        case .floatAll:
+            let targets = state.windows.filter { $0.isRuntimeManageable && !$0.floating }
+            let result = await setFloatingStateForWindows(targets, shouldFloat: true)
+            if result.updated > 0 {
+                await bringFloatingWindowsToFrontCurrentDesktop(
+                    flaggedOnly: false,
+                    reason: .manualAll,
+                    bypassCooldown: true
+                )
+            }
+            await finishVisibleWindowsLayoutOperation(
+                operation,
+                totalVisibleCount: totalVisibleCount,
+                updatedCount: result.updated,
+                limitedCount: limitedCount,
+                failedCount: result.failed
+            )
+
+        case .tileAll:
+            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--layout", "bsp"]]) else { return }
+            let targets = state.windows.filter { $0.isRuntimeManageable && $0.floating }
+            let result = await setFloatingStateForWindows(targets, shouldFloat: false)
+            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--balance"]]) else { return }
+            await finishVisibleWindowsLayoutOperation(
+                operation,
+                totalVisibleCount: totalVisibleCount,
+                updatedCount: result.updated,
+                limitedCount: limitedCount,
+                failedCount: result.failed
+            )
+
+        case .gridFloating:
+            let floatResult = await setFloatingStateForWindows(
+                state.windows.filter { $0.isRuntimeManageable && !$0.floating },
+                shouldFloat: true
+            )
+            await refreshLiveState()
+            guard let refreshed = await currentDesktopVisibleWindowsForBulkLayout() else { return }
+            state = refreshed
+            let gridResult = await applyFloatingGridFrames(
+                to: state.windows.filter { $0.isRuntimeManageable },
+                display: state.display
+            )
+            await bringFloatingWindowsToFrontCurrentDesktop(
+                flaggedOnly: false,
+                reason: .manualAll,
+                bypassCooldown: true
+            )
+            await finishVisibleWindowsLayoutOperation(
+                operation,
+                totalVisibleCount: totalVisibleCount,
+                updatedCount: floatResult.updated + gridResult.updated,
+                limitedCount: limitedCount,
+                failedCount: floatResult.failed + gridResult.failed
+            )
+
+        case .rebuildTileLayout:
+            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--layout", "bsp"]]) else { return }
+            let result = await setFloatingStateForWindows(
+                state.windows.filter { $0.isRuntimeManageable && $0.floating },
+                shouldFloat: false
+            )
+            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--balance"]]) else { return }
+            await finishVisibleWindowsLayoutOperation(
+                operation,
+                totalVisibleCount: totalVisibleCount,
+                updatedCount: result.updated,
+                limitedCount: limitedCount,
+                failedCount: result.failed
+            )
+        }
+
+        await refreshLiveState()
+        await refreshDoctor()
+    }
+
+    private func currentDesktopVisibleWindowsForBulkLayout() async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
+        var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
+            await refreshLiveState()
+            snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        }
+
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded,
+              let spaceIndex = activeSpaceIndex(in: snapshot) else {
+            await MainActor.run {
+                self.lastErrorMessage = "Current desktop data is unavailable right now."
+                self.lastActionMessage = nil
+            }
+            return nil
+        }
+
+        let spaceDisplay = snapshot.spaces.first(where: { $0.index == spaceIndex }).flatMap { space in
+            snapshot.displays.first(where: { $0.id == space.displayId })
+        }
+
+        let windows = snapshot.windows.filter {
+            $0.space == spaceIndex &&
+            $0.isVisible &&
+            !$0.isMinimized &&
+            !$0.isHidden &&
+            !isBackdropSurfaceWindow(
+                $0,
+                normalizedTitle: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedRole: $0.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedSubrole: $0.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                in: snapshot
+            )
+        }
+        .sorted { lhs, rhs in
+            if abs(lhs.frameY - rhs.frameY) > 8 { return lhs.frameY < rhs.frameY }
+            if abs(lhs.frameX - rhs.frameX) > 8 { return lhs.frameX < rhs.frameX }
+            if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+            return lhs.id < rhs.id
+        }
+        return (spaceIndex, spaceDisplay, windows)
+    }
+
+    private func runCurrentDesktopLayoutCommands(_ commands: [[String]]) async -> Bool {
+        for arguments in commands {
+            let result = await doctorService.runSupportCommand(
+                yabaiCommand(arguments, timeout: 1.5)
+            )
+            await MainActor.run {
+                appendCommandLog(from: result)
+            }
+            if !result.isSuccess {
+                await MainActor.run {
+                    self.lastErrorMessage = "Tile layout command failed."
+                    self.lastActionMessage = nil
+                }
+                return false
+            }
+        }
+        return true
+    }
+
+    private func setFloatingStateForWindows(_ windows: [WindowState], shouldFloat: Bool) async -> (updated: Int, failed: Int) {
+        var updated = 0
+        var failed = 0
+
+        for window in windows {
+            let toggled = await setWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
+            if toggled {
+                updated += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        return (updated, failed)
+    }
+
+    private func applyFloatingGridFrames(
+        to windows: [WindowState],
+        display: DisplayState?
+    ) async -> (updated: Int, failed: Int) {
+        guard !windows.isEmpty else { return (0, 0) }
+
+        let aspectRatio = {
+            guard let display, display.frameH > 1 else { return 1.6 }
+            return max(display.frameW / display.frameH, 0.5)
+        }()
+
+        let count = windows.count
+        let cols = max(1, Int(ceil(sqrt(Double(count) * aspectRatio))))
+        let rows = max(1, Int(ceil(Double(count) / Double(cols))))
+
+        var updated = 0
+        var failed = 0
+
+        for (index, window) in windows.enumerated() {
+            let row = index / cols
+            let col = index % cols
+            let result = await doctorService.runSupportCommand(
+                yabaiCommand(
+                    ["-m", "window", String(window.id), "--grid", "\(rows):\(cols):\(col):\(row):1:1"],
+                    timeout: 1.5
+                )
+            )
+            await MainActor.run {
+                appendCommandLog(from: result)
+            }
+
+            if result.isSuccess {
+                updated += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        return (updated, failed)
+    }
+
+    private func setWindowFloatingSilently(window: WindowState, shouldFloat: Bool) async -> Bool {
+        if window.floating == shouldFloat {
+            return true
+        }
+
+        let toggle = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", String(window.id), "--toggle", "float"], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: toggle)
+        }
+
+        if toggle.isSuccess {
+            return true
+        }
+
+        if window.supportsFocusedFloatToggleFallback {
+            return await setWindowFloatingUsingFocusedFallback(window: window)
+        }
+
+        return false
+    }
+
+    private func finishVisibleWindowsLayoutOperation(
+        _ operation: VisibleWindowsLayoutOperation,
+        totalVisibleCount: Int,
+        updatedCount: Int,
+        limitedCount: Int,
+        failedCount: Int
+    ) async {
+        let actionMessage: String
+        switch operation {
+        case .floatAll:
+            actionMessage = updatedCount == 0
+                ? "All visible windows are already floating."
+                : "Set \(updatedCount) visible window(s) to floating."
+        case .tileAll:
+            actionMessage = "Set visible windows to tiled and rebalanced the desktop."
+        case .gridFloating:
+            actionMessage = "Packed \(totalVisibleCount - limitedCount) controllable window(s) into a floating grid."
+        case .rebuildTileLayout:
+            actionMessage = "Rebuilt the tiled layout for the current desktop."
+        }
+
+        var issues: [String] = []
+        if limitedCount > 0 {
+            issues.append("Skipped \(limitedCount) limited window(s).")
+        }
+        if failedCount > 0 {
+            issues.append("\(failedCount) window(s) could not be updated.")
+        }
+
+        await MainActor.run {
+            self.lastActionMessage = actionMessage
+            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+        }
     }
 
     func openWindowBehaviorSettings() {
@@ -661,6 +968,10 @@ extension AppModel {
             return true
         }
 
+        if await focusWindowUsingAppActivationFallback(knownWindow) {
+            return true
+        }
+
         let latestWindow = (latestLiveStateSnapshot ?? liveStateSnapshot)?.windows.first(where: { $0.id == windowID }) ?? knownWindow
         guard latestWindow.isMinimized else {
             await MainActor.run {
@@ -701,6 +1012,10 @@ extension AppModel {
         }
 
         if focusWindowUsingAccessibilityFallback(latestWindow) {
+            return true
+        }
+
+        if await focusWindowUsingAppActivationFallback(latestWindow) {
             return true
         }
 
@@ -748,6 +1063,41 @@ extension AppModel {
         try? await Task.sleep(for: .milliseconds(120))
         let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName
         return frontApp == window.app
+    }
+
+    private func focusWindowUsingAppActivationFallback(_ window: WindowState) async -> Bool {
+        guard !window.isVisible || window.isHidden || !window.hasAXReference else {
+            return false
+        }
+
+        let appPID = pid_t(window.pid)
+        let runningApp = NSRunningApplication(processIdentifier: appPID)
+        runningApp?.unhide()
+        _ = runningApp?.activate(options: [.activateIgnoringOtherApps])
+
+        try? await Task.sleep(for: .milliseconds(140))
+
+        let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        if frontmostPID == Int(window.pid) {
+            return true
+        }
+
+        let escapedAppName = window.app
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let result = await doctorService.runSupportCommand(
+            ShellCommand("/usr/bin/osascript", ["-e", "tell application \"\(escapedAppName)\" to activate"], timeout: 2.0)
+        )
+        await MainActor.run {
+            appendCommandLog(from: result)
+        }
+
+        guard result.isSuccess else {
+            return false
+        }
+
+        try? await Task.sleep(for: .milliseconds(180))
+        return Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) == Int(window.pid)
     }
 
     private func focusWindowUsingAccessibilityFallback(_ window: WindowState) -> Bool {

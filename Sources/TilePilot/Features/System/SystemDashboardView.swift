@@ -44,6 +44,30 @@ struct SystemDashboardView: View {
             } message: {
                 Text("This resets TilePilot app settings and TilePilot-managed skhdrc/yabairc sections. Non-managed lines stay unchanged.")
             }
+            .confirmationDialog(
+                model.helperMigrationPrompt?.title ?? "Existing Helper Install Detected",
+                isPresented: Binding(
+                    get: { model.helperMigrationPrompt != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            model.dismissHelperMigrationPrompt()
+                        }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Use Existing Install") {
+                    model.keepExistingHelperInstall()
+                }
+                Button("Replace With TilePilot Helpers", role: .destructive) {
+                    model.replaceWithManagedHelpers()
+                }
+                Button("Cancel", role: .cancel) {
+                    model.dismissHelperMigrationPrompt()
+                }
+            } message: {
+                Text(model.helperMigrationPrompt?.message ?? "")
+            }
         }
     }
 
@@ -57,7 +81,7 @@ struct SystemDashboardView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Text(model.primarySetupActionDetail)
+                Text(model.setupGuideCompletionDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -66,20 +90,18 @@ struct SystemDashboardView: View {
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    if model.primarySetupAction == .ready {
-                        Button(model.primarySetupActionLabel) {
-                            model.performPrimarySetupAction()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(model.isPrimarySetupActionInFlight)
-                    } else {
-                        Button(model.primarySetupActionLabel) {
-                            model.performPrimarySetupAction()
+                    if model.setupStateNeedsAttention {
+                        Button("Run Guided Setup") {
+                            model.presentSetupGuide()
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(model.isPrimarySetupActionInFlight)
+                    } else {
+                        Button("Run Guided Setup") {
+                            model.presentSetupGuide()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
 
                     Spacer()
@@ -212,16 +234,6 @@ struct SystemDashboardView: View {
 
                 DisclosureGroup("Advanced", isExpanded: $showPerformanceAdvanced) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Window Badges", isOn: Binding(
-                            get: { model.showWindowBadgeOverlay },
-                            set: { model.setWindowBadgeOverlayEnabled($0) }
-                        ))
-
-                        Toggle("Window Outline Overlay", isOn: Binding(
-                            get: { model.showWindowOutlineOverlay },
-                            set: { model.setWindowOutlineOverlayEnabled($0) }
-                        ))
-
                         Toggle("Keep on Top Enforcement", isOn: Binding(
                             get: { model.keepOnTopEnforcementEnabled },
                             set: { model.setKeepOnTopEnforcementEnabled($0) }
@@ -231,6 +243,12 @@ struct SystemDashboardView: View {
                             get: { model.miniMapHoverTitlesEnabled },
                             set: { model.setMiniMapHoverTitlesEnabled($0) }
                         ))
+
+                        Toggle("Hide Limited/Minimized Windows in Maps", isOn: Binding(
+                            get: { model.hideMinimizedHelperWindowsInMaps },
+                            set: { model.setHideMinimizedHelperWindowsInMaps($0) }
+                        ))
+                        .help("Hide limited windows, minimized windows, app-hidden windows, and stale helper or backdrop surfaces so the mini-map and MegaMap stay focused on usable windows.")
 
                         Toggle("Fast Live Refresh", isOn: Binding(
                             get: { model.performanceFastLiveRefreshEnabled },
@@ -263,12 +281,6 @@ struct SystemDashboardView: View {
                         Divider()
 
                         HStack(spacing: 8) {
-                            Button("Disable Overlays") {
-                                model.disablePerformanceOverlays()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-
                             Button("Disable Keep on Top") {
                                 model.setKeepOnTopEnforcementEnabled(false)
                             }

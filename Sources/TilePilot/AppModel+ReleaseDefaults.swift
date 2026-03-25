@@ -55,10 +55,23 @@ extension AppModel {
         if releaseDefaultsService.hasLegacyUserDefaultsFootprint() {
             return true
         }
-        if let state = try? await configService.loadConfigDocument(), state.hasManagedSection {
-            return true
+        if let state = try? await configService.loadConfigDocument() {
+            if state.hasManagedSection {
+                return true
+            }
+            if state.fileExists && !state.fullContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return true
+            }
         }
-        if let state = try? await yabaiRulesConfigService.loadConfigDocument(), state.hasManagedSection {
+        if let state = try? await yabaiRulesConfigService.loadConfigDocument() {
+            if state.hasManagedSection {
+                return true
+            }
+            if state.fileExists && !state.fullContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return true
+            }
+        }
+        if !(await ManagedHelperService.shared.detectExistingExternalHelpers()).isEmpty {
             return true
         }
         return false
@@ -132,6 +145,8 @@ extension AppModel {
         UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)
         showWindowOutlineOverlay = state.showWindowOutlineOverlay
         UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
+        windowOutlineOverlayBaseWidth = state.windowOutlineOverlayBaseWidth
+        UserDefaults.standard.set(windowOutlineOverlayBaseWidth, forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
         raiseOnFloatToggleEnabled = state.raiseOnFloatToggleEnabled
         UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
         performancePreset = state.performanceSettings.preset
@@ -139,6 +154,7 @@ extension AppModel {
         performanceBackgroundPollingSeconds = state.performanceSettings.backgroundPollingSeconds
         performanceKeepOnTopEnforcementSeconds = state.performanceSettings.keepOnTopEnforcementSeconds
         miniMapHoverTitlesEnabled = state.performanceSettings.miniMapHoverTitlesEnabled
+        hideMinimizedHelperWindowsInMaps = state.performanceSettings.hideMinimizedHelperWindowsInMaps
         performanceFastLiveRefreshEnabled = state.performanceSettings.fastLiveRefreshEnabled
         keepOnTopEnforcementEnabled = state.performanceSettings.keepOnTopEnforcementEnabled
         persistPerformanceSettings()

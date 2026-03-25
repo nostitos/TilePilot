@@ -7,6 +7,7 @@ struct WindowBadgeView: View {
     var badgeHeight: CGFloat = 11
 
     private var runtimeEnabled: Bool { model.canRunYabaiRuntimeCommands && badge.isRuntimeManageable }
+    private var showsLimitedVisualStyle: Bool { badge.usesLimitedVisualStyle }
     private var runtimeDisabledReason: String {
         if !model.canRunYabaiRuntimeCommands {
             return model.yabaiRuntimeControlDisabledReason ?? "Window controls unavailable"
@@ -108,7 +109,7 @@ struct WindowBadgeView: View {
                     model.presentMegamap()
                 }
             } else {
-                Button("Open Megamap") {
+                Button("Open MegaMap") {
                     model.presentMegamap()
                 }
             }
@@ -120,7 +121,7 @@ struct WindowBadgeView: View {
     }
 
     private var borderColor: Color {
-        if !badge.isRuntimeManageable {
+        if showsLimitedVisualStyle {
             return Color.gray.opacity(badge.isFocused ? 0.92 : 0.52)
         }
         if badge.isFocused {
@@ -130,19 +131,18 @@ struct WindowBadgeView: View {
     }
 
     private var fillColor: Color {
-        if !badge.isRuntimeManageable {
+        if showsLimitedVisualStyle {
             return Color.gray.opacity(0.8)
         }
         return (badge.isFloating ? Color.orange : Color.blue).opacity(0.95)
     }
 
     private var helpText: String {
-        let state: String
-        if !badge.isRuntimeManageable {
-            state = "Limited control"
-        } else {
-            state = badge.isFloating ? "Floating" : "Auto-Tiled"
+        if showsLimitedVisualStyle {
+            return "\(badge.app) • Limited control. TilePilot can see this window, but yabai cannot reliably move or retile it right now."
         }
+
+        let state = badge.isFloating ? "Floating" : "Auto-Tiled"
         return "\(badge.app) • \(state). Left-click toggles. Right-click for options."
     }
 

@@ -185,14 +185,14 @@ final class StatusBarController: NSObject {
         menu.autoenablesItems = false
         menu.addItem(openTilePilotMenuItem())
         menu.addItem(openMegamapMenuItem())
+        menu.addItem(runGuidedSetupMenuItem())
         menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
         menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
 
-        if addPinnedContextItems(to: menu) {
-            menu.addItem(.separator())
-        }
-
+        _ = addPinnedContextItems(to: menu)
+        menu.addItem(.separator())
+        menu.addItem(editPinnedActionsMenuItem())
         menu.addItem(.separator())
         let runtimeEnabled = model.canRunYabaiRuntimeCommands
         let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
@@ -248,11 +248,39 @@ final class StatusBarController: NSObject {
     }
 
     private func openMegamapMenuItem() -> NSMenuItem {
-        let menuItem = item("Open Megamap", action: #selector(openMegamap))
+        let menuItem = item("Open MegaMap", action: #selector(openMegamap))
         if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-megamap")) {
             let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
             applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
         }
+        return menuItem
+    }
+
+    private func runGuidedSetupMenuItem() -> NSMenuItem {
+        let menuItem = item("Run Guided Setup", action: #selector(runGuidedSetup))
+        if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.run-guided-setup")) {
+            let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+            applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
+        }
+        return menuItem
+    }
+
+    private func editPinnedActionsMenuItem() -> NSMenuItem {
+        let menuItem = item("Change Right-Click Actions…", action: #selector(openShortcuts))
+        if let image = NSImage(
+            systemSymbolName: "slider.horizontal.3",
+            accessibilityDescription: "Change right-click actions"
+        ) {
+            image.isTemplate = true
+            menuItem.image = image
+        }
+        menuItem.attributedTitle = NSAttributedString(
+            string: "Change Right-Click Actions…",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
         return menuItem
     }
 
@@ -485,6 +513,12 @@ final class StatusBarController: NSObject {
         model.performPrimarySetupAction()
     }
 
+    @objc private func runGuidedSetup() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.presentSetupGuide()
+        onOpenTilePilot()
+    }
+
     @objc private func runPinnedShortcut(_ sender: NSMenuItem) {
         guard let stableKey = sender.representedObject as? String else { return }
         model.acknowledgeInitialStatusIfNeeded()
@@ -614,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func hideMegamapWindow() {
         megamapWindowController?.hideImmediately()
+        MegamapScreenshotCache.shared.clear()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

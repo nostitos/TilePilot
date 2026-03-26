@@ -34,29 +34,16 @@ struct AppearanceDashboardView: View {
                     set: { model.setWindowOutlineOverlayEnabled($0) }
                 ))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Outline Width")
-                        Spacer()
-                        Text("\(Int(model.windowOutlineOverlayBaseWidth.rounded())) px")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Slider(
-                        value: Binding(
-                            get: { model.windowOutlineOverlayBaseWidth },
-                            set: { model.setWindowOutlineOverlayBaseWidth($0) }
-                        ),
-                        in: 1.0 ... 6.0,
-                        step: 1.0
-                    )
-                    .disabled(!model.showWindowOutlineOverlay)
-
-                    Text("Controls the desktop Window Outline Overlay thickness in physical pixels.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                AppearanceIntegerControl(
+                    title: "Outline Width",
+                    unit: "px",
+                    value: Binding(
+                        get: { Int(model.windowOutlineOverlayBaseWidth.rounded()) },
+                        set: { model.setWindowOutlineOverlayBaseWidth(Double($0)) }
+                    ),
+                    range: 1 ... 6,
+                    isDisabled: !model.showWindowOutlineOverlay
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
@@ -77,7 +64,9 @@ struct AppearanceDashboardView: View {
                     value: Binding(
                         get: { model.windowBehaviorPolicyDraft.outerPadding },
                         set: { model.updateOuterPaddingDraft($0) }
-                    )
+                    ),
+                    range: 0 ... 100,
+                    isDisabled: false
                 )
 
                 AppearanceIntegerControl(
@@ -86,7 +75,9 @@ struct AppearanceDashboardView: View {
                     value: Binding(
                         get: { model.windowBehaviorPolicyDraft.windowGap },
                         set: { model.updateWindowGapDraft($0) }
-                    )
+                    ),
+                    range: 0 ... 100,
+                    isDisabled: false
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,6 +91,8 @@ private struct AppearanceIntegerControl: View {
     let title: String
     let unit: String
     @Binding var value: Int
+    let range: ClosedRange<Int>
+    let isDisabled: Bool
 
     private static let formatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -117,14 +110,16 @@ private struct AppearanceIntegerControl: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 56)
+                .disabled(isDisabled)
 
             Text(unit)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Stepper("", value: $value, in: 0 ... 100)
+            Stepper("", value: $value, in: range)
                 .labelsHidden()
                 .controlSize(.small)
+                .disabled(isDisabled)
 
             Spacer(minLength: 0)
         }

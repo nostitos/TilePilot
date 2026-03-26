@@ -51,10 +51,6 @@ struct TilePilotRootView: View {
                 .tabItem { Label("Overview", systemImage: "rectangle.3.group") }
                 .tag(TilePilotTab.now)
 
-            AppearanceDashboardView()
-                .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
-                .tag(TilePilotTab.appearance)
-
             WindowBehaviorDashboardView()
                 .tabItem { Label("Behaviors", systemImage: "hand.raised.square") }
                 .tag(TilePilotTab.windowBehavior)
@@ -62,6 +58,10 @@ struct TilePilotRootView: View {
             UnifiedControlsDashboardView()
                 .tabItem { Label("Actions & Shortcuts", systemImage: "square.grid.2x2") }
                 .tag(TilePilotTab.actions)
+
+            AppearanceDashboardView()
+                .tabItem { Label("Appearance", systemImage: "paintbrush.pointed") }
+                .tag(TilePilotTab.appearance)
 
             FilesDashboardView()
                 .tabItem { Label("Config Files", systemImage: "doc.text") }

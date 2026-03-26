@@ -186,8 +186,6 @@ final class StatusBarController: NSObject {
         menu.addItem(openTilePilotMenuItem())
         menu.addItem(openMegamapMenuItem())
         menu.addItem(runGuidedSetupMenuItem())
-        menu.addItem(item("Open Window Behavior", action: #selector(openWindowBehaviorSettings)))
-        menu.addItem(item("Open Shortcuts", action: #selector(openShortcuts)))
         menu.addItem(.separator())
 
         _ = addPinnedContextItems(to: menu)
@@ -266,16 +264,16 @@ final class StatusBarController: NSObject {
     }
 
     private func editPinnedActionsMenuItem() -> NSMenuItem {
-        let menuItem = item("Change Right-Click Actions…", action: #selector(openShortcuts))
+        let menuItem = item("Pin More Shortcuts…", action: #selector(openShortcuts))
         if let image = NSImage(
             systemSymbolName: "slider.horizontal.3",
-            accessibilityDescription: "Change right-click actions"
+            accessibilityDescription: "Pin more shortcuts"
         ) {
             image.isTemplate = true
             menuItem.image = image
         }
         menuItem.attributedTitle = NSAttributedString(
-            string: "Change Right-Click Actions…",
+            string: "Pin More Shortcuts…",
             attributes: [
                 .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
                 .foregroundColor: NSColor.secondaryLabelColor,

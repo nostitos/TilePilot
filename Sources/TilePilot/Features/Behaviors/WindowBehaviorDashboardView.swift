@@ -296,13 +296,13 @@ struct WindowBehaviorDashboardView: View {
     private var mouseDraggingCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Try this on a tiled desktop: hold the modifier key, then drag a window directly.")
+                Text("Hold the modifier, click a window, then drag.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
                 behaviorMenuRow(
                     title: "Modifier Key",
-                    detail: "Hold this key while dragging a window. yabai supports one modifier here, not combinations.",
+                    detail: "Hold this key while clicking and dragging a window.",
                     selection: Binding(
                         get: { model.windowBehaviorPolicyDraft.mouseModifier },
                         set: { model.updateMouseModifierDraft($0) }
@@ -310,8 +310,8 @@ struct WindowBehaviorDashboardView: View {
                 )
 
                 behaviorMenuRow(
-                    title: "Hold Modifier + Left Drag",
-                    detail: "While holding the modifier, left-drag a window. Move repositions it. Resize changes its size.",
+                    title: "Modifier + Left Click + Drag",
+                    detail: "Choose what happens when you hold the modifier, left-click a window, and drag it.",
                     selection: Binding(
                         get: { model.windowBehaviorPolicyDraft.mouseAction1 },
                         set: { model.updateMouseAction1Draft($0) }
@@ -319,8 +319,8 @@ struct WindowBehaviorDashboardView: View {
                 )
 
                 behaviorMenuRow(
-                    title: "Hold Modifier + Right Drag",
-                    detail: "While holding the modifier, right-drag a window. Move repositions it. Resize changes its size.",
+                    title: "Modifier + Right Click + Drag",
+                    detail: "Choose what happens when you hold the modifier, right-click a window, and drag it.",
                     selection: Binding(
                         get: { model.windowBehaviorPolicyDraft.mouseAction2 },
                         set: { model.updateMouseAction2Draft($0) }
@@ -328,8 +328,8 @@ struct WindowBehaviorDashboardView: View {
                 )
 
                 behaviorMenuRow(
-                    title: "When You Drop One Tiled Window On Another",
-                    detail: "Only applies to tiled windows. Drag one tiled window onto another and release near the center. Swap trades places. Stack puts them into one stack.",
+                    title: "Dragged Tiled Window Dropped On Another",
+                    detail: "Only applies to tiled windows. Drag one tiled window onto another and release near the center. Swap trades places. Stack groups them together.",
                     selection: Binding(
                         get: { model.windowBehaviorPolicyDraft.mouseDropAction },
                         set: { model.updateMouseDropActionDraft($0) }
@@ -416,26 +416,24 @@ struct WindowBehaviorDashboardView: View {
         detail: String,
         selection: Binding<Value>
     ) -> some View where Value.AllCases: RandomAccessCollection, Value: BehaviorOptionDisplayable {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(title)
+                    .frame(minWidth: 260, idealWidth: 320, maxWidth: .infinity, alignment: .leading)
 
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 360, alignment: .leading)
-
-            Picker("", selection: selection) {
-                ForEach(Array(Value.allCases), id: \.self) { value in
-                    Text(value.displayName).tag(value)
+                Picker("", selection: selection) {
+                    ForEach(Array(Value.allCases), id: \.self) { value in
+                        Text(value.pickerDisplayName).tag(value)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 220, alignment: .trailing)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: 220, alignment: .leading)
 
-            Spacer(minLength: 0)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

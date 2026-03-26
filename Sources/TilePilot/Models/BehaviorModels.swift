@@ -2,6 +2,11 @@ import Foundation
 
 protocol BehaviorOptionDisplayable {
     var displayName: String { get }
+    var pickerDisplayName: String { get }
+}
+
+extension BehaviorOptionDisplayable {
+    var pickerDisplayName: String { displayName }
 }
 
 enum HoverFocusMode: String, Codable, CaseIterable, Sendable, BehaviorOptionDisplayable {
@@ -32,6 +37,16 @@ enum MouseModifierKey: String, Codable, CaseIterable, Sendable, BehaviorOptionDi
         case .shift: return "Shift"
         case .ctrl: return "Control"
         case .fn: return "Fn"
+        }
+    }
+
+    var pickerDisplayName: String {
+        switch self {
+        case .cmd: return "⌘ Command"
+        case .alt: return "⌥ Option"
+        case .shift: return "⇧ Shift"
+        case .ctrl: return "⌃ Control"
+        case .fn: return "fn Fn"
         }
     }
 }

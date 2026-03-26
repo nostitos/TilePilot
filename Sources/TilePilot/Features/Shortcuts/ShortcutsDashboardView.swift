@@ -5,8 +5,11 @@ struct ShortcutsDashboardView: View {
     @EnvironmentObject private var model: AppModel
     private let shortcutDescriptionColumnWidth: CGFloat = 410
     private let shortcutComboColumnWidth: CGFloat = 220
-    private let shortcutRecordColumnWidth: CGFloat = 170
-    private let shortcutActionsColumnWidth: CGFloat = 96
+    private let shortcutRecordColumnWidth: CGFloat = 220
+    private let shortcutActionsColumnWidth: CGFloat = 150
+    private let shortcutRecordButtonMinWidth: CGFloat = 120
+    private let shortcutActionButtonMinWidth: CGFloat = 72
+    private let shortcutClearButtonMinWidth: CGFloat = 62
     @State private var searchText = ""
     @State private var showDesktopMoveAdvanced = false
     @State private var isReordering = false
@@ -666,22 +669,24 @@ struct ShortcutsDashboardView: View {
             .frame(width: shortcutRecordColumnWidth, alignment: .leading)
             .layoutPriority(3)
 
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Button("Test") {
                     model.runShortcut(entry)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
+                .frame(minWidth: shortcutActionButtonMinWidth)
 
                 Button("Edit") {
                     model.openShortcutSource(entry)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
+                .frame(minWidth: shortcutActionButtonMinWidth)
             }
             .frame(width: shortcutActionsColumnWidth, alignment: .trailing)
             .layoutPriority(2)
@@ -762,7 +767,7 @@ struct ShortcutsDashboardView: View {
             .frame(width: shortcutRecordColumnWidth, alignment: .leading)
             .layoutPriority(3)
 
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Button("Test") {
                     if let featureID = row.featureID {
                         model.runFeatureControl(featureID, source: .shortcutsUI)
@@ -772,18 +777,20 @@ struct ShortcutsDashboardView: View {
                 }
                 .disabled(row.disabledReason != nil || model.activeActionID != nil)
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
+                .frame(minWidth: shortcutActionButtonMinWidth)
 
                 if let entry = row.shortcutEntry {
                     Button("Edit") {
                         model.openShortcutSource(entry)
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .controlSize(.small)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
+                    .frame(minWidth: shortcutActionButtonMinWidth)
                 }
             }
             .frame(width: shortcutActionsColumnWidth, alignment: .trailing)
@@ -817,34 +824,37 @@ struct ShortcutsDashboardView: View {
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .help("Cancel recording")
             }
         } else if model.featureControlRow(forID: featureID)?.shortcutEntry != nil {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Button {
                     model.removeShortcut(for: featureID)
                 } label: {
                     Text("Clear")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .help("Clear shortcut")
+                .frame(minWidth: shortcutClearButtonMinWidth)
 
                 Button("Record Shortcut") {
                     beginShortcutRecording(for: featureID)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: shortcutRecordButtonMinWidth)
             }
         } else {
             Button("Record Shortcut") {
                 beginShortcutRecording(for: featureID)
             }
             .buttonStyle(.bordered)
-            .controlSize(.mini)
+            .controlSize(.small)
             .font(.system(size: 12, weight: .semibold))
+            .frame(minWidth: shortcutRecordButtonMinWidth)
         }
     }
 
@@ -954,7 +964,7 @@ struct ShortcutsDashboardView: View {
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .help("Cancel recording")
             }
         } else {
@@ -962,8 +972,9 @@ struct ShortcutsDashboardView: View {
                 beginShortcutRecording(for: entry)
             }
             .buttonStyle(.bordered)
-            .controlSize(.mini)
+            .controlSize(.small)
             .font(.system(size: 12, weight: .semibold))
+            .frame(minWidth: shortcutRecordButtonMinWidth)
         }
     }
 

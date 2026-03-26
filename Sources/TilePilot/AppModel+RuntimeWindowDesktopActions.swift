@@ -14,6 +14,52 @@ private enum VisibleWindowsLayoutOperation {
     case rebuildTileLayout
 }
 
+private struct RuntimeLayoutWindow: Decodable {
+    struct Frame: Decodable {
+        let x: Double
+        let y: Double
+        let w: Double
+        let h: Double
+    }
+
+    let id: Int
+    let frame: Frame
+    let isFloating: Bool
+    let isVisible: Bool
+    let isMinimized: Bool
+    let isHidden: Bool
+    let isNativeFullscreen: Bool
+    let splitType: String
+
+    var frameX: Double { frame.x }
+    var frameY: Double { frame.y }
+    var frameW: Double { frame.w }
+    var frameH: Double { frame.h }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case frame
+        case isFloating = "is-floating"
+        case isVisible = "is-visible"
+        case isMinimized = "is-minimized"
+        case isHidden = "is-hidden"
+        case isNativeFullscreen = "is-native-fullscreen"
+        case splitType = "split-type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        frame = try container.decode(Frame.self, forKey: .frame)
+        isFloating = try container.decodeIfPresent(Bool.self, forKey: .isFloating) ?? false
+        isVisible = try container.decodeIfPresent(Bool.self, forKey: .isVisible) ?? false
+        isMinimized = try container.decodeIfPresent(Bool.self, forKey: .isMinimized) ?? false
+        isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        isNativeFullscreen = try container.decodeIfPresent(Bool.self, forKey: .isNativeFullscreen) ?? false
+        splitType = try container.decodeIfPresent(String.self, forKey: .splitType) ?? ""
+    }
+}
+
 @MainActor
 extension AppModel {
     func bringFloatingWindowsToFrontCurrentDesktop() {
@@ -428,7 +474,7 @@ extension AppModel {
             await refreshLiveState()
             guard let refreshed = await currentDesktopVisibleWindowsForBulkLayout() else { return }
             state = refreshed
-            let gridResult = await applyFloatingGridFrames(
+            let gridResult = await applyGridFrames(
                 to: state.windows.filter { $0.isRuntimeManageable },
                 display: state.display
             )
@@ -446,18 +492,17 @@ extension AppModel {
             )
 
         case .rebuildTileLayout:
-            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--layout", "bsp"]]) else { return }
-            let result = await setFloatingStateForWindows(
-                state.windows.filter { $0.isRuntimeManageable && $0.floating },
-                shouldFloat: false
+            let rebuildResult = await rebuildBalancedTileLayout(
+                spaceIndex: state.spaceIndex,
+                windows: state.windows
             )
-            guard await runCurrentDesktopLayoutCommands([["-m", "space", "--balance"]]) else { return }
+
             await finishVisibleWindowsLayoutOperation(
                 operation,
                 totalVisibleCount: totalVisibleCount,
-                updatedCount: result.updated,
+                updatedCount: rebuildResult.updated,
                 limitedCount: limitedCount,
-                failedCount: result.failed
+                failedCount: rebuildResult.failed
             )
         }
 
@@ -544,7 +589,7 @@ extension AppModel {
         return (updated, failed)
     }
 
-    private func applyFloatingGridFrames(
+    private func applyGridFrames(
         to windows: [WindowState],
         display: DisplayState?
     ) async -> (updated: Int, failed: Int) {
@@ -585,8 +630,82 @@ extension AppModel {
         return (updated, failed)
     }
 
+    private func rebuildBalancedTileLayout(
+        spaceIndex: Int,
+        windows: [WindowState]
+    ) async -> (updated: Int, failed: Int) {
+        let packable = windows
+            .filter { $0.isRuntimeManageable }
+            .sorted { lhs, rhs in
+                if abs(lhs.frameY - rhs.frameY) > 8 { return lhs.frameY < rhs.frameY }
+                if abs(lhs.frameX - rhs.frameX) > 8 { return lhs.frameX < rhs.frameX }
+                return lhs.id < rhs.id
+            }
+
+        guard !packable.isEmpty else { return (0, 0) }
+
+        var failedWindowIDs: Set<Int> = []
+
+        for window in packable {
+            let ensured = await ensureWindowFloatingState(window: window, shouldFloat: true)
+            if !ensured {
+                failedWindowIDs.insert(window.id)
+            }
+        }
+
+        let layoutResult = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "space", String(spaceIndex), "--layout", "bsp"], timeout: 1.5)
+        )
+        await MainActor.run {
+            appendCommandLog(from: layoutResult)
+        }
+        guard layoutResult.isSuccess else { return (0, packable.count) }
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let rootWindow = packable[0]
+        if !(await ensureWindowFloatingState(window: rootWindow, shouldFloat: false)) {
+            failedWindowIDs.insert(rootWindow.id)
+        }
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        for window in packable.dropFirst() {
+            if let target = await largestManagedRetileTarget(spaceIndex: spaceIndex) {
+                _ = await focusRetileWindow(target.id)
+                await ensureSplitType(windowID: target.id, desired: target.frameW >= target.frameH ? "vertical" : "horizontal")
+            }
+
+            if !(await ensureWindowFloatingState(window: window, shouldFloat: false)) {
+                failedWindowIDs.insert(window.id)
+            }
+
+            try? await Task.sleep(for: .milliseconds(50))
+            _ = await runBestEffortYabaiCommand(["-m", "space", "--balance"], timeout: 1.0, log: false)
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+
+        try? await Task.sleep(for: .milliseconds(80))
+        _ = await runBestEffortYabaiCommand(["-m", "space", "--balance"], timeout: 1.0, log: false)
+
+        let finalWindows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) ?? []
+        let packableIDs = Set(packable.map(\.id))
+        let stillFloatingCount = finalWindows.filter {
+            packableIDs.contains($0.id) &&
+            $0.isVisible &&
+            !$0.isMinimized &&
+            !$0.isHidden &&
+            $0.isFloating
+        }.count
+
+        return (
+            updated: max(0, packable.count - stillFloatingCount),
+            failed: failedWindowIDs.count + stillFloatingCount
+        )
+    }
+
     private func setWindowFloatingSilently(window: WindowState, shouldFloat: Bool) async -> Bool {
-        if window.floating == shouldFloat {
+        if let current = await queryRuntimeWindow(windowID: window.id)?.isFloating, current == shouldFloat {
             return true
         }
 
@@ -606,6 +725,96 @@ extension AppModel {
         }
 
         return false
+    }
+
+    private func ensureWindowFloatingState(window: WindowState, shouldFloat: Bool) async -> Bool {
+        for _ in 0..<5 {
+            if let current = await queryRuntimeWindow(windowID: window.id)?.isFloating, current == shouldFloat {
+                return true
+            }
+            _ = await setWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
+            try? await Task.sleep(for: .milliseconds(60))
+        }
+        return await queryRuntimeWindow(windowID: window.id)?.isFloating == shouldFloat
+    }
+
+    private func ensureSplitType(windowID: Int, desired: String) async {
+        guard let current = await queryRuntimeWindow(windowID: windowID)?.splitType,
+              !current.isEmpty,
+              current != desired else {
+            return
+        }
+
+        _ = await runBestEffortYabaiCommand(
+            ["-m", "window", String(windowID), "--toggle", "split"],
+            timeout: 1.0,
+            log: false
+        )
+        try? await Task.sleep(for: .milliseconds(40))
+    }
+
+    private func focusRetileWindow(_ windowID: Int) async -> Bool {
+        let result = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.2)
+        )
+        await MainActor.run {
+            appendCommandLog(from: result)
+        }
+        return result.isSuccess
+    }
+
+    private func largestManagedRetileTarget(spaceIndex: Int) async -> RuntimeLayoutWindow? {
+        guard let windows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) else { return nil }
+        return windows
+            .filter {
+                $0.isVisible &&
+                !$0.isMinimized &&
+                !$0.isHidden &&
+                !$0.isFloating &&
+                !$0.isNativeFullscreen
+            }
+            .sorted { lhs, rhs in
+                let lhsArea = lhs.frameW * lhs.frameH
+                let rhsArea = rhs.frameW * rhs.frameH
+                if abs(lhsArea - rhsArea) > 1 { return lhsArea > rhsArea }
+                if abs(lhs.frameY - rhs.frameY) > 8 { return lhs.frameY < rhs.frameY }
+                if abs(lhs.frameX - rhs.frameX) > 8 { return lhs.frameX < rhs.frameX }
+                return lhs.id < rhs.id
+            }
+            .first
+    }
+
+    private func queryRuntimeWindowsOnSpace(spaceIndex: Int) async -> [RuntimeLayoutWindow]? {
+        let result = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "query", "--windows", "--space", String(spaceIndex)], timeout: 1.2)
+        )
+        guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([RuntimeLayoutWindow].self, from: data)
+    }
+
+    private func queryRuntimeWindow(windowID: Int) async -> RuntimeLayoutWindow? {
+        let result = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "query", "--windows", "--window", String(windowID)], timeout: 1.0)
+        )
+        guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(RuntimeLayoutWindow.self, from: data)
+    }
+
+    @discardableResult
+    private func runBestEffortYabaiCommand(
+        _ arguments: [String],
+        timeout: TimeInterval,
+        log: Bool
+    ) async -> Bool {
+        let result = await doctorService.runSupportCommand(
+            yabaiCommand(arguments, timeout: timeout)
+        )
+        if log {
+            await MainActor.run {
+                appendCommandLog(from: result)
+            }
+        }
+        return result.isSuccess
     }
 
     private func finishVisibleWindowsLayoutOperation(

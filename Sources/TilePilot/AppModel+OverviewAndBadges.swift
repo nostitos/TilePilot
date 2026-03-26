@@ -59,6 +59,16 @@ extension AppModel {
             return true
         }
 
+        if isTransientDialogSiblingWindow(
+            window,
+            normalizedTitle: normalizedTitle,
+            normalizedRole: normalizedRole,
+            normalizedSubrole: normalizedSubrole,
+            in: snapshot
+        ) {
+            return true
+        }
+
         if normalizedTitle.isEmpty,
            !window.isMinimized,
            !window.isHidden,
@@ -110,7 +120,6 @@ extension AppModel {
         in snapshot: LiveStateSnapshot
     ) -> Bool {
         guard normalizedTitle.isEmpty else { return false }
-        guard !window.hasWindowServerMatch else { return false }
         guard !window.isMinimized && !window.isHidden else { return false }
 
         let overlayLikeSubrole = normalizedSubrole == "AXSystemDialog" || normalizedSubrole == "AXDialog"
@@ -122,11 +131,55 @@ extension AppModel {
         let heightCoverage = window.frameH / max(display.frameH, 1)
         guard widthCoverage >= 0.96, heightCoverage >= 0.96 else { return false }
 
-        return snapshot.windows.contains { sibling in
+        let hasSmallerSibling = snapshot.windows.contains { sibling in
             sibling.id != window.id &&
                 sibling.pid == window.pid &&
                 sibling.frameW < (window.frameW * 0.9) &&
                 sibling.frameH < (window.frameH * 0.9)
+        }
+
+        if hasSmallerSibling {
+            return true
+        }
+
+        return window.floating || !window.hasAXReference || !window.canResize || !window.hasWindowServerMatch
+    }
+
+    func isTransientDialogSiblingWindow(
+        _ window: WindowState,
+        normalizedTitle: String,
+        normalizedRole: String,
+        normalizedSubrole: String,
+        in snapshot: LiveStateSnapshot
+    ) -> Bool {
+        guard normalizedTitle.isEmpty else { return false }
+        guard !window.isMinimized && !window.isHidden else { return false }
+
+        let dialogLikeSubrole = normalizedSubrole == "AXDialog" || normalizedSubrole == "AXSystemDialog"
+        let dialogLikeRole = normalizedRole == "AXDialog" || normalizedRole == "AXSystemDialog"
+        guard dialogLikeSubrole || dialogLikeRole else { return false }
+        guard window.floating else { return false }
+        guard !window.canResize else { return false }
+
+        let windowArea = max(window.frameW * window.frameH, 1)
+
+        return snapshot.windows.contains { sibling in
+            let siblingTitle = sibling.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let siblingSubrole = sibling.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
+            let siblingArea = sibling.frameW * sibling.frameH
+
+            return sibling.id != window.id &&
+                sibling.pid == window.pid &&
+                sibling.space == window.space &&
+                sibling.isVisible &&
+                !sibling.isMinimized &&
+                !sibling.isHidden &&
+                siblingArea > (windowArea * 2.0) &&
+                (
+                    siblingSubrole == "AXStandardWindow" ||
+                    sibling.canResize ||
+                    !siblingTitle.isEmpty
+                )
         }
     }
 
@@ -159,6 +212,12 @@ extension AppModel {
             let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedSubrole = window.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
             return !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: normalizedTitle,
+                normalizedRole: normalizedRole,
+                normalizedSubrole: normalizedSubrole,
+                in: snapshot
+            ) && !isTransientDialogSiblingWindow(
                 window,
                 normalizedTitle: normalizedTitle,
                 normalizedRole: normalizedRole,
@@ -245,6 +304,12 @@ extension AppModel {
             let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedSubrole = window.subrole.trimmingCharacters(in: .whitespacesAndNewlines)
             return !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: normalizedTitle,
+                normalizedRole: normalizedRole,
+                normalizedSubrole: normalizedSubrole,
+                in: snapshot
+            ) && !isTransientDialogSiblingWindow(
                 window,
                 normalizedTitle: normalizedTitle,
                 normalizedRole: normalizedRole,

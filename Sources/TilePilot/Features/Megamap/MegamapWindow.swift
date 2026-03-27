@@ -30,8 +30,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
 
     init(model: AppModel) {
         self.model = model
-        let rootView = MegamapRootView(model: model)
-        let hosting = NSHostingController(rootView: rootView)
+        let hosting = MegamapWindowController.makeHostingController(model: model)
 
         let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1600, height: 900)
         let window = MegamapWindow(contentViewController: hosting)
@@ -65,6 +64,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func showAndFocus() {
+        ensureContentLoaded()
         NSApp.activate(ignoringOtherApps: true)
         window?.alphaValue = 1
         showWindow(nil)
@@ -76,6 +76,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         window.alphaValue = 0
         window.orderOut(nil)
+        unloadContent()
     }
 
     func persistCurrentWindowSize() {
@@ -88,6 +89,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         persistCurrentWindowSize()
+        unloadContent()
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -116,6 +118,26 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
         guard !visibleFrame.isEmpty else { return }
         window.setFrame(visibleFrame, display: true, animate: false)
+    }
+
+    private func ensureContentLoaded() {
+        guard let window else { return }
+        if window.contentViewController is NSHostingController<AnyView> {
+            return
+        }
+        window.contentViewController = Self.makeHostingController(model: model)
+    }
+
+    private func unloadContent() {
+        guard let window else { return }
+        if window.contentViewController is NSHostingController<AnyView> {
+            window.contentViewController = NSViewController()
+        }
+        MegamapScreenshotCache.shared.clear()
+    }
+
+    private static func makeHostingController(model: AppModel) -> NSHostingController<AnyView> {
+        NSHostingController(rootView: AnyView(MegamapRootView(model: model)))
     }
 }
 
@@ -516,6 +538,11 @@ private struct MegamapDesktopTile: View {
     let onSelect: () -> Void
     @State private var isHovered = false
     @State private var hoverOverrideMessage: String?
+    private static let captureAgeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     var body: some View {
         Group {
@@ -564,6 +591,11 @@ private struct MegamapDesktopTile: View {
     private var hoverMessage: String? {
         guard isHovered else { return nil }
         return hoverOverrideMessage ?? "Jump to #\(desktop.desktopIndex)"
+    }
+
+    private var captureAgeText: String? {
+        guard let capturedAt = desktop.capturedAt else { return nil }
+        return Self.captureAgeFormatter.localizedString(for: capturedAt, relativeTo: Date())
     }
 
     private var unavailablePlaceholder: some View {
@@ -615,6 +647,18 @@ private struct MegamapDesktopTile: View {
                     .padding(.vertical, 5)
                     .background(Color.black.opacity(0.7), in: Capsule())
                     .padding(.top, 8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let captureAgeText {
+                Text(captureAgeText)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.68), in: Capsule())
+                    .padding(6)
                     .allowsHitTesting(false)
             }
         }
@@ -900,12 +944,6 @@ private struct MegamapCachedScreenshotView: View {
             .task(id: cacheTaskID(for: proxy.size)) {
                 guard proxy.size.width > 0, proxy.size.height > 0 else { return }
                 image = MegamapScreenshotCache.shared.image(for: path, idealSize: proxy.size)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .tilePilotHideMegamap)) { _ in
-                image = nil
-            }
-            .onDisappear {
-                image = nil
             }
         }
     }

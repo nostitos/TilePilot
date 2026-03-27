@@ -1,5 +1,9 @@
 # TilePilot Development Notes
 
+## Related Docs
+
+- GUI and design context: `docs/GUI_DESIGN_CONTEXT.md`
+
 ## Breaking Shortcut Change (Directional Cluster)
 
 As of 2026-02-26, TilePilot's recommended directional shortcut layout is `IJKL` (instead of `HJKL`) for focus/move/resize patterns.
@@ -35,12 +39,12 @@ Default behavior:
 Build a release app bundle and package a drag-and-drop DMG:
 
 ```bash
-scripts/build_release_dmg.sh --version v0.2.10
+scripts/build_release_dmg.sh --version v0.2.11
 ```
 
 Output artifact:
 
-- `dist/TilePilot-v0.2.10.dmg`
+- `dist/TilePilot-v0.2.11.dmg`
 
 To notarize the release DMG, first store a `notarytool` keychain profile, then run:
 
@@ -53,7 +57,7 @@ xcrun notarytool store-credentials TilePilot \
 
 TILEPILOT_NOTARY_PROFILE=TilePilot \
 TILEPILOT_NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db" \
-scripts/build_release_dmg.sh --version v0.2.10 --notarize
+scripts/build_release_dmg.sh --version v0.2.11 --notarize
 ```
 
 That will:

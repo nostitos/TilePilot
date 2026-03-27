@@ -26,6 +26,7 @@ extension AppModel {
     func openMegamapDashboard() {
         acknowledgeInitialStatusIfNeeded()
         NSApp.activate(ignoringOtherApps: true)
+        megamapCaptureService.removeAllPersistedCapturesFromDisk()
         megamapScreenRecordingAuthorized = megamapCaptureService.screenRecordingAuthorized()
         Task { [weak self] in
             guard let self else { return }
@@ -41,6 +42,7 @@ extension AppModel {
 
     func refreshMegamap() {
         acknowledgeInitialStatusIfNeeded()
+        megamapCaptureService.removeAllPersistedCapturesFromDisk()
         NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
         megamapLastActionMessage = "Refreshing MegaMap…"
         megamapLastErrorMessage = nil
@@ -58,6 +60,7 @@ extension AppModel {
 
     func refreshMegamapDesktop(spaceIndex: Int) {
         acknowledgeInitialStatusIfNeeded()
+        megamapCaptureService.removeAllPersistedCapturesFromDisk()
         NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
         megamapLastActionMessage = "Refreshing Desktop \(spaceIndex)…"
         megamapLastErrorMessage = nil
@@ -263,7 +266,7 @@ extension AppModel {
             return
         }
 
-        try? await Task.sleep(for: .milliseconds(90))
+        try? await Task.sleep(for: .milliseconds(240))
 
         do {
             let payload = try megamapCaptureService.capturedPayload(
@@ -393,7 +396,7 @@ extension AppModel {
                 continue
             }
 
-            try? await Task.sleep(for: .milliseconds(90))
+            try? await Task.sleep(for: .milliseconds(240))
 
             do {
                 guard let resolvedDisplay = resolvedDisplaysByID[target.display.id] else {
@@ -589,7 +592,7 @@ extension AppModel {
                 let preview = previewDesktopByID[desktopID]
                 let capture = megamapCaptureRecordsByDesktopID[desktopID]
                 let screenshotPath = capture.flatMap {
-                    FileManager.default.fileExists(atPath: $0.screenshotPath) ? $0.screenshotPath : nil
+                    megamapCaptureService.captureExists(at: $0.screenshotPath) ? $0.screenshotPath : nil
                 }
                 let contentMode: MegamapDesktopContentMode
                 if screenshotPath != nil {

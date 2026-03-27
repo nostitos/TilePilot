@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+private enum OverviewMiniMapHeaderMetrics {
+    static let controlHeight: CGFloat = 28
+}
+
 struct HoveredMiniWindowBubbleState: Equatable {
     let windowID: Int
     let title: String
@@ -133,13 +137,15 @@ struct OverviewDesktopPreviewCard: View {
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Text("#\(desktop.desktopIndex)")
-                        .font(.caption.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
+                        .frame(height: OverviewMiniMapHeaderMetrics.controlHeight)
 
                     Button("Jump") {
                         onDesktopSelect(desktop.desktopIndex)
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .controlSize(.small)
+                    .frame(height: OverviewMiniMapHeaderMetrics.controlHeight)
                     .help("Switch to Desktop #\(desktop.desktopIndex).")
 
                     if desktop.focused {
@@ -243,6 +249,7 @@ private struct OverviewMiniMapTilingToggle: View {
             Capsule()
                 .stroke(Color.black.opacity(0.14), lineWidth: 1)
         )
+        .frame(height: OverviewMiniMapHeaderMetrics.controlHeight)
     }
 
     private func toggleButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {

@@ -114,12 +114,14 @@ Some advanced desktop actions (especially moving windows between desktops) depen
 
 - TilePilot preserves your existing `yabairc` and `skhdrc` content outside the app-managed blocks.
 - TilePilot-managed config blocks use `TILEPILOT ...` markers.
-- `Shift + Option + M` now targets `auto-layout-current-desktop.sh` (grid-based, keeps windows floating). `readable-current-space.sh` remains as a compatibility alias.
-- `Grid Tiling (Floating)` keeps windows floating in a packed grid.
-- `Rebuild Balanced Tile Layout` rebuilds the current desktop into a more even tiled BSP layout.
+- `Shift + Option + M` now maps to `Arrange Windows into a Floating Grid`. The legacy `auto-layout-current-desktop.sh` and `readable-current-space.sh` names are kept only as compatibility aliases.
+- `Arrange Windows into a Floating Grid` keeps windows floating in a packed grid.
+- `Retile Windows into a Balanced Tiled Layout` rebuilds the current desktop into a more even tiled layout.
+- Legacy `bootstrap.sh` is treated as a display/desktop reset helper, not a normal day-to-day layout action.
 
 ## Developers
 
-Build, packaging, and signing details are in:
+Build, packaging, signing, and UI context details are in:
 
 - [Development Notes](docs/DEVELOPMENT.md)
+- [GUI And Design Context](docs/GUI_DESIGN_CONTEXT.md)

@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 extension AppModel {
     var releaseDefaultsResetButtonTitle: String {
-        "Reset to Release Defaults (\(releaseDefaultsStatus.currentVersion))"
+        "Restore All Default Settings"
     }
 
     func ensureReleaseDefaultsInitializedIfNeeded() async {

@@ -36,13 +36,13 @@ struct SystemDashboardView: View {
             .onChange(of: model.requestedSystemPanelSection) { _ in
                 applyRequestedSectionIfNeeded()
             }
-            .alert("Reset to Release Defaults?", isPresented: $showResetDefaultsConfirm) {
+            .alert("Restore All Default Settings?", isPresented: $showResetDefaultsConfirm) {
                 Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) {
+                Button("Restore", role: .destructive) {
                     model.resetToReleaseDefaults()
                 }
             } message: {
-                Text("This resets TilePilot app settings and TilePilot-managed skhdrc/yabairc sections. Non-managed lines stay unchanged.")
+                Text("This restores TilePilot app settings and the TilePilot-managed sections of skhdrc and yabairc to their default values. Any non-managed lines stay unchanged.")
             }
             .confirmationDialog(
                 model.helperMigrationPrompt?.title ?? "Existing Helper Install Detected",
@@ -82,10 +82,6 @@ struct SystemDashboardView: View {
                     .foregroundStyle(.secondary)
 
                 Text(model.setupGuideCompletionDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(model.releaseDefaultsStatus.summaryText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

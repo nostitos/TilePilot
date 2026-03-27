@@ -10,6 +10,27 @@ final class WindowBadgeOverlayController {
         override var canBecomeMain: Bool { false }
     }
 
+    private final class OutlinePanelView: NSView {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        func update(strokeColor: NSColor, lineWidth: CGFloat) {
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderColor = strokeColor.withAlphaComponent(0.85).cgColor
+            layer?.borderWidth = lineWidth
+            layer?.cornerRadius = 0
+        }
+    }
+
     private struct OverlayUpdateSignature: Equatable {
         let showBadges: Bool
         let showOutlines: Bool
@@ -295,13 +316,19 @@ final class WindowBadgeOverlayController {
         let scale = max(1.0, hostScreen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0)
         let lineWidth: CGFloat = CGFloat(model.windowOutlineOverlayBaseWidth / scale)
         let outlineRect = targetWindowRect.integral
-
-        let outlineView = WindowFrameOutlineView(
-            strokeColor: badge.usesLimitedVisualStyle ? .gray : (badge.isFloating ? .orange : .blue),
-            lineWidth: lineWidth
-        )
+        let strokeColor: NSColor = badge.usesLimitedVisualStyle
+            ? .gray
+            : (badge.isFloating ? .orange : .systemBlue)
+        let outlineView: OutlinePanelView
+        if let existing = panel.contentView as? OutlinePanelView {
+            outlineView = existing
+        } else {
+            outlineView = OutlinePanelView(frame: outlineRect)
+            panel.contentView = outlineView
+        }
+        outlineView.frame = NSRect(origin: .zero, size: outlineRect.size)
+        outlineView.update(strokeColor: strokeColor, lineWidth: lineWidth)
         panel.ignoresMouseEvents = true
-        setPanelRootView(panel, AnyView(outlineView))
         panel.setFrame(outlineRect, display: true)
         if let windowNumber = targetWindowNumber(for: badge, targetWindowRect: targetWindowRect) {
             panel.order(.above, relativeTo: Int(windowNumber))
@@ -382,17 +409,5 @@ final class WindowBadgeOverlayController {
             }
         }
         return bestNumber
-    }
-}
-
-private struct WindowFrameOutlineView: View {
-    let strokeColor: Color
-    let lineWidth: CGFloat
-
-    var body: some View {
-        Rectangle()
-            .strokeBorder(strokeColor.opacity(0.85), lineWidth: lineWidth)
-            .background(Color.clear)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

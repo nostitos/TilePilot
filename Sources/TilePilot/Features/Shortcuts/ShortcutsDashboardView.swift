@@ -10,14 +10,11 @@ struct ShortcutsDashboardView: View {
     private let shortcutRecordButtonMinWidth: CGFloat = 120
     private let shortcutActionButtonMinWidth: CGFloat = 72
     private let shortcutClearButtonMinWidth: CGFloat = 62
+    private let reorderRowHeight: CGFloat = 48
     @State private var searchText = ""
     @State private var showDesktopMoveAdvanced = false
     @State private var isReordering = false
-    @State private var draggedItemID: String?
-    @State private var reorderInsertionIndex: Int?
-    @State private var reorderDraftIDs: [String] = []
-    @State private var reorderBaseItems: [ShortcutsDisplayItem] = []
-    @State private var rowFramesByID: [String: CGRect] = [:]
+    @State private var reorderPinnedDraftIDs: [String] = []
     @State private var recordingFeatureID: FeatureControlID?
     @State private var recordingShortcutStableKey: String?
     @State private var shortcutRecordMonitor: Any?
@@ -54,28 +51,15 @@ struct ShortcutsDashboardView: View {
             }
             .onChange(of: isReordering) { enabled in
                 if enabled {
-                    reorderBaseItems = model.flatShortcutsItems(query: "")
-                    syncReorderDraft()
+                    syncPinnedReorderDraft()
                 } else {
-                    reorderDraftIDs = []
-                    reorderBaseItems = []
-                    draggedItemID = nil
-                    reorderInsertionIndex = nil
-                    rowFramesByID = [:]
+                    reorderPinnedDraftIDs = []
                 }
             }
-            .onChange(of: model.shortcutEntries.map(\.id)) { _ in
+            .onChange(of: model.pinnedShortcutContextItems.map(\.id)) { _ in
                 if reorderEnabled {
-                    reorderBaseItems = model.flatShortcutsItems(query: "")
-                    syncReorderDraft()
+                    syncPinnedReorderDraft()
                 }
-            }
-            .onChange(of: draggedItemID) { value in
-                guard value == nil, reorderEnabled, !reorderDraftIDs.isEmpty else { return }
-                model.applyShortcutsCustomOrderIDs(reorderDraftIDs)
-                reorderBaseItems = model.flatShortcutsItems(query: "")
-                syncReorderDraft()
-                reorderInsertionIndex = nil
             }
             .onDisappear {
                 stopShortcutRecording()
@@ -84,12 +68,14 @@ struct ShortcutsDashboardView: View {
     }
 
     private var filteredItems: [ShortcutsDisplayItem] {
-        if reorderEnabled {
-            let byID = Dictionary(uniqueKeysWithValues: reorderBaseItems.map { ($0.id, $0) })
-            let ids = reorderDraftIDs.isEmpty ? reorderBaseItems.map(\.id) : reorderDraftIDs
-            return ids.compactMap { byID[$0] }
-        }
         return model.flatShortcutsItems(query: searchText)
+    }
+
+    private var pinnedReorderItems: [PinnedShortcutContextItem] {
+        let baseItems = model.pinnedShortcutContextItems
+        let byID = Dictionary(uniqueKeysWithValues: baseItems.map { ($0.id, $0) })
+        let ids = reorderPinnedDraftIDs.isEmpty ? baseItems.map(\.id) : reorderPinnedDraftIDs
+        return ids.compactMap { byID[$0] }
     }
 
     private var isSearchActive: Bool {
@@ -100,12 +86,12 @@ struct ShortcutsDashboardView: View {
         isReordering && !isSearchActive
     }
 
-    private func syncReorderDraft() {
-        let allIDs = reorderBaseItems.map(\.id)
+    private func syncPinnedReorderDraft() {
+        let allIDs = model.pinnedShortcutContextItems.map(\.id)
         let allSet = Set(allIDs)
         var seen: Set<String> = []
         var next: [String] = []
-        for id in reorderDraftIDs where allSet.contains(id) {
+        for id in reorderPinnedDraftIDs where allSet.contains(id) {
             guard seen.insert(id).inserted else { continue }
             next.append(id)
         }
@@ -113,7 +99,7 @@ struct ShortcutsDashboardView: View {
             seen.insert(id)
             next.append(id)
         }
-        reorderDraftIDs = next
+        reorderPinnedDraftIDs = next
     }
 
     private var shortcutsToolbar: some View {
@@ -166,54 +152,90 @@ struct ShortcutsDashboardView: View {
     }
 
     private var shortcutsListCard: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                quickMenuCard
-                reorderControlBar
+        Group {
+            if reorderEnabled {
+                VStack(alignment: .leading, spacing: 10) {
+                    reorderControlBar
 
-                if filteredItems.isEmpty {
-                    EmptyStateView(
-                        title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
-                        systemImage: "keyboard",
-                        message: model.shortcutEntries.isEmpty
-                            ? "Reload after creating `skhdrc`, or check shortcut parse issues."
-                            : "Try a broader search query."
-                    )
-                    .frame(minHeight: 160)
+                    Text("Drag pinned items to reorder the right-click menu.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                    if model.shortcutEntries.isEmpty {
-                        HStack {
-                            Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
-                                Task { await model.refreshShortcuts() }
-                            }
-                            .disabled(model.isRefreshingShortcuts)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            Spacer(minLength: 0)
-                        }
+                    if pinnedReorderItems.isEmpty {
+                        EmptyStateView(
+                            title: "Nothing is pinned yet",
+                            systemImage: "pin.slash",
+                            message: "Pin actions below first, then reorder the right-click menu here."
+                        )
+                        .frame(minHeight: 180)
+                    } else {
+                        reorderList
                     }
-                } else {
-                    LazyVStack(spacing: 4) {
-                        ForEach(filteredItems) { item in
-                            flatShortcutsRow(item)
-                                .background(reorderRowFrameReader(for: item))
-                        }
+                }
+            } else {
+                shortcutsCatalogList
+            }
+        }
+    }
 
-                        if reorderInsertionIndex == reorderDraftIDs.count, draggedItemID != nil {
-                            Rectangle()
-                                .fill(Color.black.opacity(0.9))
-                                .frame(height: 2)
-                                .padding(.leading, 22)
+    private var shortcutsCatalogList: some View {
+        List {
+            quickMenuCard
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
+
+            reorderControlBar
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 6, trailing: 0))
+                .listRowSeparator(.hidden)
+
+            if filteredItems.isEmpty {
+                EmptyStateView(
+                    title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
+                    systemImage: "keyboard",
+                    message: model.shortcutEntries.isEmpty
+                        ? "Reload after creating `skhdrc`, or check shortcut parse issues."
+                        : "Try a broader search query."
+                )
+                .frame(minHeight: 160)
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                .listRowSeparator(.hidden)
+
+                if model.shortcutEntries.isEmpty {
+                    HStack {
+                        Button(model.isRefreshingShortcuts ? "Reloading..." : "Reload Shortcuts") {
+                            Task { await model.refreshShortcuts() }
                         }
+                        .disabled(model.isRefreshingShortcuts)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 2)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                    .listRowSeparator(.hidden)
+                }
+            } else {
+                ForEach(filteredItems) { item in
+                    flatShortcutsRow(item)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowSeparator(.hidden)
                 }
             }
         }
-        .coordinateSpace(name: "shortcuts-reorder-space")
-        .onPreferenceChange(ShortcutsRowFramePreferenceKey.self) { frames in
-            rowFramesByID = reorderEnabled ? frames : [:]
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var reorderList: some View {
+        List {
+            ForEach(pinnedReorderItems) { item in
+                reorderPinnedItemRowBody(item)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                    .listRowSeparator(.hidden)
+            }
+            .onMove(perform: movePinnedReorderItems)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     private var quickMenuCard: some View {
@@ -254,21 +276,6 @@ struct ShortcutsDashboardView: View {
         .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    @ViewBuilder
-    private func reorderRowFrameReader(for item: ShortcutsDisplayItem) -> some View {
-        if reorderEnabled {
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(
-                        key: ShortcutsRowFramePreferenceKey.self,
-                        value: [item.id: proxy.frame(in: .named("shortcuts-reorder-space"))]
-                    )
-            }
-        } else {
-            EmptyView()
-        }
-    }
-
     private var reorderControlBar: some View {
         HStack(spacing: 10) {
             Button {
@@ -277,12 +284,12 @@ struct ShortcutsDashboardView: View {
                 }
                 isReordering.toggle()
             } label: {
-                Label(isReordering ? "Done Shortcut Ordering" : "Shortcut Ordering", systemImage: isReordering ? "checkmark.circle.fill" : "arrow.up.arrow.down.circle.fill")
+                Label(isReordering ? "Done Reordering Right-Click Menu" : "Reorder Right-Click Menu", systemImage: isReordering ? "checkmark.circle.fill" : "arrow.up.arrow.down.circle.fill")
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
             .environment(\.controlActiveState, .key)
-            .help("Click to toggle row ordering")
+            .help("Click to reorder pinned right-click menu items")
 
             Spacer(minLength: 0)
         }
@@ -290,22 +297,43 @@ struct ShortcutsDashboardView: View {
 
     @ViewBuilder
     private func flatShortcutsRow(_ item: ShortcutsDisplayItem) -> some View {
-        if reorderEnabled {
-            HStack(alignment: .center, spacing: 6) {
-                reorderHandle(for: item)
-                flatShortcutsRowBody(item)
-            }
-            .overlay(alignment: .top) {
-                if shouldShowInsertionLine(before: item.id) {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.9))
-                        .frame(height: 2)
-                        .padding(.leading, 22)
+        flatShortcutsRowBody(item)
+    }
+
+    private func reorderPinnedItemRowBody(_ item: PinnedShortcutContextItem) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reorderPinnedItemTitle(for: item))
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+
+                if let secondary = reorderPinnedItemSecondaryText(for: item) {
+                    Text(secondary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-        } else {
-            flatShortcutsRowBody(item)
+
+            Spacer(minLength: 8)
+
+            if let trailing = reorderPinnedItemTrailingText(for: item) {
+                Text(trailing)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
+        .frame(maxWidth: .infinity, minHeight: reorderRowHeight, alignment: .leading)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.04))
+        )
     }
 
     @ViewBuilder
@@ -323,8 +351,8 @@ struct ShortcutsDashboardView: View {
             }
         case .desktopJumpFamily(let entries):
             jumpDesktopFamilyCard(entries)
-        case .desktopMoveFamily:
-            EmptyView()
+        case .desktopMoveFamily(let entries):
+            desktopMoveAdvancedFamilyCard(entries)
         }
     }
 
@@ -430,67 +458,62 @@ struct ShortcutsDashboardView: View {
         }
     }
 
-    private func reorderHandle(for item: ShortcutsDisplayItem) -> some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(width: 14)
-            .padding(.horizontal, 2)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named("shortcuts-reorder-space"))
-                    .onChanged { value in
-                        updateReorderDrag(itemID: item.id, locationY: value.location.y)
-                    }
-                    .onEnded { value in
-                        finishReorderDrag(itemID: item.id, locationY: value.location.y)
-                    }
-            )
-        .help("Drag to reorder")
-    }
-
-    private func shouldShowInsertionLine(before itemID: String) -> Bool {
-        guard let insertion = reorderInsertionIndex, draggedItemID != nil else { return false }
-        guard let rowIndex = reorderDraftIDs.firstIndex(of: itemID) else { return false }
-        return insertion == rowIndex
-    }
-
-    private func updateReorderDrag(itemID: String, locationY: CGFloat) {
+    private func movePinnedReorderItems(fromOffsets: IndexSet, toOffset: Int) {
         guard reorderEnabled else { return }
-        if draggedItemID == nil {
-            draggedItemID = itemID
-        }
-        reorderInsertionIndex = insertionIndex(for: locationY, draggingID: itemID)
-    }
+        var nextIDs = reorderPinnedDraftIDs
+        nextIDs.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        guard nextIDs != reorderPinnedDraftIDs else { return }
+        reorderPinnedDraftIDs = nextIDs
 
-    private func finishReorderDrag(itemID: String, locationY: CGFloat) {
-        guard reorderEnabled else { return }
-        defer {
-            draggedItemID = nil
-            reorderInsertionIndex = nil
-        }
-        guard let sourceIndex = reorderDraftIDs.firstIndex(of: itemID) else { return }
-        let insertion = insertionIndex(for: locationY, draggingID: itemID)
-        var nextIDs = reorderDraftIDs
-        let movingID = nextIDs.remove(at: sourceIndex)
-        var destination = insertion
-        if sourceIndex < insertion {
-            destination = max(0, insertion - 1)
-        }
-        destination = min(max(0, destination), nextIDs.count)
-        nextIDs.insert(movingID, at: destination)
-        reorderDraftIDs = nextIDs
-    }
-
-    private func insertionIndex(for locationY: CGFloat, draggingID: String) -> Int {
-        let ids = reorderDraftIDs
-        for id in ids where id != draggingID {
-            guard let frame = rowFramesByID[id] else { continue }
-            if locationY < frame.midY, let index = ids.firstIndex(of: id) {
-                return index
+        let currentOverallIDs = model.flatShortcutsItems(query: "").map(\.id)
+        let pinnedSet = Set(nextIDs)
+        var remainingPinned = nextIDs[...]
+        let mergedIDs = currentOverallIDs.map { id in
+            if pinnedSet.contains(id), let replacement = remainingPinned.popFirst() {
+                return replacement
             }
+            return id
         }
-        return ids.count
+
+        model.applyShortcutsCustomOrderIDs(mergedIDs)
+        syncPinnedReorderDraft()
+    }
+
+    private func reorderPinnedItemTitle(for item: PinnedShortcutContextItem) -> String {
+        switch item {
+        case .feature(let row):
+            return row.title
+        case .directional(let group, let bindings):
+            return directionalSummary(group: group, bindings: bindings).map { directionalFamilyTitle($0.kind) } ?? group.menuTitle
+        case .shortcut(let entry):
+            return model.shortcutTitle(entry)
+        }
+    }
+
+    private func reorderPinnedItemSecondaryText(for item: PinnedShortcutContextItem) -> String? {
+        switch item {
+        case .feature(let row):
+            return row.description
+        case .directional(let group, let bindings):
+            return directionalSummary(group: group, bindings: bindings).map { directionalFamilyDescription($0.kind) }
+        case .shortcut(let entry):
+            return model.shortcutSecondaryText(entry)
+        }
+    }
+
+    private func reorderPinnedItemTrailingText(for item: PinnedShortcutContextItem) -> String? {
+        switch item {
+        case .feature(let row):
+            let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
+            guard let comboRaw, !comboRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return model.displayShortcutComboSymbols(from: comboRaw)
+        case .directional(_, let bindings):
+            return bindings.isEmpty ? nil : "\(bindings.count)"
+        case .shortcut(let entry):
+            let combo = entry.combo.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !combo.isEmpty else { return nil }
+            return model.displayShortcutComboSymbols(from: combo)
+        }
     }
 
     private func jumpDesktopFamilyCard(_ entries: [ShortcutEntry]) -> some View {

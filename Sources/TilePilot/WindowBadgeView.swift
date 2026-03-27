@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WindowBadgeView: View {
-    @ObservedObject var model: AppModel
+    let model: AppModel
     let badge: WindowBadgeState
     var badgeWidth: CGFloat = 52
     var badgeHeight: CGFloat = 11

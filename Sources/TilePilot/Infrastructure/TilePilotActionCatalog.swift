@@ -15,20 +15,20 @@ enum TilePilotActionCatalog {
         switch actionID {
         case .balanceSpace:
             return .init(
-                title: "Even Out Tile Sizes",
-                subtitle: "Redistribute space so tiled windows are closer in size",
+                title: "Rebalance Tiled Window Sizes",
+                subtitle: "Redistribute space so tiled windows on this desktop are closer in size",
                 category: "Layouts",
-                buttonLabel: "Even Out",
+                buttonLabel: "Rebalance",
                 requiredCapabilities: ["yabai-binary", "yabai-daemon", "yabai-query"],
                 requiresLiveState: true,
                 disableInDegradedMode: true
             )
         case .layoutBSPAndBalance:
             return .init(
-                title: "Switch to Tiled Layout",
-                subtitle: "Turn tiling on for this desktop and even out tile sizes",
+                title: "Set This Desktop to Tiled Layout and Rebalance",
+                subtitle: "Turn on tiled layout for this desktop and rebalance existing tiles",
                 category: "Layouts",
-                buttonLabel: "Switch to Tiled",
+                buttonLabel: "Set Tiled",
                 requiredCapabilities: ["yabai-binary", "yabai-daemon", "yabai-query"],
                 requiresLiveState: true,
                 disableInDegradedMode: true

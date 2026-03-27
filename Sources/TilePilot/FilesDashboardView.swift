@@ -66,13 +66,13 @@ struct FilesDashboardView: View {
                 editorJumpLine = nil
             }
         }
-        .alert("Reset to Release Defaults?", isPresented: $showResetDefaultsConfirm) {
+        .alert("Restore All Default Settings?", isPresented: $showResetDefaultsConfirm) {
             Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) {
+            Button("Restore", role: .destructive) {
                 model.resetToReleaseDefaults()
             }
         } message: {
-            Text("This resets TilePilot app settings and TilePilot-managed skhdrc/yabairc sections. Non-managed lines stay unchanged.")
+            Text("This restores TilePilot app settings and the TilePilot-managed sections of skhdrc and yabairc to their default values. Any non-managed lines stay unchanged.")
         }
     }
 
@@ -83,7 +83,7 @@ struct FilesDashboardView: View {
                     Label("Config & Script Files", systemImage: "folder")
                         .font(.headline)
                     Spacer()
-                    Button("Reset Defaults") {
+                    Button("Restore All Default Settings") {
                         showResetDefaultsConfirm = true
                     }
                     .font(.caption)

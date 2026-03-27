@@ -215,9 +215,6 @@ extension AppModel {
     var systemSummaryLine: String {
         switch primarySetupAction {
         case .ready:
-            if let snapshot = bootstrapSnapshot {
-                return "Ready · \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))"
-            }
             return "Ready"
         case .recheck:
             return "Setup scan needed"

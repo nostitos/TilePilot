@@ -4,6 +4,8 @@ import SwiftUI
 
 @MainActor
 final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
+    private let model: AppModel
+
     private enum PersistedWindowSizeKeys {
         static let width = "TilePilot.mainWindow.width"
         static let height = "TilePilot.mainWindow.height"
@@ -11,9 +13,8 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
     }
 
     init(model: AppModel) {
-        let rootView = TilePilotRootView()
-            .environmentObject(model)
-        let hosting = NSHostingController(rootView: rootView)
+        self.model = model
+        let hosting = TilePilotWindowController.makeHostingController(model: model)
 
         let window = NSWindow(contentViewController: hosting)
         window.title = "TilePilot"
@@ -38,6 +39,7 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func showAndFocus() {
+        ensureContentLoaded()
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -51,10 +53,32 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         persistCurrentWindowSize()
+        unloadContent()
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
         persistCurrentWindowSize()
+    }
+
+    private func ensureContentLoaded() {
+        guard let window else { return }
+        if window.contentViewController is NSHostingController<AnyView> {
+            return
+        }
+        window.contentViewController = Self.makeHostingController(model: model)
+    }
+
+    private func unloadContent() {
+        guard let window else { return }
+        if window.contentViewController is NSHostingController<AnyView> {
+            window.contentViewController = NSViewController()
+        }
+    }
+
+    private static func makeHostingController(model: AppModel) -> NSHostingController<AnyView> {
+        let rootView = TilePilotRootView()
+            .environmentObject(model)
+        return NSHostingController(rootView: AnyView(rootView))
     }
 
     private static func restorePersistedSize(for window: NSWindow) {
@@ -185,7 +209,6 @@ final class StatusBarController: NSObject {
         menu.autoenablesItems = false
         menu.addItem(openTilePilotMenuItem())
         menu.addItem(openMegamapMenuItem())
-        menu.addItem(runGuidedSetupMenuItem())
         menu.addItem(.separator())
 
         _ = addPinnedContextItems(to: menu)
@@ -248,15 +271,6 @@ final class StatusBarController: NSObject {
     private func openMegamapMenuItem() -> NSMenuItem {
         let menuItem = item("Open MegaMap", action: #selector(openMegamap))
         if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-megamap")) {
-            let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
-            applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
-        }
-        return menuItem
-    }
-
-    private func runGuidedSetupMenuItem() -> NSMenuItem {
-        let menuItem = item("Run Guided Setup", action: #selector(runGuidedSetup))
-        if let row = model.featureControlRow(forID: FeatureControlID(rawValue: "app.run-guided-setup")) {
             let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
             applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
         }
@@ -511,12 +525,6 @@ final class StatusBarController: NSObject {
         model.performPrimarySetupAction()
     }
 
-    @objc private func runGuidedSetup() {
-        model.acknowledgeInitialStatusIfNeeded()
-        model.presentSetupGuide()
-        onOpenTilePilot()
-    }
-
     @objc private func runPinnedShortcut(_ sender: NSMenuItem) {
         guard let stableKey = sender.representedObject as? String else { return }
         model.acknowledgeInitialStatusIfNeeded()
@@ -646,7 +654,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func hideMegamapWindow() {
         megamapWindowController?.hideImmediately()
-        MegamapScreenshotCache.shared.clear()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

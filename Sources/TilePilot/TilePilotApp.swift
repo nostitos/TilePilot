@@ -92,7 +92,7 @@ struct TilePilotRootView: View {
         }
         .task {
             if !hasAppliedInitialTabSelection {
-                selectedTab = model.consumeShouldStartOnSetupTab() ? .system : .now
+                selectedTab = model.consumeShouldStartOnSetupTab() ? .system : model.currentVisibleTab
                 hasAppliedInitialTabSelection = true
             }
             model.currentVisibleTab = selectedTab

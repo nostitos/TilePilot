@@ -36,22 +36,34 @@ final class MegamapCaptureService {
         NSWorkspace.shared.open(url)
     }
 
-    func capturesDirectoryURL() throws -> URL {
-        let base = try FileManager.default.url(
+    func removeCapture(at path: String) {
+        if MegamapTransientCaptureStore.shared.contains(path) {
+            MegamapTransientCaptureStore.shared.removeImage(for: path)
+            return
+        }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
+    func captureExists(at identifier: String) -> Bool {
+        if MegamapTransientCaptureStore.shared.contains(identifier) {
+            return true
+        }
+        return FileManager.default.fileExists(atPath: identifier)
+    }
+
+    func removeAllPersistedCapturesFromDisk() {
+        guard let base = try? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
-        )
+            create: false
+        ) else {
+            return
+        }
         let directory = base
             .appendingPathComponent("TilePilot", isDirectory: true)
             .appendingPathComponent("Megamap", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
-
-    func removeCapture(at path: String) {
-        try? FileManager.default.removeItem(atPath: path)
+        try? FileManager.default.removeItem(at: directory)
     }
 
     func capture(display: DisplayState, desktopIndex: Int) throws -> MegamapCaptureRecord {
@@ -97,19 +109,8 @@ final class MegamapCaptureService {
     }
 
     func persist(_ payload: CapturedImagePayload) throws -> MegamapCaptureRecord {
-        let directory = try capturesDirectoryURL()
-        let imageRep = NSBitmapImageRep(cgImage: payload.cgImage)
-        guard let pngData = imageRep.representation(using: .png, properties: [:]) else {
-            throw NSError(
-                domain: "MegamapCaptureService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for \(payload.displayName)."]
-            )
-        }
-
-        let fileName = "display-\(payload.displayID)-desktop-\(payload.desktopIndex)-\(Int(payload.capturedAt.timeIntervalSince1970)).png"
-        let fileURL = directory.appendingPathComponent(fileName)
-        try pngData.write(to: fileURL, options: .atomic)
+        let captureIdentifier = "memory://display-\(payload.displayID)-desktop-\(payload.desktopIndex)-\(Int(payload.capturedAt.timeIntervalSince1970))"
+        MegamapTransientCaptureStore.shared.store(payload.cgImage, for: captureIdentifier)
 
         return MegamapCaptureRecord(
             displayID: payload.displayID,
@@ -120,7 +121,7 @@ final class MegamapCaptureService {
             capturedFrameY: payload.capturedFrame.origin.y,
             capturedFrameW: payload.capturedFrame.size.width,
             capturedFrameH: payload.capturedFrame.size.height,
-            screenshotPath: fileURL.path,
+            screenshotPath: captureIdentifier,
             capturedAt: payload.capturedAt
         )
     }

@@ -101,6 +101,9 @@ extension AppModel {
             let keepOnTopInterval = currentKeepOnTopEnforcementIntervalSeconds()
             return keepOnTopInterval > 0 ? min(2.0, keepOnTopInterval) : 2.0
         }
+        if hasActiveOverlayTargets && !hasOnScreenTilePilotWindow && !hasActiveKeepOnTopWindows {
+            return 2.0
+        }
         switch runtimeActivityMode {
         case .overview, .overlays, .keepOnTop, .mixed:
             let baseInterval = overlayRefreshPolicy == .reduced

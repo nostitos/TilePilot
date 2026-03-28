@@ -19,18 +19,22 @@ struct ShortcutsDashboardView: View {
     @State private var recordingShortcutStableKey: String?
     @State private var shortcutRecordMonitor: Any?
     @State private var shortcutGlobalRecordMonitor: Any?
+    @State private var selectedExplainer: ShortcutExplainerTopic = .rightClickMenu
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 10) {
-                shortcutsToolbar
-                searchCard
+            ScrollViewReader { proxy in
+                VStack(alignment: .leading, spacing: 10) {
+                    shortcutsToolbar
+                    searchCard
+                    shortcutsExplainerCard(proxy: proxy)
 
-                if !model.shortcutParseIssues.isEmpty {
-                    issuesCard
+                    if !model.shortcutParseIssues.isEmpty {
+                        issuesCard
+                    }
+
+                    shortcutsListCard
                 }
-
-                shortcutsListCard
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -64,6 +68,41 @@ struct ShortcutsDashboardView: View {
             .onDisappear {
                 stopShortcutRecording()
             }
+        }
+    }
+
+    private func shortcutsExplainerCard(proxy: ScrollViewProxy) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Pick one concept. The diagram shows what the feature is for before you learn the exact controls.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $selectedExplainer) {
+                    ForEach(ShortcutExplainerTopic.allCases) { topic in
+                        Text(topic.displayTitle).tag(topic)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(selectedExplainer.summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+
+                selectedExplainer.diagram
+
+                HStack {
+                    Button(selectedExplainer.buttonTitle) {
+                        selectedExplainer.performPrimaryAction(searchText: $searchText, isReordering: $isReordering, proxy: proxy)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Advanced Concepts", systemImage: "sparkles.rectangle.stack")
         }
     }
 
@@ -181,10 +220,12 @@ struct ShortcutsDashboardView: View {
     private var shortcutsCatalogList: some View {
         List {
             quickMenuCard
+                .id(ShortcutScrollTarget.rightClickMenu)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
 
             reorderControlBar
+                .id(ShortcutScrollTarget.catalogTop)
                 .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 6, trailing: 0))
                 .listRowSeparator(.hidden)
 
@@ -1651,6 +1692,72 @@ struct ShortcutsDashboardView: View {
             return "Desktop Move (Experimental)"
         default:
             return group
+        }
+    }
+}
+
+private enum ShortcutScrollTarget: String, Hashable {
+    case rightClickMenu
+    case catalogTop
+}
+
+private enum ShortcutExplainerTopic: String, CaseIterable, Identifiable {
+    case rightClickMenu
+    case layoutOutcomes
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .rightClickMenu: return "Right-Click Menu"
+        case .layoutOutcomes: return "Layout Outcomes"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .rightClickMenu:
+            return "Pin a few high-frequency actions so they appear when you right-click the TilePilot menu bar icon."
+        case .layoutOutcomes:
+            return "Some layout actions leave windows floating, while others end with windows tiled. The names now say which outcome to expect."
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+        case .rightClickMenu: return "Jump to Right-Click Menu"
+        case .layoutOutcomes: return "Browse Layout Actions"
+        }
+    }
+
+    @ViewBuilder
+    var diagram: some View {
+        switch self {
+        case .rightClickMenu:
+            RightClickMenuExplainerDiagram()
+        case .layoutOutcomes:
+            LayoutOutcomeExplainerDiagram()
+        }
+    }
+
+    func performPrimaryAction(
+        searchText: Binding<String>,
+        isReordering: Binding<Bool>,
+        proxy: ScrollViewProxy
+    ) {
+        switch self {
+        case .rightClickMenu:
+            searchText.wrappedValue = ""
+            isReordering.wrappedValue = false
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(ShortcutScrollTarget.rightClickMenu, anchor: .top)
+            }
+        case .layoutOutcomes:
+            searchText.wrappedValue = ""
+            isReordering.wrappedValue = false
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(ShortcutScrollTarget.catalogTop, anchor: .top)
+            }
         }
     }
 }

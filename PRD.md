@@ -1,589 +1,289 @@
-# TilePilot (GUI for yabai/skhd) - Product Requirements Document (v1.2)
+# TilePilot - Product Requirements Document (v1.3)
 
 ## Document Control
-- Version: 1.2
-- Date: 2026-02-26
-- Status: Active development (foundation shipped, major product cycle replanned)
+- Version: 1.3
+- Date: 2026-03-27
+- Status: Active development (bundled-helper baseline shipped)
 - Platform: macOS (direct distribution, non-App-Store)
-
-### Breaking UX / Shortcut Convention Change (2026-02-26)
-- Recommended directional shortcut cluster moved from `HJKL` to `IJKL` for focus/move/resize workflows.
-- This is a user-facing breaking change for users who adopted prior `HJKL` defaults/examples.
-- Product copy, shortcut explainers, and docs should treat `IJKL` as the primary convention going forward.
 
 ---
 
 ## 1) Product Summary
 
-TilePilot is a native macOS menu bar app that adds a click-first control layer on top of `yabai` and `skhd`.
-It improves observability, reliability, and ease of use without replacing the underlying window manager engine.
+TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical for daily use through:
+- live visibility into desktops and windows
+- click-first actions
+- safe config management
+- guided setup and recovery
 
 ### North Star
-- Keep `yabai/skhd` as the engine.
-- Enable click-first operation and gradual shortcut learning.
-- Never fake state when `yabai` is degraded, incompatible, or uncertain.
+- Keep `yabai` and `skhd` as the runtime engine.
+- Make the product usable without terminal-first habits.
+- Prefer truthful degraded states over optimistic but wrong UI.
+- Use user language first: desktops, windows, floating, tiled, right-click menu.
 
-### Strategy Note (v1.2)
-- Foundation/recovery work is largely built and should be treated as a shipped baseline.
-- The next major cycle should prioritize finishing product workflows (especially Actions) and improving discoverability/usability for powerful features.
-- Continue reducing jargon/noise in user-facing surfaces; show internals only when useful.
-- Keep capability detection and recovery logic as infrastructure, not the product "headline."
+### Locked Product Decisions
+- End users should not need Homebrew or Xcode Command Line Tools.
+- TilePilot ships bundled `yabai` and `skhd` helpers and installs/manages them per-user.
+- Guided Setup is the primary onboarding and recovery flow.
+- Unsupported scripting-addition / SIP-dependent features are not part of the supported product path.
+- MegaMap screenshots are memory-only. They are not persisted to disk.
+- `Actions` and `Shortcuts` are one combined product surface.
 
 ---
 
-## 1.1) Implementation Snapshot (As Built vs Planned)
+## 2) Current Product State
 
-### Completed / Mostly Implemented
-- Native menu bar app shell + main window (`TilePilot`) with left-click/right-click split.
-- Capability/health checks, setup checks, diagnostics export, command log.
-- Fresh Mac dependency bootstrap flow (Homebrew / `yabai` / `skhd`) via Terminal installer helper.
-- Live `yabai` polling + degraded mode/fallback view.
+## 2.1 Shipped Baseline
+- Native menu bar app shell with left-click main window and right-click action menu.
+- Main tabs:
+  - `Overview`
+  - `Behaviors`
+  - `Actions & Shortcuts`
+  - `Appearance`
+  - `Config Files`
+  - `System`
+- Bundled helper install and management:
+  - install bundled helpers into the user account
+  - manage per-user LaunchAgents
+  - start/restart helper services in-app
+- Guided Setup:
+  - auto-opens when essential setup is incomplete
+  - manual reopen from `System` and the menu bar
+  - covers helper install, helper services, Accessibility, Start at Login, Mission Control review, and optional Screen Recording for MegaMap
+- Live state:
+  - displays, desktops, windows
+  - degraded-mode handling when `yabai` is unavailable or unreliable
+  - desktop overlays and mini-map views
+- MegaMap:
+  - screenshot-based desktop view
+  - RAM-only capture cache
+  - optional Screen Recording for real screenshots
+  - synthetic fallback when Screen Recording is unavailable
 - Window behavior controls:
-  - global default (float-by-default vs auto-tile)
-  - hover focus (`focus_follows_mouse`)
-  - per-app `Never Tile` / `Always Tile`
-  - managed `yabairc` section + backups
-- Focused window runtime actions (tile/float/toggle).
-- Shortcut viewer (`skhdrc` parsing) and safe `skhdrc` managed-section editor.
-- Developer packaging flow:
-  - `/Applications/TilePilot.app`
-  - hi-res icon bundled
-  - Developer ID signing supported
+  - desktop tiling on/off
+  - app defaults
+  - app rules
+  - hover focus
+  - cursor follows focus
+  - yabai mouse dragging/drop settings
+  - global tiling spacing controls
+- Unified actions and shortcuts:
+  - feature-backed actions
+  - imported `skhdrc` entries
+  - pinning to the right-click menu
+  - shortcut recording and editing
+- Appearance controls:
+  - badges
+  - outline overlay
+  - outline width
+  - global tiling spacing controls
+- Config management:
+  - managed `yabairc` / `skhdrc` sections
+  - backups and restore flows
+  - raw file editing in `Config Files`
+- Signed/notarized DMG release flow.
 
-### Partially Implemented / Needs Product Finish
-- **Actions tab**: foundational actions and gating exist, but catalog/organization/copy/discoverability are incomplete.
-- **Quick access menu**: improved and simplified, but still needs long-term curation and context-aware entries.
-- **Main view (`TilePilot`)**: live map exists, but "find a window / act on it quickly" workflows are still weak.
-- **System tab polish**: unified checks are in place, but copy and progressive disclosure still need refinement over the next cycle.
+## 2.2 Important Recent Behavior Decisions
+- Main layout actions now use outcome-based naming:
+  - `Float All Windows on This Desktop`
+  - `Tile All Windows on This Desktop`
+  - `Arrange Windows into a Floating Grid`
+  - `Retile Windows into a Balanced Tiled Layout`
+  - `Rebalance Tiled Window Sizes`
+- Legacy `Auto Layout` naming is no longer a primary concept.
+  - old aliases map to the floating-grid action
+- Legacy `bootstrap.sh` is treated as a reset/helper script, not a normal first-class layout action
+- Map cleanup hides limited/minimized/helper/backdrop junk when enabled
+- MegaMap should reuse last in-memory captures within the current app session only
 
-### Not Yet Implemented (High-Value Next Cycle)
-- Visual explainers/onboarding for advanced features (one concept at a time).
-- Strong "feature discovery" UX tied to real user problems ("Why do my windows move?" / "How do I keep this app floating?").
-- Finished `Actions` product experience (grouping, labels, macros, learnability, quick access integration).
-- Better search/filter/focus workflows in the main `TilePilot` view.
-
----
-
-## 2) Problem Statement
-
-Current `yabai/skhd` users face:
-- Hard-to-memorize shortcuts.
-- Invisible or ambiguous WM state.
-- Unclear recovery when permissions/services degrade.
-- Setup drift after macOS updates or version mismatches.
-- Fear of editing config files directly.
-
-TilePilot addresses this with:
-- Live state visibility.
-- Clickable common actions.
-- Searchable shortcut reference.
-- Health + compatibility diagnostics with guided recovery.
-- Safe, reversible config editing for known-safe sections.
-
----
-
-## 3) Goals and Non-Goals
-
-## Goals (v1)
-- Operate core workflows without shortcut memorization.
-- Provide trustworthy live state and health/capability status.
-- Detect common setup and compatibility blockers early (permissions, Mission Control, scripting-addition constraints).
-- Clearly communicate degraded mode and limit risky actions.
-- Make essential config edits safe and reversible.
-- Keep UI responsive even during command failures/recovery.
-- Make advanced `yabai` features teachable through progressive, visual explainers.
-- Prefer user language (desktops/windows/actions) over engine jargon in primary surfaces.
-
-## Non-Goals (v1)
-- Full parser/editor for all `skhd` grammar.
-- Full graphical rule engine for all `yabai` rule flags.
-- Exact grid tiling guarantees beyond engine limits.
-- Full drag-and-drop workspace designer.
-- Automatic repair of SIP/scripting-addition constraints beyond guided steps.
+## 2.3 Known Product Gaps
+- Overview still needs stronger find-and-act workflows for large desktop/window sets
+- MegaMap capture timing and desktop association need more hardening under fast desktop switching
+- The combined `Actions & Shortcuts` surface is much better, but still needs curation and simplification
+- Some helper or transient windows still require ongoing heuristics to avoid visual junk in maps/overlays
+- Learning/discoverability is still mostly copy-driven; visual explainers are still missing
 
 ---
 
-## 4) Priority Profiles (Subject to User Priorities)
+## 3) Product Requirements (Current)
 
-The product should support different build order priorities without changing the core architecture.
+## 3.1 Setup and Recovery
+- TilePilot must install and manage bundled helper binaries without requiring Homebrew, Terminal, or Command Line Tools on end-user machines.
+- Guided Setup must be the primary path whenever essential requirements are missing.
+- Essential setup blockers:
+  - helpers not installed
+  - helper services not running
+- Recommended but non-blocking setup items:
+  - Accessibility review
+  - Start at Login
+  - Mission Control review
+- Optional feature-specific setup:
+  - Screen Recording for MegaMap screenshots
+- Returning from external settings or permission prompts must trigger automatic recheck.
 
-### A. Support-Load Reduction First (Default v1.1 Plan)
-- Build Doctor/capability detection, setup checklist, recovery UX, and diagnostics export before advanced actions.
+## 3.2 Live State and Degraded Truthfulness
+- TilePilot must prefer correct live state over stale or optimistic assumptions.
+- If `yabai` is unavailable or unreliable, the UI must say so directly and route users to Guided Setup or recovery actions.
+- Windows shown in maps/overlays should exclude obvious junk surfaces when the cleanup setting is enabled:
+  - minimized windows
+  - app-hidden windows
+  - stale/helper windows
+  - backdrop/dialog surfaces
+  - transient child dialogs when a larger real sibling exists
 
-### B. New-User Adoption First
-- Build onboarding/setup checklist + shortcut coach + basic safe actions earlier.
+## 3.3 Main Window / Overview
+- `Overview` is the primary daily-use surface.
+- It should support:
+  - seeing displays and desktops in a way that matches physical layout vertically
+  - understanding which desktops and windows are active
+  - jumping quickly to desktops/windows
+  - obvious recovery when helpers or permissions are missing
+- Degraded Overview states must always show a visible recovery path, not subtle or low-contrast links.
 
-### C. Power-User Productivity First
-- Build live state + actions earlier, but keep minimal health gating and diagnostics in foundation.
+## 3.4 MegaMap
+- MegaMap is a manual, higher-resolution desktop overview.
+- Real screenshots require Screen Recording.
+- Without Screen Recording, MegaMap must show a clear synthetic fallback.
+- Screenshots must remain in RAM only and never be persisted to disk.
+- MegaMap should reuse already captured screenshots within the current app session.
+- Each desktop tile should show capture age in relative form.
+- Refresh actions must be explicit:
+  - refresh one desktop
+  - refresh all desktops
 
----
+## 3.5 Actions and Shortcuts
+- `Actions & Shortcuts` is the single product surface for:
+  - first-class feature actions
+  - imported shortcuts
+  - right-click menu pinning
+- User-facing action naming must describe outcomes, especially final floating vs tiled state.
+- The right-click menu should be curated around frequent actions and clearly represented in-app.
+- Legacy shortcut/script entries should resolve to current user-facing names where TilePilot can confidently map them.
+- Unknown custom commands may remain visible, but should not degrade the clarity of first-class actions.
 
-## 5) Target Users
+## 3.6 Behaviors and Appearance
+- `Behaviors` owns behavior semantics:
+  - desktop tiling
+  - app rules/defaults
+  - focus/cursor behavior
+  - yabai mouse drag/drop behavior
+- `Appearance` owns visual and layout presentation controls:
+  - badges
+  - outline overlay
+  - outline width
+  - screen edge padding
+  - gap between tiled windows
+- UI wording in both tabs should stay short, concrete, and outcome-focused.
 
-- Existing `yabai/skhd` users who want better visibility and safer controls.
-- New users adopting tiling on macOS who prefer click-first onboarding.
-- Power users who want quick macro actions without scripting everything.
-
----
-
-## 6) Scope
-
-## In Scope (v1)
-- Menu bar app + TilePilot window.
-- First-run setup/recovery checklist ("Doctor").
-- Capability detection and compatibility summary (machine/OS/tooling).
-- Live WM state (displays/spaces/windows).
-- Action buttons for common operations.
-- Shortcut reference parsed from `~/.config/skhd/skhdrc`.
-- Health checks:
-  - Accessibility permission status.
-  - `yabai`/`skhd` daemon running state.
-  - Mission Control settings required/recommended for reliable behavior.
-  - Scripting-addition availability constraints (with reason categories).
-  - macOS / `yabai` / `skhd` version visibility and warnings.
-- Safe config editing for known sections and helper args.
-- Event + command log (last N entries).
-- Diagnostics export (sanitized, issue-report friendly).
-
-## Out of Scope (v1)
-- Full `.yabairc` and `skhdrc` semantic editor.
-- Full visual tiling tree editor.
-- Auto mode that continuously overrides user intent.
-- In-app SIP modification or privileged installers.
-
----
-
-## 7) User Experience & Information Architecture
-
-## Menu Bar Quick Menu (always available)
-- Minimal, high-frequency quick access only (top-level):
-  - Open TilePilot
-  - Open Window Behavior
-  - Show Shortcuts
-  - Focused window float/tile actions
-  - Manual tiling / hover-focus recovery toggles
-  - Align tiles (balance)
-- Setup/diagnostics/admin actions are moved into a secondary submenu (not top-level clutter).
-- The menu should be curated as a daily-use surface, not a dump of every feature.
-
-## First-Run / Recovery Wizard (v1)
-- Checklist-based onboarding flow.
-- Detects missing permissions/settings and links to the right System Settings panes.
-- Separates:
-  - "Core features available now"
-  - "Advanced features unavailable on this setup"
-- Re-runnable anytime from menu bar and the System tab.
-
-## TilePilot Window Tabs
-1. **TilePilot** (main view)
-   - Live map (Displays -> Desktops -> Windows).
-   - Focused window controls.
-   - Problem banners only when action is needed (not constant status chatter).
-   - Future priority: search/find window + quick actions from list rows.
-2. **Actions**
-   - Large click-first action cards.
-   - Capability-gated actions with explicit disabled reasons.
-   - Needs finish cycle: better grouping/copy, macro explainers, and stronger quick-menu integration.
-3. **Shortcuts**
-   - Searchable, categorized shortcut reference from `skhdrc`.
-   - Should also be a "learn the stack" surface, not only a raw parser output.
-   - Script shortcuts must use user-facing action copy:
-     - title from cleaned filename (no shell extension / dash-noise)
-     - description from first script header comment line (`# ...`) when available
-     - no `Runs script ...` phrasing in primary UI
-   - Future priority: visual shortcut explainers and pinning selected shortcuts to quick access.
-4. **System**
-   - Unified essentials checklist: install/runtime/permissions/Mission Control/scripting-addition.
-   - Inline fix actions (`Install`, `Start`, `Open Settings`, `Fix`, `Recheck`).
-   - Advanced sections (collapsed by default):
-     - raw file editing (`yabairc`, `skhdrc`, scripts)
-     - managed `skhdrc` section editor
-     - diagnostics command log/export
+## 3.7 Config Safety
+- TilePilot-managed config edits must preserve user content outside managed sections.
+- Backups and restore must remain available through the product UI.
+- First-save behavior must backfill existing unmanaged config when adopting new controlled settings such as spacing or yabai mouse controls.
 
 ---
 
-## 8) Functional Requirements
+## 4) Decisions That Made Older PRD Items Irrelevant
 
-## 8.1 Doctor + Capability Detection (New v1.1 Priority)
-- On launch and on-demand, detect:
-  - macOS version/build (best effort).
-  - CPU architecture.
-  - `yabai` version (if installed).
-  - `skhd` version (if installed).
-  - Accessibility permission status.
-  - `yabai` daemon running state.
-  - `skhd` daemon running state.
-  - Mission Control settings relevant to `yabai` reliability.
-  - scripting-addition availability and failure category (when detectable).
-- Capabilities must be represented as typed statuses, not a single boolean.
-- The app must distinguish:
-  - `available`
-  - `degraded`
-  - `blocked`
-  - `unsupported`
-  - `unknown`
-- Each blocked/degraded capability should include:
-  - short reason code
-  - user-readable explanation
-  - suggested recovery step(s)
+The following older assumptions are no longer current product direction:
 
-## 8.2 Live State
-- Query:
-  - `yabai -m query --windows`
-  - `yabai -m query --spaces`
-  - `yabai -m query --displays`
-- Fallback source (degraded context only):
-  - `CGWindowListCopyWindowInfo` monitor-level totals.
-- State must include source quality metadata:
-  - `source`: `yabai | fallback | stale`
-  - `lastUpdatedAt`
-- Window identity must use window ID as primary key (not title).
-- If capability checks indicate unsupported/blocked features, live state UI must reflect confidence limits.
+- **Homebrew / Terminal installer as the primary setup path**
+  - replaced by bundled helper installation
+- **Separate `Actions` tab**
+  - replaced by combined `Actions & Shortcuts`
+- **SIP / scripting-addition repair as a supported setup goal**
+  - removed from supported product path
+- **Persistent MegaMap screenshot cache on disk**
+  - explicitly rejected for privacy reasons
+- **`Auto Layout` as a primary product action name**
+  - retired in favor of direct floating-grid naming
+- **`Bootstrap` as a normal layout action**
+  - now treated as legacy reset plumbing only
 
-## 8.3 Polling + Event Ingestion
-- Periodic polling tiers:
-  - Foreground/visible: 600-900 ms.
-  - Background: 2-3 s.
-- Event-triggered refresh with debounce/coalescing.
-- Post-action immediate refresh.
-- No blocking shell calls on main thread.
-- Polling errors must be categorized (timeout, parse, command-not-found, permission, other).
-
-## 8.4 Actions (v1 Catalog)
-- Focus window direction.
-- Move window direction.
-- Focus space N.
-- Send window to space N.
-- `space --balance`
-- `space --layout bsp` + `space --balance`
-- `space --layout stack`
-- `window --toggle float`
-- One-shot "readable current space".
-- One-shot browser relief (`max windows per lane` setting).
-
-## 8.5 Shortcut Copy + Script Metadata (v1.2)
-- For script-based shortcut commands, parse only the first command token as script path.
-- Supported script path forms:
-  - absolute (`/Users/...`)
-  - home-relative (`~/...`)
-  - relative (`./...`, resolved from `~/.config/skhd`)
-- Row copy policy:
-  - title = cleaned filename (`disable-tiling-all-visible.sh` -> `Disable Tiling All Visible`)
-  - description = first comment header line in the first 20 lines
-  - fallback description = cleaned filename-derived sentence when file/comment is unavailable
-- If normalized title and description are equivalent, hide the second line to avoid duplicate copy.
-- Action labels and descriptions must use user-facing language first; engine commands/jargon are secondary.
-- The `Actions` tab is a core product surface and must be treated as unfinished until:
-  - action grouping is curated for daily use
-  - action copy explains outcome (not command syntax)
-  - advanced actions include contextual explainers/examples
-
-## 8.5 Action Availability Contract
-- Every action has:
-  - `enabled` boolean.
-  - `disabledReason` (required if disabled).
-  - `requiredCapabilities` (machine-readable list).
-- In degraded mode, workspace-precise actions are disabled with explicit reason text.
-- If an action command exits successfully but observable state does not change, show "no visible effect" feedback and suggested checks.
-
-## 8.5.1 Quick Access Curation (New v1.2)
-- The menu bar right-click menu must remain intentionally minimal at top level.
-- Top-level items should be limited to high-frequency actions users can reasonably perform many times per day.
-- Setup, diagnostics, system settings, and daemon management actions should be grouped under a secondary submenu.
-- Quick access entries should be reviewed/re-prioritized as major features are added (avoid legacy clutter drift).
-- The right-click menu should show concise context when useful:
-  - current focused window app/title near focused-window actions
-  - explicit "no focused window" state when those actions are unavailable
-- Context lines must support nearby actions and avoid generic status chatter.
-
-## 8.5.2 Visual Feature Explainers (New v1.2)
-- Add lightweight visual explainer modules/cards for advanced features, one concept at a time (examples):
-  - Manual Tiling Mode
-  - Hover Focus
-  - App Rules (`Default` vs `Never Tile` vs `Always Tile`)
-  - Browser Relief / layout macros
-- Each explainer should include:
-  - what problem it solves
-  - before/after behavior (visual or diagrammatic)
-  - one clear action button (enable/open/settings)
-- Explain features in user language first; advanced jargon may appear in secondary detail text.
-
-## 8.6 Shortcuts
-- Parse `~/.config/skhd/skhdrc` line-by-line.
-- Build `ShortcutEntry` list: combo, command, category, source line.
-- Must tolerate malformed lines without crashing.
-- Search + copy affordances.
-- Flag entries that reference helper scripts/paths that no longer exist (best effort).
-
-## 8.6.1 Shortcut Explainability (New v1.2 Priority)
-- Each shortcut should have a simple, plain-language explanation where possible.
-- Explain outcomes in user terms first, for example:
-  - "Focus the window to the left"
-  - "Send the current window to Desktop 2 and switch to it"
-  - "Toggle the current window between tiled and floating"
-- If a shortcut runs a custom script/command that cannot be confidently translated, show:
-  - a safe fallback explanation (e.g. "Runs custom helper script")
-  - the raw command in secondary detail text.
-
-## 8.6.2 Shortcut Visual Explainers (New v1.2 Priority)
-- Provide minimalist visual explainers for common shortcut categories (focus, move, resize, layout, desktop send/focus).
-- Prefer reusable visual components/templates over hand-designing every shortcut image.
-- Visual explainers should be:
-  - simple
-  - consistent
-  - fast to understand at a glance
-- These visuals should support learning, not replace the shortcut text.
-
-## 8.6.3 Pinned Shortcuts / Quick Menu Integration (New v1.2 Priority)
-- Users should be able to pin shortcuts from the `Shortcuts` view to the menu bar right-click quick menu.
-- Pinned shortcuts serve two use cases:
-  - click-to-run frequent actions
-  - memory support while learning shortcut combos
-- Pinned list should be bounded (recommended 6-10) to prevent menu clutter.
-- Pinned shortcut entries should show:
-  - shortcut combo
-  - short plain-language action label
-  - disabled reason when unavailable
-- Distinguish runnable shortcuts vs reference-only shortcuts when safety/compatibility is uncertain.
-
-## 8.7 Config Editing (Safe Sections Only)
-- Editable scope:
-  - Known hotkeys block.
-  - Known helper script args (`max windows per lane`).
-- Unknown lines outside safe sections preserved byte-for-byte.
-- Save pipeline:
-  1. Create backup.
-  2. Atomic write.
-  3. Basic syntax sanity check.
-  4. Restart affected service.
-  5. System verify.
-  6. Auto-rollback on failure.
-- One-click restore options available.
-- Show diff preview before save (within editable scope only).
-
-## 8.8 System Health + Recovery
-- System health state includes:
-  - Accessibility status.
-  - `yabai` running.
-  - `skhd` running.
-  - Mission Control checks.
-  - scripting-addition status (typed, not boolean-only).
-  - macOS / tool version summary and compatibility warnings.
-  - degraded flag.
-- Recovery actions:
-  - Restart daemons.
-  - Open relevant System Settings panes.
-  - Refresh system checks.
-  - Re-run Doctor checklist.
-- Event/Command log shows last N:
-  - command, duration, stdout/stderr snippets, status/error type.
-
-## 8.9 Diagnostics Export (New v1.1)
-- Export a sanitized diagnostics bundle/report containing:
-  - SystemProfile (OS version, arch)
-  - tool versions (if available)
-  - capability matrix + statuses
-  - health snapshot
-  - recent command log metadata and short stderr excerpts
-  - degraded-mode state and trigger reason
-- Must avoid exporting full config contents by default.
-- Provide "Copy issue-ready summary" text output for quick sharing.
+These should not drive new roadmap work unless product direction changes again.
 
 ---
 
-## 9) Degraded Mode Requirements (Critical)
+## 5) Suggested Next Steps
 
-## Trigger
-Enter degraded mode when `yabai` window total is materially below fallback count for `N` consecutive samples (anti-flap, recommended `N=3`).
+## 5.1 Priority 1 - Overview Workflow Upgrade
+- Add strong search/filter in `Overview` for app/title/window ID
+- Add row-level quick actions where useful:
+  - focus
+  - jump to desktop
+  - float
+  - tile
+  - bring to front
+- Add a lower-noise “current desktop only” or similar focused mode
 
-## Recovery
-Exit degraded mode after `M` consecutive healthy samples (recommended `M=5`).
+Why:
+- This is the biggest remaining daily-use gap
+- The core data and actions already exist
+- It improves discoverability without expanding setup complexity
 
-## Behavior in Degraded Mode
-- Show persistent degraded banner.
-- Show monitor-level counts from fallback source.
-- Do not claim reliable workspace mapping.
-- Disable workspace-level misleading actions.
-- Keep only actions with safe confidence.
-- Show explicit guided recovery steps.
-- Surface compatibility/update warnings if capability checks indicate likely OS-update or scripting-addition-related breakage.
+## 5.2 Priority 2 - Actions & Shortcuts Curation
+- Tighten grouping and reduce wording drift
+- Distinguish clearly between:
+  - first-class TilePilot actions
+  - imported custom shortcuts
+  - legacy aliases
+- Add better descriptions/examples for high-value layout actions and mouse controls
+- Keep right-click menu editing obvious and bounded
 
----
+Why:
+- The surface now works, but still feels heavier than it should
+- This is the most visible “product polish” gap after setup
 
-## 10) Data Model (v1)
+## 5.3 Priority 3 - MegaMap Reliability Hardening
+- Continue improving desktop-switch capture timing
+- Add better internal diagnostics for capture-to-desktop mismatches
+- Keep fallback behavior explicit when a desktop could not be refreshed
+- Preserve privacy constraint: no disk caching
 
-- `SystemProfile { macOSVersion, macOSBuild?, arch, yabaiVersion?, skhdVersion?, detectedAt }`
-- `CapabilityState { key, status, reasonCode?, message, remediationSteps[] }`
-- `DisplayState { id, name, focused, windowCount, source, lastUpdatedAt }`
-- `SpaceState { index, label?, displayId, focused, visible, layout, windowCount, source, lastUpdatedAt }`
-- `WindowState { id, app, space, display, floating, title, source, lastUpdatedAt }`
-- `ShortcutEntry { combo, command, category, sourceLine }`
-- `MissionControlCheck { key, expected, actual?, status, message }`
-- `HealthState { accessibilityOK, yabaiRunning, skhdRunning, degraded, missionControlChecks[], capabilities[], compatibilityWarnings[] }`
-- `ActionAvailability { actionId, enabled, disabledReason?, requiredCapabilities[] }`
-- `EventLogEntry { timestamp, type, payloadSummary }`
-- `CommandLogEntry { id, command, startedAt, endedAt?, durationMs?, exitStatus, stdout?, stderr?, errorType? }`
-- `DiagnosticsReport { generatedAt, systemProfile, health, capabilities, recentCommands, degradedReason? }`
+Why:
+- MegaMap is valuable, but users notice correctness bugs immediately
 
----
+## 5.4 Priority 4 - Visual Explainers for Advanced Concepts
+- Add compact explainers for:
+  - desktop auto-tiling
+  - app rules
+  - hover focus
+  - right-click menu pinning
+  - floating vs tiled outcomes for layout actions
 
-## 11) Non-Functional Requirements
+Why:
+- The product still depends too much on text for teaching
+- These explainers should clarify concepts without reintroducing jargon
 
-- Menu opens quickly under load (target <150 ms).
-- First useful state appears in the TilePilot window within 1 second.
-- First Doctor result appears within 2 seconds on a healthy machine.
-- All command execution off main thread.
-- Robust timeout and cancellation handling.
-- No crashes on malformed `skhdrc` lines or transient query failures.
-- Clear uncertainty and stale-state labeling in UI.
-- Diagnostics export completes without blocking UI interaction.
+## 5.5 Priority 5 - Ongoing Window/Junk Heuristic Hardening
+- Keep tightening overlay/map exclusion heuristics for:
+  - transient dialogs
+  - backdrop surfaces
+  - app helper windows
+  - weird window-manager mismatches
 
----
-
-## 12) Success Metrics (v1)
-
-- User can complete core workflow without memorizing shortcuts.
-- 100% of unavailable actions show explicit disable reason.
-- Config save failures are auto-rolled back and recoverable in one click.
-- Degraded state is visible and does not expose misleading workspace controls.
-- Reduced "what is happening?" complaints via event/command visibility.
-- First-run users can identify blocked prerequisites from the in-app checklist without opening external docs.
-- Diagnostics export produces issue-ready summaries that reduce back-and-forth for common setup failures.
-
----
-
-## 13) Milestones and Timeline (Replanned v1.2 - Next Major Cycle)
-
-### Baseline (Already Built / In App)
-- Foundation shell, command runner, setup/health checks, diagnostics export.
-- Live state polling + degraded mode fallback.
-- Window Behavior (manual tiling / hover focus / app rules) + managed `yabairc` editing.
-- Shortcuts and Config MVPs.
-- Basic Actions UI and menu bar quick access.
-
-### Next Major Cycle Goal
-Finish TilePilot as a coherent daily-use product by improving:
-- `Actions` completeness and learnability
-- visual explainers for advanced features
-- main-view find/control workflows
-- quick access curation and contextual shortcuts
-
-### Proposed next-cycle sequence (Estimate: 12-18 dev days)
-
-1. **Actions Completion Pass (3-4d)**
-   - Curate action groups for real user tasks (not command buckets only).
-   - Rewrite action copy to describe outcomes in user language.
-   - Add/finish high-value macros (browser relief, readable layouts, common recovery actions).
-   - Improve per-action disabled reasons and "why nothing changed" feedback.
-
-2. **Shortcuts Learning Upgrade (2-4d)**
-   - Add plain-language explanations for shortcut entries.
-   - Add pin/unpin shortcut controls.
-   - Add pinned shortcuts section to the quick menu (bounded and curated).
-   - Add click-to-run support for safe shortcut actions.
-
-3. **Visual Explainers v1 (2-3d)**
-   - Add explainer cards/modules for:
-     - Manual Tiling Mode
-     - Hover Focus
-     - App Rules
-     - shortcut categories (focus/move/layout)
-     - 1-2 powerful layout macros
-   - Include clear before/after explanation and one-click entry action.
-
-4. **Main View (`TilePilot`) Workflow Upgrade (2-3d)**
-   - Add search/filter for finding a window by app/title.
-   - Add row actions (`Focus`, `Tile`, `Float`, `Toggle`) where appropriate.
-   - Add optional "current desktop only" mode for lower noise.
-   - Continue removing non-actionable status/debug clutter.
-
-5. **Quick Access Menu Curation Pass (1-2d)**
-   - Context-aware top-level quick items (focused window present vs not present).
-   - Add focused-window context line near focused-window actions.
-   - Integrate user-pinned shortcuts (bounded list).
-   - Promote only frequent actions.
-   - Keep setup/diagnostics hidden behind submenu and trim further if needed.
-
-6. **Teachability + Copy Sweep (1-2d)**
-   - Wording consistency across tabs (`desktops`, `float`, `auto-tile`, etc.).
-   - Clarify advanced terms only where needed.
-   - Ensure UI answers "Do I care?" and "What should I do next?"
-
-7. **Reliability / UX Hardening Pass (2-4d)**
-   - Event-driven refresh improvements (or quieter smarter polling).
-   - Edge-case fixes for app-name matching and window visibility quirks.
-   - Final regression pass on setup/bootstrap/window behavior persistence.
-
-### Alternate priority adjustments
-- **Adoption-first:** move Visual Explainers to milestone 1 (parallel with Actions completion).
-- **Power-user-first:** move Main View Workflow Upgrade ahead of Visual Explainers, but keep copy cleanup in same cycle.
+Why:
+- This is a recurring correctness issue in real usage
+- It should remain narrow, generic, and non-app-specific where possible
 
 ---
 
-## 14) Testing Plan
+## 6) Non-Goals (Still Intentionally Out of Scope)
 
-## Unit
-- `skhdrc` parser: valid/malformed lines.
-- Config merge/write/rollback logic.
-- Degraded detection and anti-flap transitions.
-- Action availability derivation from capability matrix.
-- Error categorization and reason-code mapping.
-
-## Integration
-- Command timeout/failure behavior.
-- Daemon restart + health refresh.
-- Atomic write failure and rollback path.
-- Diagnostics export sanitization (no full config by default).
-- Doctor rerun after settings changes.
-
-## Manual
-- Permission denied scenarios.
-- Mission Control settings misconfiguration scenarios.
-- Monitor add/remove and space transitions.
-- Crowded desktop relief workflows.
-- Degraded mode UX and recovery completion.
-- macOS update / scripting-addition broken-state messaging (simulated if needed).
+- Full semantic editor for arbitrary `yabairc` / `skhdrc`
+- Continuous automation that overrides user intent
+- Full graphical tiling-tree editor
+- In-app SIP modification or Recovery Mode workflows
+- Shipping advanced scripting-addition-dependent desktop/window features as part of the core supported product
+- Persisting MegaMap screenshots to disk
 
 ---
 
-## 15) Release & Distribution (Direct Distribution)
+## 7) Success Criteria for the Next Cycle
 
-- Signed Developer ID app.
-- Notarized and stapled release artifact.
-- Initial format: signed `.dmg`.
-- Manual update checks for v1.
-- Publish release notes + checksum.
-- Clean-machine install verification before public release.
-- Verify first-run checklist behavior on a clean machine.
-
----
-
-## 16) Default Settings (v1)
-
-- Manual-first mode: **ON**
-- Auto-relief: **OFF** (one-shot only)
-- Max windows per lane: **6**
-- Essential shortcuts surfaced first: **8-10 actions**
-- Diagnostics log retention: **Last 200 commands/events** (configurable later)
-
----
-
-## 17) Risks and Mitigations
-
-- **State inconsistency:** source labeling + anti-flap degraded detection.
-- **Permission confusion:** explicit health checklist + one-click recovery.
-- **Mission Control misconfiguration:** dedicated checks + plain-language explanations.
-- **Scripting-addition / macOS update churn:** typed capability statuses + compatibility warnings + diagnostics export.
-- **Config corruption risk:** transactional save + automatic rollback.
-- **Event bursts/races:** debounced/coalesced refresh + periodic polling fallback.
-- **False-positive capability detection:** conservative statusing (`unknown` over incorrect certainty) + log-backed diagnostics.
-
----
-
-## 18) Future Considerations (Post-v1)
-
-- Expanded rule management UI.
-- Optional auto-update channel.
-- More advanced macro editor.
-- Enhanced visual layout inspector/tree view.
-- Compatibility knowledge-base updates (local or remote metadata).
+- New or migrated users can recover from missing helpers/permissions using Guided Setup without terminal knowledge
+- Users can find and act on a specific window quickly from `Overview`
+- Main layout actions are understandable without prior `yabai` vocabulary
+- The right-click menu feels intentionally curated, not accidental
+- MegaMap remains privacy-safe while becoming more reliable within a session
+- The product stops accumulating legacy naming that conflicts with current behavior

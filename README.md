@@ -4,7 +4,7 @@
 
 # TilePilot
 
-TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical for everyday use.
+TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical for everyday use without a terminal-first setup flow.
 
 ## What You Can Do
 
@@ -12,8 +12,9 @@ TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical f
 - Control default behavior (`Manual Tiling`, `Hover Focus`, `Cursor Follows Focus`)
 - Set per-app rules (`Never Tile`, `Always Tile`)
 - Learn and run shortcuts from a GUI
+- Use Guided Setup when helpers, permissions, or services drift
+- Use MegaMap and window overlays for live desktop visibility
 - Edit `yabairc`, `skhdrc`, and helper scripts in one place
-- Recover quickly when setup or services drift
 
 ## Requirements
 
@@ -21,9 +22,10 @@ TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical f
 
 ## Main UI Areas
 
-- `TilePilot` (main view): windows/desktops overview + focused window controls
-- `Behavior`: desktop tiling controls, app defaults/rules, focus & cursor controls
-- `Actions & Shortcuts`: unified controls list with shortcut learning + quick actions
+- `Overview`: windows/desktops overview + focused window controls
+- `Behaviors`: desktop tiling controls, app defaults/rules, focus & cursor controls
+- `Actions & Shortcuts`: unified controls list with shortcut learning + right-click menu pinning
+- `Appearance`: overlays and tiling spacing controls
 - `Config Files`: raw editing for `yabairc`, `skhdrc`, and referenced scripts
 - `System`: essentials checklist + direct fix actions
   - Advanced sections (collapsed by default): managed `skhdrc` editor, diagnostics logs
@@ -50,35 +52,28 @@ Example:
 
 1. Download the latest DMG from [Releases](https://github.com/nostitos/TilePilot/releases/latest).
 2. Drag `TilePilot.app` into `Applications`.
-3. Open TilePilot and use the `System` tab for first-time setup checks.
+3. Open TilePilot and follow Guided Setup if helpers or permissions are still missing.
 
-## Dependencies
+## First-Time Setup
 
-TilePilot can bootstrap common dependencies on a fresh Mac:
+TilePilot ships with bundled `yabai` and `skhd` helpers and installs/manages them for you.
 
-- `Homebrew`
-- `yabai`
-- `skhd`
+You may still need to approve:
 
-Manual approvals still required:
+- Accessibility for `TilePilot`, `yabai`, and `skhd`
+- Screen Recording if you want real MegaMap screenshots
+- Start at Login if you want TilePilot available after sign-in
 
-- Accessibility permissions (macOS)
-- Some Mission Control settings
-- Optional scripting-addition setup for advanced desktop/window controls
+## Supported Scope
 
-## Desktop Switching Reality (Important)
+TilePilot currently focuses on the supported everyday path:
 
-- On many systems, `yabai -m space --focus` needs yabai scripting addition support.
-- Without scripting addition, direct desktop focus commands can fail even if yabai/skhd are installed.
-- TilePilot falls back to:
-  1. focusing an existing window on the target desktop,
-  2. then macOS Mission Control desktop shortcuts (if configured).
-- For reliable no-SIP desktop jumps, set macOS shortcuts in:
-  `System Settings -> Keyboard -> Keyboard Shortcuts -> Mission Control`.
+- bundled helper install and recovery
+- floating/tiled window actions
+- right-click menu actions and shortcuts
+- MegaMap with optional Screen Recording
 
-## Scripting Addition + SIP (Advanced)
-
-Some advanced desktop actions (especially moving windows between desktops) depend on yabai’s scripting addition, which may require partial SIP changes depending on macOS version/hardware; TilePilot can launch repair/install helpers, but it cannot change SIP or bypass Recovery Mode/security constraints. Review official guidance before enabling it: <https://github.com/koekeishiya/yabai/wiki/Disabling-System-Integrity-Protection>.
+Advanced scripting-addition / SIP-dependent desktop-control workflows are intentionally out of scope for now.
 
 ## Interactive Window Badges
 
@@ -118,6 +113,7 @@ Some advanced desktop actions (especially moving windows between desktops) depen
 - `Arrange Windows into a Floating Grid` keeps windows floating in a packed grid.
 - `Retile Windows into a Balanced Tiled Layout` rebuilds the current desktop into a more even tiled layout.
 - Legacy `bootstrap.sh` is treated as a display/desktop reset helper, not a normal day-to-day layout action.
+- MegaMap screenshots stay in memory only for the current app session and are not written to disk.
 
 ## Developers
 

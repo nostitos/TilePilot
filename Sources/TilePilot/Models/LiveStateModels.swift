@@ -255,6 +255,7 @@ struct OverviewWindowPreview: Identifiable, Sendable, Equatable {
     let floating: Bool
     let runtimeManageable: Bool
     let usesLimitedVisualStyle: Bool
+    let warmPaletteIndex: Int?
     let focused: Bool
     let visible: Bool
     let normalizedX: Double

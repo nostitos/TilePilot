@@ -44,6 +44,32 @@ struct AppearanceDashboardView: View {
                     range: 1 ... 6,
                     isDisabled: !model.showWindowOutlineOverlay
                 )
+
+                AppearanceColorControl(
+                    title: "Tiled Windows",
+                    selection: Binding(
+                        get: { model.tiledOverlayAccentColor.swiftUIColor },
+                        set: { newColor in
+                            if let converted = OverlayAccentColor.from(swiftUIColor: newColor) {
+                                model.setTiledOverlayAccentColor(converted)
+                            }
+                        }
+                    ),
+                    isDisabled: !model.showWindowBadgeOverlay && !model.showWindowOutlineOverlay
+                )
+
+                AppearanceColorControl(
+                    title: "Floating Windows",
+                    selection: Binding(
+                        get: { model.floatingOverlayAccentColor.swiftUIColor },
+                        set: { newColor in
+                            if let converted = OverlayAccentColor.from(swiftUIColor: newColor) {
+                                model.setFloatingOverlayAccentColor(converted)
+                            }
+                        }
+                    ),
+                    isDisabled: !model.showWindowBadgeOverlay && !model.showWindowOutlineOverlay
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
@@ -83,6 +109,32 @@ struct AppearanceDashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             Label("Tiling Layout", systemImage: "rectangle.split.3x1")
+        }
+    }
+}
+
+private struct AppearanceColorControl: View {
+    let title: String
+    @Binding var selection: Color
+    let isDisabled: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+
+            ColorPicker("", selection: $selection, supportsOpacity: false)
+                .labelsHidden()
+                .disabled(isDisabled)
+
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(selection)
+                .frame(width: 28, height: 18)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+
+            Spacer(minLength: 0)
         }
     }
 }

@@ -282,7 +282,8 @@ private struct OverviewMiniWindowFrameLayer: View {
             isFloating: window.floating,
             usesLimitedVisualStyle: window.usesLimitedVisualStyle,
             isFocused: window.focused,
-            isSelected: isSelected
+            isSelected: isSelected,
+            preferredWarmIndex: window.warmPaletteIndex
         )
         let baseLineWidth: CGFloat = isSelected ? 2 : 1.2
         let lineWidth = isHovered ? baseLineWidth * 3 : baseLineWidth

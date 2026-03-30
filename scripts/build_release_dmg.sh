@@ -123,7 +123,7 @@ resolve_sign_identity() {
 }
 
 echo "Building signed release app..."
-"$ROOT_DIR/scripts/package_dev_app.sh" --release --no-install --no-open
+"$ROOT_DIR/scripts/package_dev_app.sh" --release --no-install --no-open --version "$VERSION"
 
 APP_PATH="$DIST_DIR/${APP_NAME}.app"
 if [[ ! -d "$APP_PATH" ]]; then

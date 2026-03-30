@@ -143,9 +143,9 @@ extension AppModel {
                 title: "Review Mission Control Settings",
                 summary: missionControlStatus == .good ? "Mission Control settings look compatible." : "Mission Control settings can affect how reliably macOS desktops behave for TilePilot.",
                 whyItMatters: "Desktop ordering and display grouping need to be predictable for overview and desktop navigation features.",
-                whatToDo: "Open Mission Control settings and confirm TilePilot’s recommended macOS desktop behavior.",
+                whatToDo: missionControlWhatToDo(missionControlChecks),
                 detail: missionControlGuideDetail(missionControlChecks),
-                verificationText: "Recheck after reviewing the settings.",
+                verificationText: "After reviewing the settings, come back to TilePilot and press Recheck. If you change Displays have separate Spaces, macOS may ask you to log out first.",
                 status: missionControlStatus,
                 isBlocking: false,
                 isSkippable: true,
@@ -241,11 +241,11 @@ extension AppModel {
     func refreshSetupGuidePresentationAfterStateChange() {
         if setupGuidePresentationState.isPresented {
             if let selectedKind = setupGuidePresentationState.selectedStepKind,
-               let selected = setupGuideSteps.first(where: { $0.kind == selectedKind }),
-               !selected.isSatisfied {
+               setupGuideSteps.contains(where: { $0.kind == selectedKind }) {
                 return
             }
-            setupGuidePresentationState.selectedStepKind = nextIncompleteSetupGuideStep(after: setupGuidePresentationState.selectedStepKind)?.kind
+
+            setupGuidePresentationState.selectedStepKind = preferredStartingSetupGuideStep(for: setupGuidePresentationState.source)?.kind
             return
         }
 
@@ -327,16 +327,51 @@ extension AppModel {
 
     private func missionControlGuideDetail(_ checks: [MissionControlCheck]) -> String {
         if checks.isEmpty {
-            return "TilePilot has not verified Mission Control settings yet."
+            return "TilePilot has not verified these settings yet. Review them manually if desktop order or multi-display spaces feel wrong."
         }
-        let warnings = checks.filter { $0.status == .warning }
-        if !warnings.isEmpty {
-            return warnings.map(\.message).joined(separator: " ")
+
+        var notes: [String] = []
+
+        if let mruSpaces = checks.first(where: { $0.key == "mru-spaces" }) {
+            switch mruSpaces.status {
+            case .warning:
+                notes.append("Automatically rearrange Spaces based on most recent use looks enabled right now.")
+            case .unknown:
+                notes.append("TilePilot could not verify Automatically rearrange Spaces based on most recent use.")
+            case .pass:
+                break
+            }
         }
-        let unknowns = checks.filter { $0.status == .unknown }
-        if !unknowns.isEmpty {
-            return unknowns.map(\.message).joined(separator: " ")
+
+        if let spansDisplays = checks.first(where: { $0.key == "spans-displays" }) {
+            switch spansDisplays.status {
+            case .warning:
+                notes.append("Displays have separate Spaces may be turned off right now.")
+            case .unknown:
+                notes.append("TilePilot could not verify Displays have separate Spaces.")
+            case .pass:
+                break
+            }
         }
-        return "Mission Control settings already look compatible."
+
+        if notes.isEmpty {
+            return "Recommended values are already in place: Automatically rearrange Spaces based on most recent use is off, and Displays have separate Spaces is on."
+        }
+
+        return notes.joined(separator: " ")
+    }
+
+    private func missionControlWhatToDo(_ checks: [MissionControlCheck]) -> String {
+        let lines = [
+            "Open Mission Control settings and check these values:",
+            "• Automatically rearrange Spaces based on most recent use: Off",
+            "• Displays have separate Spaces: On",
+        ]
+
+        if checks.contains(where: { $0.status == .unknown }) {
+            return lines.joined(separator: "\n") + "\n\nTilePilot could not verify one or both settings automatically, so review them manually."
+        }
+
+        return lines.joined(separator: "\n")
     }
 }

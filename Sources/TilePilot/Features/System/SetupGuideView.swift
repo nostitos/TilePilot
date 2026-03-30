@@ -143,27 +143,42 @@ struct SetupGuideView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("What to do now")
-                        .font(.headline)
-                    Text(step.whatToDo)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                    if let detail = step.detail, !detail.isEmpty {
-                        Divider()
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let verificationText = step.verificationText, !verificationText.isEmpty {
-                        Divider()
-                        Text(verificationText)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+            if step.isSatisfied {
+                if let detail = step.detail, !detail.isEmpty {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Current status")
+                                .font(.headline)
+                            Text(detail)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("What to do now")
+                            .font(.headline)
+                        Text(step.whatToDo)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        if let detail = step.detail, !detail.isEmpty {
+                            Divider()
+                            Text(detail)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let verificationText = step.verificationText, !verificationText.isEmpty {
+                            Divider()
+                            Text(verificationText)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             Spacer(minLength: 0)

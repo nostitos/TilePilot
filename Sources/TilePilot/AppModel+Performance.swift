@@ -186,6 +186,18 @@ extension AppModel {
         UserDefaults.standard.set(clamped, forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
     }
 
+    func setTiledOverlayAccentColor(_ color: OverlayAccentColor) {
+        guard tiledOverlayAccentColor != color else { return }
+        tiledOverlayAccentColor = color
+        UserDefaults.standard.set(color.userDefaultsArray, forKey: AppModel.tiledOverlayAccentColorDefaultsKey)
+    }
+
+    func setFloatingOverlayAccentColor(_ color: OverlayAccentColor) {
+        guard floatingOverlayAccentColor != color else { return }
+        floatingOverlayAccentColor = color
+        UserDefaults.standard.set(color.userDefaultsArray, forKey: AppModel.floatingOverlayAccentColorDefaultsKey)
+    }
+
     func incrementMiniMapHoverUpdates() {
         mutateRuntimeDiagnostics { $0.miniMapHoverUpdateCount += 1 }
     }

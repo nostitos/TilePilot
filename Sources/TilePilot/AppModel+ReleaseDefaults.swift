@@ -147,6 +147,10 @@ extension AppModel {
         UserDefaults.standard.set(showWindowOutlineOverlay, forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
         windowOutlineOverlayBaseWidth = state.windowOutlineOverlayBaseWidth
         UserDefaults.standard.set(windowOutlineOverlayBaseWidth, forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
+        tiledOverlayAccentColor = state.tiledOverlayAccentColor
+        UserDefaults.standard.set(state.tiledOverlayAccentColor.userDefaultsArray, forKey: AppModel.tiledOverlayAccentColorDefaultsKey)
+        floatingOverlayAccentColor = state.floatingOverlayAccentColor
+        UserDefaults.standard.set(state.floatingOverlayAccentColor.userDefaultsArray, forKey: AppModel.floatingOverlayAccentColorDefaultsKey)
         raiseOnFloatToggleEnabled = state.raiseOnFloatToggleEnabled
         UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
         performancePreset = state.performanceSettings.preset

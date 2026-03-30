@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.9-defaults.1"
+    static let currentProfileVersion = "v0.2.9-defaults.2"
 
     private let fileManager = FileManager.default
 
@@ -27,6 +27,8 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                 showWindowBadgeOverlay: true,
                 showWindowOutlineOverlay: true,
                 windowOutlineOverlayBaseWidth: 1.0,
+                tiledOverlayAccentColor: .tiledDefault,
+                floatingOverlayAccentColor: .floatingDefault,
                 raiseOnFloatToggleEnabled: true,
                 appForegroundPolicyByName: [:],
                 performanceSettings: .responsive
@@ -80,6 +82,8 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             "TilePilot.showWindowBadgeOverlay",
             "TilePilot.showWindowOutlineOverlay",
             "TilePilot.windowOutlineOverlayBaseWidth",
+            "TilePilot.tiledOverlayAccentColor",
+            "TilePilot.floatingOverlayAccentColor",
             "TilePilot.raiseOnFloatToggle",
             "TilePilot.appForegroundPolicyByName",
             "TilePilot.performanceHideMinimizedHelperWindowsInMaps",

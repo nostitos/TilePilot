@@ -4,26 +4,19 @@ struct WindowBehaviorDashboardView: View {
     @EnvironmentObject private var model: AppModel
     @State private var newNeverTileApp: String = ""
     @State private var newAlwaysTileApp: String = ""
-    @State private var selectedExplainer: BehaviorExplainerTopic = .desktopTiling
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        precedenceCard
-                        behaviorExplainerCard(proxy: proxy)
-                        mouseDraggingCard
-                        desktopBehaviorCard
-                            .id(BehaviorScrollTarget.desktopTiling)
-                        defaultBehaviorCard
-                        appRulesCard
-                            .id(BehaviorScrollTarget.appRules)
-                        pointerFocusCard
-                            .id(BehaviorScrollTarget.focusAndCursor)
-                    }
-                    .padding()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    precedenceCard
+                    mouseDraggingCard
+                    desktopBehaviorCard
+                    defaultBehaviorCard
+                    appRulesCard
+                    pointerFocusCard
                 }
+                .padding()
             }
             .navigationTitle("TilePilot")
             .safeAreaInset(edge: .bottom) {
@@ -39,43 +32,6 @@ struct WindowBehaviorDashboardView: View {
                 }
             }
             .task { await model.refreshWindowBehaviorConfig() }
-        }
-    }
-
-    private func behaviorExplainerCard(proxy: ScrollViewProxy) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Pick one concept. The diagram shows what changes after you turn it on.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("", selection: $selectedExplainer) {
-                    ForEach(BehaviorExplainerTopic.allCases) { topic in
-                        Text(topic.displayTitle).tag(topic)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(selectedExplainer.summary)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-
-                selectedExplainer.diagram
-
-                HStack {
-                    Button(selectedExplainer.buttonTitle) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(selectedExplainer.scrollTarget, anchor: .top)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Spacer(minLength: 0)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Advanced Concepts", systemImage: "sparkles.rectangle.stack")
         }
     }
 
@@ -478,67 +434,6 @@ struct WindowBehaviorDashboardView: View {
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private enum BehaviorScrollTarget: String, Hashable {
-    case desktopTiling
-    case appRules
-    case focusAndCursor
-}
-
-private enum BehaviorExplainerTopic: String, CaseIterable, Identifiable {
-    case desktopTiling
-    case appRules
-    case hoverFocus
-
-    var id: String { rawValue }
-
-    var displayTitle: String {
-        switch self {
-        case .desktopTiling: return "Desktop Tiling"
-        case .appRules: return "App Rules"
-        case .hoverFocus: return "Hover Focus"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .desktopTiling:
-            return "Desktop Auto-Tiling decides whether windows on a desktop snap into tiles or stay free-floating."
-        case .appRules:
-            return "App rules override the global default for specific apps, so one app can stay tiled or floating even when most others do not."
-        case .hoverFocus:
-            return "Hover Focus changes focus when your pointer crosses windows. Cursor Follows Focus moves the pointer to the focused window."
-        }
-    }
-
-    var buttonTitle: String {
-        switch self {
-        case .desktopTiling: return "Jump to Desktop Auto-Tiling"
-        case .appRules: return "Jump to App Behavior"
-        case .hoverFocus: return "Jump to Focus & Cursor"
-        }
-    }
-
-    var scrollTarget: BehaviorScrollTarget {
-        switch self {
-        case .desktopTiling: return .desktopTiling
-        case .appRules: return .appRules
-        case .hoverFocus: return .focusAndCursor
-        }
-    }
-
-    @ViewBuilder
-    var diagram: some View {
-        switch self {
-        case .desktopTiling:
-            DesktopAutoTilingExplainerDiagram()
-        case .appRules:
-            AppRulesExplainerDiagram()
-        case .hoverFocus:
-            HoverFocusExplainerDiagram()
         }
     }
 }

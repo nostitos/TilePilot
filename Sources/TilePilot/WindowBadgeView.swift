@@ -125,7 +125,7 @@ struct WindowBadgeView: View {
             return Color.gray.opacity(badge.isFocused ? 0.92 : 0.52)
         }
         if badge.isFocused {
-            return badge.isFloating ? Color.orange.opacity(0.92) : Color.blue.opacity(0.92)
+            return accentColor.opacity(0.92)
         }
         return Color.white.opacity(0.36)
     }
@@ -134,7 +134,11 @@ struct WindowBadgeView: View {
         if showsLimitedVisualStyle {
             return Color.gray.opacity(0.8)
         }
-        return (badge.isFloating ? Color.orange : Color.blue).opacity(0.95)
+        return accentColor.opacity(0.95)
+    }
+
+    private var accentColor: Color {
+        badge.isFloating ? model.floatingOverlayAccentColor.swiftUIColor : model.tiledOverlayAccentColor.swiftUIColor
     }
 
     private var helpText: String {

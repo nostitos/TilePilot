@@ -35,6 +35,8 @@ final class WindowBadgeOverlayController {
         let showBadges: Bool
         let showOutlines: Bool
         let outlineBaseWidth: Double
+        let tiledOverlayAccentColor: OverlayAccentColor
+        let floatingOverlayAccentColor: OverlayAccentColor
         let refreshPolicy: OverlayRefreshPolicy
         let badgeTargets: [WindowBadgeState]
         let outlineTargets: [WindowBadgeState]
@@ -79,6 +81,24 @@ final class WindowBadgeOverlayController {
             .store(in: &cancellables)
 
         model.$windowOutlineOverlayBaseWidth
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleOverlayUpdate(with: self.pendingBadges)
+            }
+            .store(in: &cancellables)
+
+        model.$tiledOverlayAccentColor
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleOverlayUpdate(with: self.pendingBadges)
+            }
+            .store(in: &cancellables)
+
+        model.$floatingOverlayAccentColor
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -176,6 +196,8 @@ final class WindowBadgeOverlayController {
             showBadges: model.showWindowBadgeOverlay,
             showOutlines: model.showWindowOutlineOverlay,
             outlineBaseWidth: model.windowOutlineOverlayBaseWidth,
+            tiledOverlayAccentColor: model.tiledOverlayAccentColor,
+            floatingOverlayAccentColor: model.floatingOverlayAccentColor,
             refreshPolicy: policy,
             badgeTargets: model.showWindowBadgeOverlay ? normalized(badgeTargets(from: badges), for: policy) : [],
             outlineTargets: model.showWindowOutlineOverlay ? badges : []
@@ -318,7 +340,7 @@ final class WindowBadgeOverlayController {
         let outlineRect = targetWindowRect.integral
         let strokeColor: NSColor = badge.usesLimitedVisualStyle
             ? .gray
-            : (badge.isFloating ? .orange : .systemBlue)
+            : (badge.isFloating ? model.floatingOverlayAccentColor.nsColor : model.tiledOverlayAccentColor.nsColor)
         let outlineView: OutlinePanelView
         if let existing = panel.contentView as? OutlinePanelView {
             outlineView = existing

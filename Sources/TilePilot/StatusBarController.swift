@@ -214,6 +214,11 @@ final class StatusBarController: NSObject {
         _ = addPinnedContextItems(to: menu)
         menu.addItem(.separator())
         menu.addItem(editPinnedActionsMenuItem())
+        if let availableRelease = model.availableAppUpdateRelease {
+            menu.addItem(.separator())
+            menu.addItem(openAvailableUpdateMenuItem(release: availableRelease))
+        }
+        menu.addItem(checkForUpdatesMenuItem())
         menu.addItem(.separator())
         let runtimeEnabled = model.canRunYabaiRuntimeCommands
         let runtimeReason = model.yabaiRuntimeControlDisabledReason ?? "Unavailable"
@@ -293,6 +298,37 @@ final class StatusBarController: NSObject {
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
         )
+        return menuItem
+    }
+
+    private func openAvailableUpdateMenuItem(release: AppUpdateReleaseInfo) -> NSMenuItem {
+        let menuItem = item("New Version Available: \(release.tagName)", action: #selector(openLatestReleasePage))
+        if let image = NSImage(
+            systemSymbolName: "arrow.down.circle.fill",
+            accessibilityDescription: "Open latest TilePilot release"
+        ) {
+            image.isTemplate = true
+            menuItem.image = image
+        }
+        menuItem.attributedTitle = NSAttributedString(
+            string: "New Version Available: \(release.tagName)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
+                .foregroundColor: NSColor.systemBlue,
+            ]
+        )
+        return menuItem
+    }
+
+    private func checkForUpdatesMenuItem() -> NSMenuItem {
+        let menuItem = item("Check for Updates…", action: #selector(checkForUpdates))
+        if let image = NSImage(
+            systemSymbolName: "arrow.clockwise.circle",
+            accessibilityDescription: "Check for updates"
+        ) {
+            image.isTemplate = true
+            menuItem.image = image
+        }
         return menuItem
     }
 
@@ -518,6 +554,18 @@ final class StatusBarController: NSObject {
         model.acknowledgeInitialStatusIfNeeded()
         model.requestOpenTilePilotTab(.shortcuts)
         onOpenTilePilot()
+    }
+
+    @objc private func checkForUpdates() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.requestOpenTilePilotTab(.system)
+        onOpenTilePilot()
+        model.checkForAppUpdates(manual: true)
+    }
+
+    @objc private func openLatestReleasePage() {
+        model.acknowledgeInitialStatusIfNeeded()
+        model.openLatestReleasePage()
     }
 
     @objc private func runSetupInstaller() {

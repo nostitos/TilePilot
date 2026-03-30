@@ -13,6 +13,7 @@ struct SystemDashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     summaryCard
+                    appUpdateCard
                     performanceCard
                     essentialsCard
                     advancedPanelsCard
@@ -165,6 +166,46 @@ struct SystemDashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             Label("Essentials", systemImage: "checklist")
+        }
+    }
+
+    private var appUpdateCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 8) {
+                    Label("App Update", systemImage: "arrow.down.app")
+                        .font(.headline)
+                    Spacer()
+                    if model.appUpdateStatus.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Text(model.appUpdateStatusTitle)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(model.appUpdateStatusDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    Button("Check for Updates") {
+                        model.checkForAppUpdates(manual: true)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    if model.availableAppUpdateRelease != nil {
+                        Button("Open Release Page") {
+                            model.openLatestReleasePage()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

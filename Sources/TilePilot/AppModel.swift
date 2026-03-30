@@ -56,6 +56,8 @@ final class AppModel: ObservableObject {
     static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
     static let windowOutlineOverlayBaseWidthDefaultsKey = "TilePilot.windowOutlineOverlayBaseWidth"
+    static let tiledOverlayAccentColorDefaultsKey = "TilePilot.tiledOverlayAccentColor"
+    static let floatingOverlayAccentColorDefaultsKey = "TilePilot.floatingOverlayAccentColor"
     static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
     static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
     static let performancePresetDefaultsKey = "TilePilot.performancePreset"
@@ -70,6 +72,10 @@ final class AppModel: ObservableObject {
     static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
     static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
     static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
+    static let appUpdateLastSuccessfulCheckAtDefaultsKey = "TilePilot.appUpdate.lastSuccessfulCheckAt"
+    static let appUpdateLatestKnownReleaseDefaultsKey = "TilePilot.appUpdate.latestKnownRelease"
+    static let appUpdateDismissedVersionDefaultsKey = "TilePilot.appUpdate.dismissedVersion"
+    static let appUpdateAutomaticChecksEnabledInfoKey = "TilePilotEnableAutomaticUpdateChecks"
 
     private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
         guard let raw = UserDefaults.standard.dictionary(forKey: AppModel.appForegroundPolicyByNameDefaultsKey) as? [String: String] else {
@@ -101,6 +107,9 @@ final class AppModel: ObservableObject {
     @Published var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
     @Published private(set) var requestedSystemPanelSection: SystemPanelSection?
+    @Published var appUpdateStatus: AppUpdateStatus = .idle
+    @Published var appUpdateLastSuccessfulCheckAt: Date? = UserDefaults.standard.object(forKey: AppModel.appUpdateLastSuccessfulCheckAtDefaultsKey) as? Date
+    @Published var dismissedAppUpdateVersion: String? = UserDefaults.standard.string(forKey: AppModel.appUpdateDismissedVersionDefaultsKey)
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
@@ -237,6 +246,16 @@ final class AppModel: ObservableObject {
         }
         return defaults.bool(forKey: AppModel.showWindowOutlineOverlayDefaultsKey)
     }()
+    @Published var tiledOverlayAccentColor: OverlayAccentColor = {
+        let defaults = UserDefaults.standard
+        return OverlayAccentColor.from(userDefaultsArray: defaults.array(forKey: AppModel.tiledOverlayAccentColorDefaultsKey) as? [Double])
+            ?? .tiledDefault
+    }()
+    @Published var floatingOverlayAccentColor: OverlayAccentColor = {
+        let defaults = UserDefaults.standard
+        return OverlayAccentColor.from(userDefaultsArray: defaults.array(forKey: AppModel.floatingOverlayAccentColorDefaultsKey) as? [Double])
+            ?? .floatingDefault
+    }()
     @Published var windowOutlineOverlayBaseWidth: Double = {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey) == nil {
@@ -254,6 +273,7 @@ final class AppModel: ObservableObject {
     let configFilesService = ConfigFilesService()
     let releaseDefaultsService = ReleaseDefaultsService()
     let megamapCaptureService = MegamapCaptureService()
+    let appUpdateService = AppUpdateService()
     private let keepOnTopCoordinator = KeepOnTopCoordinator()
     private(set) var overviewDisplayPreviews: [OverviewDisplayPreview] = []
     private(set) var overviewDisplaySections: [OverviewDisplaySection] = []
@@ -305,11 +325,19 @@ final class AppModel: ObservableObject {
     let windowBehaviorAutoSaveDelayNanoseconds: UInt64 = 400_000_000
     var hasInitializedStagedAppRuleLists = false
     var currentVisibleTab: TilePilotTab = .now
+    var isCheckingForAppUpdates = false
+
+    init() {
+        appUpdateStatus = Self.loadPersistedAppUpdateStatus()
+    }
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
         Task { [weak self] in
             await self?.ensureReleaseDefaultsInitializedIfNeeded()
+        }
+        if shouldRunAutomaticAppUpdateCheck() {
+            checkForAppUpdates(manual: false)
         }
         autoRefreshTask = Task { [weak self] in
             guard let self else { return }
@@ -367,6 +395,27 @@ final class AppModel: ObservableObject {
         managedHelperAutoUpgradeTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
+    }
+
+    private static func loadPersistedAppUpdateStatus() -> AppUpdateStatus {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: AppModel.appUpdateLatestKnownReleaseDefaultsKey) else {
+            return .idle
+        }
+        guard let release = try? JSONDecoder().decode(AppUpdateReleaseInfo.self, from: data) else {
+            return .idle
+        }
+        guard let current = AppVersion(Self.currentBundleVersionString()),
+              let available = AppVersion(release.version),
+              available > current else {
+            return .idle
+        }
+        return .available(release)
+    }
+
+    static func currentBundleVersionString() -> String {
+        let rawVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+        return normalizedAppVersionString(from: rawVersion) ?? rawVersion
     }
 
     func refreshDoctor() async {

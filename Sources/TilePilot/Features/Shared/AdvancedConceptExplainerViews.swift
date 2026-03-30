@@ -1,5 +1,12 @@
 import SwiftUI
 
+private enum ExplainerDiagramMetrics {
+    static let pairedStageMinWidth: CGFloat = 220
+    static let pairedStageMaxWidth: CGFloat = 252
+    static let pairedStageSpacing: CGFloat = 12
+    static let stageHeight: CGFloat = 132
+}
+
 private struct ExplainerStage<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
@@ -23,7 +30,34 @@ private struct ExplainerStage<Content: View>: View {
                 content
                     .padding(12)
             }
-            .frame(maxWidth: .infinity, minHeight: 110, maxHeight: 110)
+            .frame(maxWidth: .infinity, minHeight: ExplainerDiagramMetrics.stageHeight, maxHeight: ExplainerDiagramMetrics.stageHeight)
+        }
+    }
+}
+
+private struct ExplainerTwoUp<Leading: View, Trailing: View>: View {
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let trailing: Trailing
+
+    init(@ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.leading = leading()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: ExplainerDiagramMetrics.pairedStageSpacing) {
+                leading
+                    .frame(minWidth: ExplainerDiagramMetrics.pairedStageMinWidth, maxWidth: ExplainerDiagramMetrics.pairedStageMaxWidth)
+                trailing
+                    .frame(minWidth: ExplainerDiagramMetrics.pairedStageMinWidth, maxWidth: ExplainerDiagramMetrics.pairedStageMaxWidth)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            VStack(alignment: .leading, spacing: ExplainerDiagramMetrics.pairedStageSpacing) {
+                leading
+                trailing
+            }
         }
     }
 }
@@ -54,7 +88,7 @@ private struct ExplainerWindowBlock: View {
 
 struct DesktopAutoTilingExplainerDiagram: View {
     var body: some View {
-        HStack(spacing: 12) {
+        ExplainerTwoUp {
             ExplainerStage(title: "On: windows tile") {
                 HStack(spacing: 6) {
                     ExplainerWindowBlock(title: "Mail", color: .blue, size: .init(width: 58, height: 74), focused: true)
@@ -64,7 +98,7 @@ struct DesktopAutoTilingExplainerDiagram: View {
                     }
                 }
             }
-
+        } trailing: {
             ExplainerStage(title: "Off: windows float") {
                 ZStack {
                     ExplainerWindowBlock(title: "Mail", color: .blue, size: .init(width: 78, height: 52))
@@ -81,7 +115,7 @@ struct DesktopAutoTilingExplainerDiagram: View {
 
 struct AppRulesExplainerDiagram: View {
     var body: some View {
-        HStack(spacing: 12) {
+        ExplainerTwoUp {
             ExplainerStage(title: "Global default") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Float by default")
@@ -94,7 +128,7 @@ struct AppRulesExplainerDiagram: View {
                     }
                 }
             }
-
+        } trailing: {
             ExplainerStage(title: "App rule overrides it") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Chrome: Always Tile")
@@ -115,7 +149,7 @@ struct AppRulesExplainerDiagram: View {
 
 struct HoverFocusExplainerDiagram: View {
     var body: some View {
-        HStack(spacing: 12) {
+        ExplainerTwoUp {
             ExplainerStage(title: "Hover moves focus") {
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 10) {
@@ -128,7 +162,7 @@ struct HoverFocusExplainerDiagram: View {
                         .offset(x: 94, y: 10)
                 }
             }
-
+        } trailing: {
             ExplainerStage(title: "Cursor follows focus") {
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 10) {
@@ -185,7 +219,7 @@ struct RightClickMenuExplainerDiagram: View {
 
 struct LayoutOutcomeExplainerDiagram: View {
     var body: some View {
-        HStack(spacing: 12) {
+        ExplainerTwoUp {
             ExplainerStage(title: "Leave Floating") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Arrange Windows into a Floating Grid")
@@ -203,7 +237,7 @@ struct LayoutOutcomeExplainerDiagram: View {
                     }
                 }
             }
-
+        } trailing: {
             ExplainerStage(title: "End Tiled") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Retile Windows into a Balanced Tiled Layout")

@@ -15,6 +15,8 @@ OPEN_AFTER_BUILD=1
 KEEP_DIST_COPY=0
 SIGN_APP=1
 SIGN_IDENTITY="${TILEPILOT_CODESIGN_IDENTITY:-}"
+APP_VERSION_INPUT="${TILEPILOT_APP_VERSION:-}"
+BUILD_NUMBER_INPUT="${TILEPILOT_BUILD_NUMBER:-}"
 
 usage() {
   cat <<EOF
@@ -30,6 +32,8 @@ Options:
   --keep-dist        Also keep a copy in dist/ after install (default: off)
   --no-sign         Skip code signing
   --sign-identity   Override signing identity (Developer ID Application...)
+  --version         Bundle short version string (default: latest git tag or 0.0.0)
+  --build-number    Bundle build number (default: git commit count or 1)
   --run              Run the packaged app after bundling
   --open             Launch the packaged app via LaunchServices after bundling (default)
   --no-open          Do not relaunch/open after bundling
@@ -70,6 +74,22 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ;;
+    --version)
+      shift
+      APP_VERSION_INPUT="${1:-}"
+      if [[ -z "$APP_VERSION_INPUT" ]]; then
+        echo "--version requires a value" >&2
+        exit 1
+      fi
+      ;;
+    --build-number)
+      shift
+      BUILD_NUMBER_INPUT="${1:-}"
+      if [[ -z "$BUILD_NUMBER_INPUT" ]]; then
+        echo "--build-number requires a value" >&2
+        exit 1
+      fi
+      ;;
     --run)
       RUN_AFTER_BUILD=1
       ;;
@@ -92,6 +112,48 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+resolve_default_version() {
+  if [[ -n "$APP_VERSION_INPUT" ]]; then
+    echo "$APP_VERSION_INPUT"
+    return 0
+  fi
+  local git_tag
+  git_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+  if [[ -n "$git_tag" ]]; then
+    echo "$git_tag"
+  else
+    echo "0.0.0"
+  fi
+}
+
+normalize_version() {
+  local raw="$1"
+  raw="${raw#v}"
+  echo "$raw"
+}
+
+resolve_build_number() {
+  if [[ -n "$BUILD_NUMBER_INPUT" ]]; then
+    echo "$BUILD_NUMBER_INPUT"
+    return 0
+  fi
+  local git_count
+  git_count="$(git rev-list --count HEAD 2>/dev/null || true)"
+  if [[ -n "$git_count" ]]; then
+    echo "$git_count"
+  else
+    echo "1"
+  fi
+}
+
+APP_VERSION_RAW="$(resolve_default_version)"
+APP_VERSION="$(normalize_version "$APP_VERSION_RAW")"
+BUILD_NUMBER="$(resolve_build_number)"
+AUTOMATIC_UPDATE_CHECKS_ENABLED="false"
+if [[ "$CONFIGURATION" == "release" ]]; then
+  AUTOMATIC_UPDATE_CHECKS_ENABLED="true"
+fi
 
 echo "Building Swift package (${CONFIGURATION})..."
 if [[ "$CONFIGURATION" == "release" ]]; then
@@ -265,9 +327,9 @@ cat > "$INFO_PLIST" <<EOF
     </dict>
   </array>
   <key>CFBundleShortVersionString</key>
-  <string>0.2.11</string>
+  <string>${APP_VERSION}</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>${BUILD_NUMBER}</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>
@@ -276,6 +338,8 @@ cat > "$INFO_PLIST" <<EOF
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>TilePilotEnableAutomaticUpdateChecks</key>
+  <${AUTOMATIC_UPDATE_CHECKS_ENABLED}/>
 </dict>
 </plist>
 EOF

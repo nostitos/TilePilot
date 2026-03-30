@@ -19,18 +19,20 @@ private final class MegamapWindow: NSWindow {
 }
 
 @MainActor
-final class MegamapWindowController: NSWindowController, NSWindowDelegate {
+private final class MegamapDisplayWindowController: NSWindowController, NSWindowDelegate {
     private let model: AppModel
+    private let displayID: Int
 
     private enum PersistedWindowKeys {
-        static let width = "TilePilot.megamapWindow.width"
-        static let height = "TilePilot.megamapWindow.height"
-        static let frameAutosaveName = "TilePilotMegamapWindow"
+        static func width(for displayID: Int) -> String { "TilePilot.megamapWindow.\(displayID).width" }
+        static func height(for displayID: Int) -> String { "TilePilot.megamapWindow.\(displayID).height" }
+        static func frameAutosaveName(for displayID: Int) -> String { "TilePilotMegamapWindow.\(displayID)" }
     }
 
-    init(model: AppModel) {
+    init(model: AppModel, displayID: Int) {
         self.model = model
-        let hosting = MegamapWindowController.makeHostingController(model: model)
+        self.displayID = displayID
+        let hosting = MegamapDisplayWindowController.makeHostingController(model: model, displayID: displayID)
 
         let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1600, height: 900)
         let window = MegamapWindow(contentViewController: hosting)
@@ -46,9 +48,9 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         window.minSize = NSSize(width: 980, height: 620)
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.moveToActiveSpace)
-        _ = window.setFrameUsingName(PersistedWindowKeys.frameAutosaveName)
-        Self.restorePersistedSize(for: window)
-        window.setFrameAutosaveName(PersistedWindowKeys.frameAutosaveName)
+        _ = window.setFrameUsingName(PersistedWindowKeys.frameAutosaveName(for: displayID))
+        Self.restorePersistedSize(for: window, displayID: displayID)
+        window.setFrameAutosaveName(PersistedWindowKeys.frameAutosaveName(for: displayID))
         window.onEscape = {
             NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
         }
@@ -63,13 +65,16 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         nil
     }
 
-    func showAndFocus() {
+    func show(makeKey: Bool) {
         ensureContentLoaded()
-        NSApp.activate(ignoringOtherApps: true)
         window?.alphaValue = 1
         showWindow(nil)
-        snapToVisibleFrame()
-        window?.makeKeyAndOrderFront(nil)
+        snapToDisplayVisibleFrame()
+        if makeKey {
+            window?.makeKeyAndOrderFront(nil)
+        } else {
+            window?.orderFront(nil)
+        }
     }
 
     func hideImmediately() {
@@ -82,24 +87,25 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
     func persistCurrentWindowSize() {
         guard let window else { return }
         let defaults = UserDefaults.standard
-        defaults.set(window.frame.width, forKey: PersistedWindowKeys.width)
-        defaults.set(window.frame.height, forKey: PersistedWindowKeys.height)
-        window.saveFrame(usingName: PersistedWindowKeys.frameAutosaveName)
+        defaults.set(window.frame.width, forKey: PersistedWindowKeys.width(for: displayID))
+        defaults.set(window.frame.height, forKey: PersistedWindowKeys.height(for: displayID))
+        window.saveFrame(usingName: PersistedWindowKeys.frameAutosaveName(for: displayID))
     }
 
     func windowWillClose(_ notification: Notification) {
         persistCurrentWindowSize()
         unloadContent()
+        NotificationCenter.default.post(name: .tilePilotHideMegamap, object: nil)
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
         persistCurrentWindowSize()
     }
 
-    private static func restorePersistedSize(for window: NSWindow) {
+    private static func restorePersistedSize(for window: NSWindow, displayID: Int) {
         let defaults = UserDefaults.standard
-        let persistedWidth = CGFloat(defaults.double(forKey: PersistedWindowKeys.width))
-        let persistedHeight = CGFloat(defaults.double(forKey: PersistedWindowKeys.height))
+        let persistedWidth = CGFloat(defaults.double(forKey: PersistedWindowKeys.width(for: displayID)))
+        let persistedHeight = CGFloat(defaults.double(forKey: PersistedWindowKeys.height(for: displayID)))
         guard persistedWidth > 0, persistedHeight > 0 else { return }
         let minWidth = window.minSize.width
         let minHeight = window.minSize.height
@@ -113,9 +119,9 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         window.setFrame(frame, display: false)
     }
 
-    private func snapToVisibleFrame() {
+    private func snapToDisplayVisibleFrame() {
         guard let window else { return }
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+        let visibleFrame = bestVisibleFrame() ?? window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
         guard !visibleFrame.isEmpty else { return }
         window.setFrame(visibleFrame, display: true, animate: false)
     }
@@ -125,7 +131,7 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         if window.contentViewController is NSHostingController<AnyView> {
             return
         }
-        window.contentViewController = Self.makeHostingController(model: model)
+        window.contentViewController = Self.makeHostingController(model: model, displayID: displayID)
     }
 
     private func unloadContent() {
@@ -133,11 +139,98 @@ final class MegamapWindowController: NSWindowController, NSWindowDelegate {
         if window.contentViewController is NSHostingController<AnyView> {
             window.contentViewController = NSViewController()
         }
-        MegamapScreenshotCache.shared.clear()
     }
 
-    private static func makeHostingController(model: AppModel) -> NSHostingController<AnyView> {
-        NSHostingController(rootView: AnyView(MegamapRootView(model: model)))
+    private func bestVisibleFrame() -> NSRect? {
+        let snapshot = model.latestLiveStateSnapshot ?? model.liveStateSnapshot
+        if let display = snapshot?.displays.first(where: { $0.id == displayID }) {
+            let resolved = model.megamapCaptureService.resolveScreenDescriptors(for: [display])
+            if let descriptor = resolved[display.id] {
+                return descriptor.visibleFrame
+            }
+        }
+
+        guard let section = model.megamapDisplaySections.first(where: { $0.id == displayID }) else {
+            return nil
+        }
+        let targetFrame = CGRect(
+            x: section.desktops.first?.displayFrameX ?? 0,
+            y: section.desktops.first?.displayFrameY ?? 0,
+            width: section.desktops.first?.displayFrameW ?? 0,
+            height: section.desktops.first?.displayFrameH ?? 0
+        )
+        guard !targetFrame.isEmpty else { return nil }
+
+        var bestScreen: NSScreen?
+        var bestScore: CGFloat = -.greatestFiniteMagnitude
+        for screen in NSScreen.screens {
+            let intersection = screen.frame.intersection(targetFrame)
+            let overlapArea = intersection.isNull ? 0 : (intersection.width * intersection.height)
+            let exactFrameBonus: CGFloat = screen.frame.equalTo(targetFrame) ? 2_000_000 : 0
+            let exactNameBonus: CGFloat = {
+                if #available(macOS 10.15, *) {
+                    return screen.localizedName == section.name ? 1_000_000 : 0
+                }
+                return 0
+            }()
+            let score = overlapArea + exactFrameBonus + exactNameBonus
+            if score > bestScore {
+                bestScore = score
+                bestScreen = screen
+            }
+        }
+        return bestScreen?.visibleFrame
+    }
+
+    private static func makeHostingController(model: AppModel, displayID: Int) -> NSHostingController<AnyView> {
+        NSHostingController(rootView: AnyView(MegamapRootView(model: model, displayID: displayID)))
+    }
+}
+
+@MainActor
+final class MegamapWindowController {
+    private let model: AppModel
+    private var displayControllers: [Int: MegamapDisplayWindowController] = [:]
+
+    init(model: AppModel) {
+        self.model = model
+    }
+
+    func showAndFocus() {
+        let displaySections = model.megamapDisplaySections
+        let targetDisplayIDs = Set(displaySections.map(\.id))
+
+        let staleDisplayIDs = displayControllers.keys.filter { !targetDisplayIDs.contains($0) }
+        for displayID in staleDisplayIDs {
+            displayControllers[displayID]?.hideImmediately()
+            displayControllers.removeValue(forKey: displayID)
+        }
+
+        guard !displaySections.isEmpty else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let primaryDisplayID = displaySections.first(where: { $0.focused })?.id ?? displaySections.first?.id
+
+        for section in displaySections {
+            let controller = displayControllers[section.id] ?? {
+                let newController = MegamapDisplayWindowController(model: model, displayID: section.id)
+                displayControllers[section.id] = newController
+                return newController
+            }()
+            controller.show(makeKey: section.id == primaryDisplayID)
+        }
+    }
+
+    func hideImmediately() {
+        for controller in displayControllers.values {
+            controller.hideImmediately()
+        }
+    }
+
+    func persistCurrentWindowSize() {
+        for controller in displayControllers.values {
+            controller.persistCurrentWindowSize()
+        }
     }
 }
 
@@ -152,12 +245,14 @@ final class MegamapViewBridge: ObservableObject {
     @Published private(set) var runtimeDisabledReason: String?
 
     let model: AppModel
+    private let displayID: Int?
 
     private var cancellables: Set<AnyCancellable> = []
 
-    init(model: AppModel) {
+    init(model: AppModel, displayID: Int? = nil) {
         self.model = model
-        displaySections = model.megamapDisplaySections
+        self.displayID = displayID
+        displaySections = Self.filterDisplaySections(model.megamapDisplaySections, for: displayID)
         isRefreshing = model.isRefreshingMegamap
         screenRecordingAuthorized = model.megamapScreenRecordingAuthorized
         lastActionMessage = model.megamapLastActionMessage
@@ -167,7 +262,10 @@ final class MegamapViewBridge: ObservableObject {
 
         model.$megamapDisplaySections
             .removeDuplicates()
-            .sink { [weak self] in self?.displaySections = $0 }
+            .sink { [weak self] in
+                guard let self else { return }
+                self.displaySections = Self.filterDisplaySections($0, for: self.displayID)
+            }
             .store(in: &cancellables)
         model.$isRefreshingMegamap
             .removeDuplicates()
@@ -240,13 +338,18 @@ final class MegamapViewBridge: ObservableObject {
     func setWindowFloating(_ window: OverviewWindowPreview, shouldFloat: Bool) {
         model.setWindowFloating(windowID: window.id, shouldFloat: shouldFloat)
     }
+
+    private static func filterDisplaySections(_ sections: [MegamapDisplaySection], for displayID: Int?) -> [MegamapDisplaySection] {
+        guard let displayID else { return sections }
+        return sections.filter { $0.id == displayID }
+    }
 }
 
 struct MegamapRootView: View {
     @StateObject private var bridge: MegamapViewBridge
 
-    init(model: AppModel) {
-        _bridge = StateObject(wrappedValue: MegamapViewBridge(model: model))
+    init(model: AppModel, displayID: Int? = nil) {
+        _bridge = StateObject(wrappedValue: MegamapViewBridge(model: model, displayID: displayID))
     }
 
     var body: some View {
@@ -713,7 +816,8 @@ private struct MegamapSyntheticDesktopCanvas: View {
                         windowID: window.id,
                         isFloating: window.floating,
                         usesLimitedVisualStyle: window.usesLimitedVisualStyle,
-                        isFocused: window.focused
+                        isFocused: window.focused,
+                        preferredWarmIndex: window.warmPaletteIndex
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
                     let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 3 : baseLineWidth
@@ -825,7 +929,8 @@ private struct MegamapMergedDesktopCanvas: View {
                         windowID: window.id,
                         isFloating: window.floating,
                         usesLimitedVisualStyle: window.usesLimitedVisualStyle,
-                        isFocused: window.focused
+                        isFocused: window.focused,
+                        preferredWarmIndex: window.warmPaletteIndex
                     )
                     let baseLineWidth: CGFloat = window.focused ? 2 : 1.2
                     let lineWidth = hoveredWindowID == window.id ? baseLineWidth * 3 : baseLineWidth

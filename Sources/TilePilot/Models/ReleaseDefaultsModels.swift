@@ -12,6 +12,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let showWindowBadgeOverlay: Bool
     let showWindowOutlineOverlay: Bool
     let windowOutlineOverlayBaseWidth: Double
+    let tiledOverlayAccentColor: OverlayAccentColor
+    let floatingOverlayAccentColor: OverlayAccentColor
     let raiseOnFloatToggleEnabled: Bool
     let appForegroundPolicyByName: [String: AppForegroundPolicy]
     let performanceSettings: PerformanceSettings
@@ -23,6 +25,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         showWindowBadgeOverlay: Bool,
         showWindowOutlineOverlay: Bool,
         windowOutlineOverlayBaseWidth: Double,
+        tiledOverlayAccentColor: OverlayAccentColor,
+        floatingOverlayAccentColor: OverlayAccentColor,
         raiseOnFloatToggleEnabled: Bool,
         appForegroundPolicyByName: [String: AppForegroundPolicy],
         performanceSettings: PerformanceSettings
@@ -33,6 +37,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.showWindowBadgeOverlay = showWindowBadgeOverlay
         self.showWindowOutlineOverlay = showWindowOutlineOverlay
         self.windowOutlineOverlayBaseWidth = windowOutlineOverlayBaseWidth
+        self.tiledOverlayAccentColor = tiledOverlayAccentColor
+        self.floatingOverlayAccentColor = floatingOverlayAccentColor
         self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
         self.appForegroundPolicyByName = appForegroundPolicyByName
         self.performanceSettings = performanceSettings
@@ -45,6 +51,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case showWindowBadgeOverlay
         case showWindowOutlineOverlay
         case windowOutlineOverlayBaseWidth
+        case tiledOverlayAccentColor
+        case floatingOverlayAccentColor
         case raiseOnFloatToggleEnabled
         case appForegroundPolicyByName
         case performanceSettings
@@ -58,6 +66,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
         showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
         windowOutlineOverlayBaseWidth = try container.decodeIfPresent(Double.self, forKey: .windowOutlineOverlayBaseWidth) ?? 2.0
+        tiledOverlayAccentColor = try container.decodeIfPresent(OverlayAccentColor.self, forKey: .tiledOverlayAccentColor) ?? .tiledDefault
+        floatingOverlayAccentColor = try container.decodeIfPresent(OverlayAccentColor.self, forKey: .floatingOverlayAccentColor) ?? .floatingDefault
         raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
         appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
         performanceSettings = try container.decodeIfPresent(PerformanceSettings.self, forKey: .performanceSettings) ?? .balanced

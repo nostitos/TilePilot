@@ -49,15 +49,18 @@ enum MapWindowPalette {
         )
     ]
 
+    static var warmFamilyCount: Int { warmFamilies.count }
+
     static func colors(
         windowID: Int,
         isFloating: Bool,
         usesLimitedVisualStyle: Bool,
         isFocused: Bool,
-        isSelected: Bool = false
+        isSelected: Bool = false,
+        preferredWarmIndex: Int? = nil
     ) -> MapWindowPaletteColors {
         if usesLimitedVisualStyle {
-            let family = warmFamilies[paletteIndex(for: windowID)]
+            let family = warmFamilies[paletteIndex(for: windowID, preferredIndex: preferredWarmIndex)]
             return MapWindowPaletteColors(
                 border: family.limitedBorder,
                 fill: isSelected ? family.limitedFill.opacity(0.18) : family.limitedFill
@@ -65,7 +68,7 @@ enum MapWindowPalette {
         }
 
         if isFloating {
-            let family = warmFamilies[paletteIndex(for: windowID)]
+            let family = warmFamilies[paletteIndex(for: windowID, preferredIndex: preferredWarmIndex)]
             return MapWindowPaletteColors(
                 border: family.floatingBorder,
                 fill: isSelected ? family.floatingFill.opacity(0.22) : family.floatingFill
@@ -87,7 +90,10 @@ enum MapWindowPalette {
         )
     }
 
-    private static func paletteIndex(for windowID: Int) -> Int {
-        abs(windowID) % warmFamilies.count
+    private static func paletteIndex(for windowID: Int, preferredIndex: Int?) -> Int {
+        if let preferredIndex {
+            return max(0, min(warmFamilies.count - 1, preferredIndex))
+        }
+        return abs(windowID) % warmFamilies.count
     }
 }

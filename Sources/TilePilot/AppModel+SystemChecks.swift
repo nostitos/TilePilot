@@ -186,11 +186,11 @@ extension AppModel {
         }
         let missionDetail: String
         if missionWarningCount > 0 {
-            missionDetail = "\(missionWarningCount) Mission Control setting(s) need review for predictable desktop behavior."
+            missionDetail = "Recommended values: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
         } else if missionUnknownCount > 0 {
-            missionDetail = "Some Mission Control settings could not be verified."
+            missionDetail = "TilePilot could not verify one or both settings. Recommended values are: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
         } else if missionControlChecks.isEmpty {
-            missionDetail = "Run Recheck to verify Mission Control settings."
+            missionDetail = "Recommended values are: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
         } else {
             missionDetail = "Mission Control settings look compatible."
         }
@@ -255,6 +255,10 @@ extension AppModel {
             restartYabaiBestEffort()
         case .restartSkhd:
             restartSkhdBestEffort()
+        case .checkForUpdates:
+            checkForAppUpdates(manual: true)
+        case .openLatestReleasePage:
+            openLatestReleasePage()
         case .recheck:
             performSetupAction(.recheck)
         }

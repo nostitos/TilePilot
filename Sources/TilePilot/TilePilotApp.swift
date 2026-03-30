@@ -7,6 +7,7 @@ enum TilePilotTab: Hashable {
     case windowBehavior
     case actions
     case shortcuts
+    case howItWorks
     case system
     // legacy route-only cases (mapped to .system)
     case files
@@ -66,6 +67,10 @@ struct TilePilotRootView: View {
             FilesDashboardView()
                 .tabItem { Label("Config Files", systemImage: "doc.text") }
                 .tag(TilePilotTab.files)
+
+            HowItWorksDashboardView()
+                .tabItem { Label("How It Works", systemImage: "questionmark.bubble") }
+                .tag(TilePilotTab.howItWorks)
 
             SystemDashboardView()
                 .tabItem { Label("System", systemImage: "gearshape.2") }

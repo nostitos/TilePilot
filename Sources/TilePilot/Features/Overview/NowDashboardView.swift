@@ -9,6 +9,11 @@ struct NowDashboardView: View {
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        if model.shouldShowAvailableUpdateBanner,
+                           let release = model.availableAppUpdateRelease {
+                            availableUpdateBanner(release: release)
+                        }
+
                         if model.shouldShowWindowBehaviorRecommendation {
                             GroupBox {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -74,6 +79,39 @@ struct NowDashboardView: View {
                     model.ensureOverviewCachesIfNeeded()
                 }
             }
+        }
+    }
+
+    private func availableUpdateBanner(release: AppUpdateReleaseInfo) -> some View {
+        GroupBox {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.down.app.fill")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TilePilot \(release.tagName) is available")
+                        .font(.headline)
+                    Text("Open the GitHub release page when you want to update.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    Button("Open Release Page") {
+                        model.openLatestReleasePage()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button("Dismiss") {
+                        model.dismissAvailableUpdateBanner()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Update Available", systemImage: "arrow.down.app")
         }
     }
 

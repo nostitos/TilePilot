@@ -20,13 +20,15 @@ enum OverviewPreviewBuilder {
             let desktops = (spacesByDisplay[display.id] ?? [])
                 .sorted { $0.index < $1.index }
                 .map { space in
-                    let normalizedWindows = (windowsBySpace[space.index] ?? [])
+                    let normalizedWindows = assignWarmPaletteIndices(
+                        to: (windowsBySpace[space.index] ?? [])
                         .filter { $0.display == display.id }
                         .compactMap { normalizedPreview(for: $0, in: display, desktopIndex: space.index) }
                         .sorted { lhs, rhs in
                             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
                             return lhs.id < rhs.id
                         }
+                    )
                     return OverviewDesktopPreview(
                         id: "display-\(display.id)-desktop-\(space.index)",
                         displayID: display.id,
@@ -74,6 +76,7 @@ enum OverviewPreviewBuilder {
             floating: window.floating,
             runtimeManageable: window.isRuntimeManageable,
             usesLimitedVisualStyle: window.usesLimitedVisualStyle,
+            warmPaletteIndex: nil,
             focused: window.focused,
             visible: window.isVisible,
             normalizedX: left,
@@ -81,6 +84,41 @@ enum OverviewPreviewBuilder {
             normalizedW: right - left,
             normalizedH: bottom - top
         )
+    }
+
+    private static func assignWarmPaletteIndices(to windows: [OverviewWindowPreview]) -> [OverviewWindowPreview] {
+        let warmIndices = windows.enumerated()
+            .filter { _, window in
+                window.floating || window.usesLimitedVisualStyle
+            }
+            .map(\.offset)
+
+        guard !warmIndices.isEmpty else { return windows }
+
+        let familyCount = MapWindowPalette.warmFamilyCount
+        let maxSlot = max(familyCount - 1, 0)
+        let divisor = max(warmIndices.count - 1, 1)
+
+        return windows.enumerated().map { index, window in
+            guard let warmPosition = warmIndices.firstIndex(of: index) else { return window }
+            let paletteIndex = Int((Double(warmPosition) / Double(divisor) * Double(maxSlot)).rounded())
+            return OverviewWindowPreview(
+                id: window.id,
+                app: window.app,
+                title: window.title,
+                desktopIndex: window.desktopIndex,
+                floating: window.floating,
+                runtimeManageable: window.runtimeManageable,
+                usesLimitedVisualStyle: window.usesLimitedVisualStyle,
+                warmPaletteIndex: paletteIndex,
+                focused: window.focused,
+                visible: window.visible,
+                normalizedX: window.normalizedX,
+                normalizedY: window.normalizedY,
+                normalizedW: window.normalizedW,
+                normalizedH: window.normalizedH
+            )
+        }
     }
 }
 

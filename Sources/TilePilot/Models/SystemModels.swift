@@ -336,6 +336,8 @@ enum SystemCheckAction: String, Sendable, Hashable {
     case openMissionControlKeyboardShortcuts
     case restartYabai
     case restartSkhd
+    case checkForUpdates
+    case openLatestReleasePage
     case recheck
 
     var label: String {
@@ -355,6 +357,8 @@ enum SystemCheckAction: String, Sendable, Hashable {
         case .openMissionControlKeyboardShortcuts: return "Keyboard Shortcuts"
         case .restartYabai: return "Restart yabai"
         case .restartSkhd: return "Restart skhd"
+        case .checkForUpdates: return "Check for Updates"
+        case .openLatestReleasePage: return "Open Release Page"
         case .recheck: return "Recheck"
         }
     }

@@ -185,6 +185,23 @@ struct SystemDashboardView: View {
                 Text(model.appUpdateStatusTitle)
                     .font(.subheadline.weight(.semibold))
 
+                HStack(spacing: 8) {
+                    Text("Current version")
+                        .font(.caption.weight(.semibold))
+                    Text(model.currentAppVersion)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+
+                    if let release = model.availableAppUpdateRelease {
+                        Spacer(minLength: 0)
+                        Text("Latest")
+                            .font(.caption.weight(.semibold))
+                        Text(release.tagName)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Text(model.appUpdateStatusDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)

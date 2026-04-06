@@ -104,6 +104,7 @@ final class AppModel: ObservableObject {
     @Published var setupGuidePresentationState: SetupGuidePresentationState = .hidden
     @Published var helperMigrationPrompt: HelperMigrationPromptState?
     @Published var windowBadges: [WindowBadgeState] = []
+    @Published var windowBadgeOverlayRefreshNonce: UInt64 = 0
     @Published var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
     @Published private(set) var requestedSystemPanelSection: SystemPanelSection?
@@ -536,6 +537,9 @@ final class AppModel: ObservableObject {
         if lastLiveStateContentSignature == contentSignature {
             recordRuntimeBurst(.unchangedPoll)
             mutateRuntimeDiagnostics { $0.liveStateUnchangedPollCount += 1 }
+            if hasVisibleWindowBadgePanels {
+                refreshWindowBadgesIfNeeded(forceRepair: true)
+            }
             updateRuntimeDiagnosticsMode(for: snapshot)
             await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
             return
@@ -1242,9 +1246,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func refreshWindowBadgesIfNeeded() {
+    private func refreshWindowBadgesIfNeeded(forceRepair: Bool = false) {
         guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
-            refreshWindowBadges()
+            refreshWindowBadges(forceRepair: forceRepair)
             return
         }
         guard hasActiveOverlayConsumer else {
@@ -1256,7 +1260,7 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        refreshWindowBadges()
+        refreshWindowBadges(forceRepair: forceRepair)
     }
 
     var hasActiveOverlayConsumer: Bool {

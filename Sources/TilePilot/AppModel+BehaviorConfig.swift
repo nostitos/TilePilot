@@ -113,7 +113,7 @@ extension AppModel {
     }
 
     func saveWindowBehaviorPolicy() {
-        saveWindowBehaviorPolicy(reason: .manual)
+        saveWindowBehaviorPolicy(reason: .manual())
     }
 
     func enableManualTilingMode() {
@@ -241,7 +241,7 @@ extension AppModel {
         windowBehaviorPolicyDraft.neverTileApps = canonicalizeAppRuleList(stagedNeverTileApps)
         windowBehaviorPolicyDraft.alwaysTileApps = canonicalizeAppRuleList(stagedAlwaysTileApps)
         recomputeYabaiConfigDiffPreview()
-        saveWindowBehaviorPolicy(reason: .manual)
+        saveWindowBehaviorPolicy(reason: .manual())
     }
 
     func appTilingBehavior(for appName: String) -> AppTilingBehavior {
@@ -294,6 +294,28 @@ extension AppModel {
         if next == .keepFrontWhenFloating {
             bringFlaggedFloatingWindowsToFrontCurrentDesktop()
         }
+    }
+
+    func toggleNeverAutoTile(for appName: String) {
+        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let next: AppTilingBehavior = appTilingBehavior(for: trimmed) == .neverTile ? .useDefault : .neverTile
+        setNeverAutoTileEnabled(next == .neverTile, for: trimmed)
+    }
+
+    func setNeverAutoTileEnabled(_ enabled: Bool, for appName: String) {
+        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let next: AppTilingBehavior = enabled ? .neverTile : .useDefault
+        setAppTilingBehavior(next, for: trimmed, autosave: false)
+
+        let message = enabled
+            ? "\(trimmed) will stay out of tiled layouts."
+            : "\(trimmed) now uses the default tiling behavior."
+
+        saveWindowBehaviorPolicy(reason: .manual(message: message))
     }
 
     func setAppTilingBehavior(_ behavior: AppTilingBehavior, for appName: String, autosave: Bool = true) {
@@ -359,7 +381,7 @@ extension AppModel {
     }
 
     private enum WindowBehaviorSaveReason {
-        case manual
+        case manual(message: String? = nil)
         case autosave
     }
 
@@ -389,8 +411,8 @@ extension AppModel {
                         self.lastActionMessage = "App rule list changes applied."
                         self.windowBehaviorAutosaveActionMessage = nil
                         self.windowBehaviorAutosaveErrorMessage = nil
-                    } else if reason == .manual {
-                        self.lastActionMessage = "Window behavior saved to yabairc."
+                    } else if case let .manual(message) = reason {
+                        self.lastActionMessage = message ?? "Window behavior saved to yabairc."
                         self.windowBehaviorAutosaveActionMessage = nil
                         self.windowBehaviorAutosaveErrorMessage = nil
                     } else {
@@ -409,7 +431,7 @@ extension AppModel {
                 await MainActor.run {
                     self.lastErrorMessage = "Saving yabairc settings failed: \(error.localizedDescription)"
                     self.lastActionMessage = nil
-                    if reason == .autosave, !wasApplyingStagedRules {
+                    if case .autosave = reason, !wasApplyingStagedRules {
                         self.windowBehaviorAutosaveErrorMessage = "Could not save behavior changes. Try again."
                         self.windowBehaviorAutosaveActionMessage = nil
                     }

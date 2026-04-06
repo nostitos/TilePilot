@@ -5,11 +5,11 @@ struct ShortcutsDashboardView: View {
     @EnvironmentObject private var model: AppModel
     private let shortcutDescriptionColumnWidth: CGFloat = 410
     private let shortcutComboColumnWidth: CGFloat = 220
-    private let shortcutRecordColumnWidth: CGFloat = 220
-    private let shortcutActionsColumnWidth: CGFloat = 150
-    private let shortcutRecordButtonMinWidth: CGFloat = 120
-    private let shortcutActionButtonMinWidth: CGFloat = 72
-    private let shortcutClearButtonMinWidth: CGFloat = 62
+    private let shortcutRecordColumnWidth: CGFloat = 168
+    private let shortcutActionsColumnWidth: CGFloat = 104
+    private let shortcutRecordButtonMinWidth: CGFloat = 108
+    private let shortcutActionButtonMinWidth: CGFloat = 46
+    private let shortcutClearButtonMinWidth: CGFloat = 50
     private let reorderRowHeight: CGFloat = 48
     @State private var searchText = ""
     @State private var showDesktopMoveAdvanced = false
@@ -692,7 +692,7 @@ struct ShortcutsDashboardView: View {
             .frame(width: shortcutRecordColumnWidth, alignment: .leading)
             .layoutPriority(3)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Button("Test") {
                     model.runShortcut(entry)
                 }
@@ -790,7 +790,7 @@ struct ShortcutsDashboardView: View {
             .frame(width: shortcutRecordColumnWidth, alignment: .leading)
             .layoutPriority(3)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Button("Test") {
                     if let featureID = row.featureID {
                         model.runFeatureControl(featureID, source: .shortcutsUI)
@@ -851,7 +851,7 @@ struct ShortcutsDashboardView: View {
                 .help("Cancel recording")
             }
         } else if model.featureControlRow(forID: featureID)?.shortcutEntry != nil {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Button {
                     model.removeShortcut(for: featureID)
                 } label: {

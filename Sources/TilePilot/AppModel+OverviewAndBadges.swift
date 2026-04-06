@@ -25,6 +25,15 @@ extension AppModel {
         liveStateSnapshot?.windows.first(where: \.focused)
     }
 
+    var focusedAppName: String? {
+        let trimmed = focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func isNeverAutoTileEnabled(for appName: String) -> Bool {
+        appTilingBehavior(for: appName) == .neverTile
+    }
+
     func isOverviewExcludedWindow(_ window: WindowState, in snapshot: LiveStateSnapshot) -> Bool {
         let normalizedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedRole = window.role.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -193,17 +202,17 @@ extension AppModel {
         focusedWindowState != nil && doctorSnapshot != nil
     }
 
-    func refreshWindowBadges() {
+    func refreshWindowBadges(forceRepair: Bool = false) {
         guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
-            applyWindowBadgeState([], hoveredWindowID: nil)
+            applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
         guard let snapshot = currentSnapshotForRuntimeConsumers else {
-            applyWindowBadgeState([], hoveredWindowID: nil)
+            applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
         guard snapshot.source == .yabai, !snapshot.degraded else {
-            applyWindowBadgeState([], hoveredWindowID: nil)
+            applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
 
@@ -232,7 +241,7 @@ extension AppModel {
             return window.frameW > 40 && window.frameH > 24
         }
         guard !sizeFiltered.isEmpty else {
-            applyWindowBadgeState([], hoveredWindowID: nil)
+            applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
 
@@ -244,7 +253,7 @@ extension AppModel {
             visibleSpaceCandidates = sizeFiltered.filter { visibleSpaceIndexes.contains($0.space) }
         }
         guard !visibleSpaceCandidates.isEmpty else {
-            applyWindowBadgeState([], hoveredWindowID: nil)
+            applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
 
@@ -290,7 +299,7 @@ extension AppModel {
                 frameH: window.frameH
             )
         }
-        applyWindowBadgeState(badges, hoveredWindowID: nil)
+        applyWindowBadgeState(badges, hoveredWindowID: nil, forcePublish: forceRepair)
     }
 
     func updateHoveredWindowForBadges(candidates: [WindowState]? = nil) {
@@ -367,12 +376,15 @@ extension AppModel {
         )
     }
 
-    private func applyWindowBadgeState(_ badges: [WindowBadgeState], hoveredWindowID: Int?) {
-        if windowBadges != badges {
+    private func applyWindowBadgeState(_ badges: [WindowBadgeState], hoveredWindowID: Int?, forcePublish: Bool = false) {
+        if forcePublish || windowBadges != badges {
             windowBadges = badges
         }
-        if hoveredWindowIDForBadges != hoveredWindowID {
+        if forcePublish || hoveredWindowIDForBadges != hoveredWindowID {
             hoveredWindowIDForBadges = hoveredWindowID
+        }
+        if forcePublish {
+            windowBadgeOverlayRefreshNonce &+= 1
         }
     }
 

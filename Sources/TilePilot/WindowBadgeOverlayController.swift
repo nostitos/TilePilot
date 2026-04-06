@@ -107,6 +107,13 @@ final class WindowBadgeOverlayController {
             }
             .store(in: &cancellables)
 
+        model.$windowBadgeOverlayRefreshNonce
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.invalidateAndReapplyOverlays()
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in

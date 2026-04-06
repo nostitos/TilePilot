@@ -105,7 +105,7 @@ extension AppModel {
                 kind: .accessibility,
                 category: .recommended,
                 title: "Review Accessibility Permissions",
-                summary: accessibilityStatus == .good ? "Accessibility access is already granted for TilePilot." : "Accessibility improves focus, raise, helper startup recovery, and some UI automation flows.",
+                summary: accessibilityStatus == .good ? "Accessibility access is already granted for TilePilot." : "Accessibility improves window focus, raise, helper startup recovery, and some UI automation flows.",
                 whyItMatters: "TilePilot uses Accessibility for some window focus and bring-to-front fallbacks. On a new or migrated Mac, macOS may also require yabai and skhd to be re-enabled in Accessibility before they work reliably again.",
                 whatToDo: "Request TilePilot's permission first. Then open Accessibility settings and make sure TilePilot is enabled. If you migrated to a new Mac, also look for yabai and skhd there and re-enable them if they appear.",
                 detail: firstNonEmptyGuideDetail([

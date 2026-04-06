@@ -37,7 +37,7 @@ struct WindowBehaviorDashboardView: View {
 
     private var precedenceCard: some View {
         GroupBox {
-            Text("Tiling decisions run in order: Desktop behavior -> App behavior -> Window override.")
+            Text("Tiling decisions run in order: Desktop behavior -> App behavior.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,7 +159,7 @@ struct WindowBehaviorDashboardView: View {
 
                 Text(model.windowBehaviorPolicyDraft.manualTilingModeEnabled
                      ? "New windows float by default. Use 'Always Tile' as exceptions."
-                     : "New windows auto-tile by default. Use 'Never Tile' as exceptions.")
+                     : "New windows auto-tile by default. Use 'Never Auto-Tile' as exceptions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -250,7 +250,7 @@ struct WindowBehaviorDashboardView: View {
                     .foregroundStyle(.secondary)
 
                 listEditor(
-                    title: "Never Tile Apps",
+                    title: "Never Auto-Tile Apps",
                     items: model.stagedNeverTileApps,
                     newValue: $newNeverTileApp,
                     addAction: { model.addStagedNeverTileApp(newNeverTileApp); newNeverTileApp = "" },
@@ -479,7 +479,7 @@ struct CurrentAppsBehaviorListView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .frame(width: 116)
+                        .frame(width: 148)
                         Picker("", selection: Binding(
                             get: { model.appForegroundPolicy(for: app) },
                             set: { model.setAppForegroundPolicy($0, for: app) }

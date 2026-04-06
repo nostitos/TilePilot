@@ -68,6 +68,18 @@ struct WindowBadgeView: View {
                                 Text(title)
                             }
                             .disabled(row.disabledReason != nil)
+                        } else if featureID.rawValue == "app.never-auto-tile" {
+                            Toggle(isOn: Binding(
+                                get: {
+                                    model.isNeverAutoTileEnabled(for: badge.app)
+                                },
+                                set: { enabled in
+                                    model.setNeverAutoTileEnabled(enabled, for: badge.app)
+                                }
+                            )) {
+                                Text(title)
+                            }
+                            .disabled(row.disabledReason != nil)
                         } else {
                             Button(title) {
                                 model.runFeatureControl(featureID, source: .statusMenu, appContext: badge.app)

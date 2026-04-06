@@ -15,7 +15,7 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
     }
     if featureID.rawValue == "app.keep-on-top-when-floating" {
         let selectedApp = appContext?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let focusedApp = focusedWindowState?.app.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusedApp = focusedAppName
         let candidateApps = [selectedApp ?? "", focusedApp ?? ""]
         guard let appName = candidateApps.first(where: { !$0.isEmpty }) else {
             lastErrorMessage = "No app available to apply keep-on-top."
@@ -23,6 +23,18 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
             return
         }
         toggleKeepFrontWhenFloating(for: appName)
+        return
+    }
+    if featureID.rawValue == "app.never-auto-tile" {
+        let selectedApp = appContext?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusedApp = focusedAppName
+        let candidateApps = [selectedApp ?? "", focusedApp ?? ""]
+        guard let appName = candidateApps.first(where: { !$0.isEmpty }) else {
+            lastErrorMessage = "No app available to mark Never Auto-Tile."
+            lastActionMessage = nil
+            return
+        }
+        toggleNeverAutoTile(for: appName)
         return
     }
     if featureID.rawValue == "screen.bring-floating-front" {

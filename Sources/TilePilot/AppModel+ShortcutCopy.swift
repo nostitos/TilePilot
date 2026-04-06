@@ -13,16 +13,19 @@ extension AppModel {
             return "Stops tiling the windows on this desktop so you can move and overlap them freely."
         }
         if normalized.contains("tilepilot://feature/screen.set-tiled-all-visible") {
-            return "Puts the windows on this desktop back into tiles and evens out their sizes."
+            return "Puts eligible windows on this desktop back into tiles and leaves Never Auto-Tile apps floating."
         }
         if normalized.contains("tilepilot://feature/screen.grid-floating") {
             return "Places the windows on this desktop into a simple grid and leaves them floating."
         }
         if normalized.contains("tilepilot://feature/screen.grid-auto-tiled") {
-            return "Puts the windows on this desktop back into tiles and rebuilds a more even layout."
+            return "Retiles eligible windows on this desktop into a balanced layout and leaves Never Auto-Tile apps floating."
         }
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Toggles keep-on-top for the focused app when floating."
+        }
+        if normalized.contains("tilepilot://feature/app.never-auto-tile") {
+            return "Keeps the focused app out of tiled layouts."
         }
         if normalized.contains("tilepilot://feature/app.open-megamap") {
             return "Opens the large screenshot-based view of all desktops."
@@ -41,10 +44,10 @@ extension AppModel {
             return "Places the windows on this desktop into a simple grid and leaves them floating."
         }
         if c.contains("rebuild-balanced-tile-layout.sh") {
-            return "Puts the windows on this desktop back into tiles and rebuilds a more even layout."
+            return "Retiles eligible windows on this desktop into a balanced layout and leaves Never Auto-Tile apps floating."
         }
         if c.contains("grid-tiling-auto-tiled.sh") {
-            return "Puts the windows on this desktop back into tiles and rebuilds a more even layout."
+            return "Retiles eligible windows on this desktop into a balanced layout and leaves Never Auto-Tile apps floating."
         }
         if c.contains("grid-pack-toggle.sh") {
             return "Legacy helper for arranging the windows on this desktop into a floating grid."
@@ -166,6 +169,9 @@ extension AppModel {
         }
         if normalized.contains("tilepilot://feature/app.keep-on-top-when-floating") {
             return "Keep App on Top"
+        }
+        if normalized.contains("tilepilot://feature/app.never-auto-tile") {
+            return "Never Auto-Tile App"
         }
         if normalized.contains("tilepilot://feature/app.open-megamap") {
             return "Open MegaMap"

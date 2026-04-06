@@ -132,34 +132,14 @@ struct SetupGuideView: View {
                 .font(.body)
                 .foregroundStyle(.primary)
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Why TilePilot needs this")
-                        .font(.headline)
-                    Text(step.whyItMatters)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
             if step.isSatisfied {
                 if let detail = step.detail, !detail.isEmpty {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Current status")
-                                .font(.headline)
-                            Text(detail)
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    detailSection(title: "Current status", detail)
                 }
             } else {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("What to do now")
+                        Text("What to do next")
                             .font(.headline)
                         Text(step.whatToDo)
                             .font(.body)
@@ -180,6 +160,8 @@ struct SetupGuideView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+
+            detailSection(title: "Why TilePilot needs this", step.whyItMatters)
 
             Spacer(minLength: 0)
 
@@ -220,6 +202,19 @@ struct SetupGuideView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func detailSection(title: String, _ body: String) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                Text(body)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var completionState: some View {

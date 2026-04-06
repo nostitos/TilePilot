@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.9-defaults.2"
+    static let currentProfileVersion = "v0.2.13-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -11,6 +11,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             userState: ReleaseDefaultsUserState(
                 pinnedFeatureControlIDs: [
                     "app.keep-on-top-when-floating",
+                    "app.never-auto-tile",
                     "screen.set-floating-all-visible",
                     "screen.grid-auto-tiled",
                     "screen.grid-floating",

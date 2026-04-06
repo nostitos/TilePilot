@@ -425,6 +425,8 @@ extension AppModel {
         guard var state = await currentDesktopVisibleWindowsForBulkLayout() else { return }
         let totalVisibleCount = state.windows.count
         let limitedCount = state.windows.filter { !$0.isRuntimeManageable }.count
+        let neverAutoTileWindows = bulkLayoutNeverAutoTileWindows(from: state.windows)
+        let tilingEligibleWindows = bulkLayoutTilingEligibleWindows(from: state.windows)
 
         if totalVisibleCount == 0 {
             await MainActor.run {
@@ -449,21 +451,29 @@ extension AppModel {
                 operation,
                 totalVisibleCount: totalVisibleCount,
                 updatedCount: result.updated,
+                ruleExceptionCount: 0,
                 limitedCount: limitedCount,
                 failedCount: result.failed
             )
 
         case .tileAll:
             guard await runCurrentDesktopLayoutCommands([["-m", "space", "--layout", "bsp"]]) else { return }
-            let targets = state.windows.filter { $0.isRuntimeManageable && $0.floating }
-            let result = await setFloatingStateForWindows(targets, shouldFloat: false)
+            let floatExceptions = await setFloatingStateForWindows(
+                neverAutoTileWindows.filter { $0.isRuntimeManageable && !$0.floating },
+                shouldFloat: true
+            )
+            let result = await setFloatingStateForWindows(
+                tilingEligibleWindows.filter { $0.isRuntimeManageable && $0.floating },
+                shouldFloat: false
+            )
             guard await runCurrentDesktopLayoutCommands([["-m", "space", "--balance"]]) else { return }
             await finishVisibleWindowsLayoutOperation(
                 operation,
                 totalVisibleCount: totalVisibleCount,
                 updatedCount: result.updated,
+                ruleExceptionCount: neverAutoTileWindows.count,
                 limitedCount: limitedCount,
-                failedCount: result.failed
+                failedCount: result.failed + floatExceptions.failed
             )
 
         case .gridFloating:
@@ -487,22 +497,28 @@ extension AppModel {
                 operation,
                 totalVisibleCount: totalVisibleCount,
                 updatedCount: floatResult.updated + gridResult.updated,
+                ruleExceptionCount: 0,
                 limitedCount: limitedCount,
                 failedCount: floatResult.failed + gridResult.failed
             )
 
         case .rebuildTileLayout:
+            let floatExceptions = await setFloatingStateForWindows(
+                neverAutoTileWindows.filter { $0.isRuntimeManageable && !$0.floating },
+                shouldFloat: true
+            )
             let rebuildResult = await rebuildBalancedTileLayout(
                 spaceIndex: state.spaceIndex,
-                windows: state.windows
+                windows: tilingEligibleWindows
             )
 
             await finishVisibleWindowsLayoutOperation(
                 operation,
                 totalVisibleCount: totalVisibleCount,
                 updatedCount: rebuildResult.updated,
+                ruleExceptionCount: neverAutoTileWindows.count,
                 limitedCount: limitedCount,
-                failedCount: rebuildResult.failed
+                failedCount: rebuildResult.failed + floatExceptions.failed
             )
         }
 
@@ -552,6 +568,14 @@ extension AppModel {
             return lhs.id < rhs.id
         }
         return (spaceIndex, spaceDisplay, windows)
+    }
+
+    private func bulkLayoutNeverAutoTileWindows(from windows: [WindowState]) -> [WindowState] {
+        windows.filter { isNeverAutoTileEnabled(for: $0.app) }
+    }
+
+    private func bulkLayoutTilingEligibleWindows(from windows: [WindowState]) -> [WindowState] {
+        windows.filter { !isNeverAutoTileEnabled(for: $0.app) }
     }
 
     private func runCurrentDesktopLayoutCommands(_ commands: [[String]]) async -> Bool {
@@ -645,6 +669,7 @@ extension AppModel {
         guard !packable.isEmpty else { return (0, 0) }
 
         var failedWindowIDs: Set<Int> = []
+        let packableIDs = Set(packable.map(\.id))
 
         for window in packable {
             let ensured = await ensureWindowFloatingState(window: window, shouldFloat: true)
@@ -671,7 +696,7 @@ extension AppModel {
         try? await Task.sleep(for: .milliseconds(80))
 
         for window in packable.dropFirst() {
-            if let target = await largestManagedRetileTarget(spaceIndex: spaceIndex) {
+            if let target = await largestManagedRetileTarget(spaceIndex: spaceIndex, allowedWindowIDs: packableIDs) {
                 _ = await focusRetileWindow(target.id)
                 await ensureSplitType(windowID: target.id, desired: target.frameW >= target.frameH ? "vertical" : "horizontal")
             }
@@ -689,7 +714,6 @@ extension AppModel {
         _ = await runBestEffortYabaiCommand(["-m", "space", "--balance"], timeout: 1.0, log: false)
 
         let finalWindows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) ?? []
-        let packableIDs = Set(packable.map(\.id))
         let stillFloatingCount = finalWindows.filter {
             packableIDs.contains($0.id) &&
             $0.isVisible &&
@@ -763,10 +787,11 @@ extension AppModel {
         return result.isSuccess
     }
 
-    private func largestManagedRetileTarget(spaceIndex: Int) async -> RuntimeLayoutWindow? {
+    private func largestManagedRetileTarget(spaceIndex: Int, allowedWindowIDs: Set<Int>) async -> RuntimeLayoutWindow? {
         guard let windows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) else { return nil }
         return windows
             .filter {
+                allowedWindowIDs.contains($0.id) &&
                 $0.isVisible &&
                 !$0.isMinimized &&
                 !$0.isHidden &&
@@ -821,6 +846,7 @@ extension AppModel {
         _ operation: VisibleWindowsLayoutOperation,
         totalVisibleCount: Int,
         updatedCount: Int,
+        ruleExceptionCount: Int,
         limitedCount: Int,
         failedCount: Int
     ) async {
@@ -831,14 +857,21 @@ extension AppModel {
                 ? "All visible windows are already floating."
                 : "Set \(updatedCount) visible window(s) to floating."
         case .tileAll:
-            actionMessage = "Set visible windows to tiled and rebalanced the desktop."
+            actionMessage = updatedCount == 0
+                ? "No eligible windows were tiled on this desktop."
+                : "Tiled eligible windows on this desktop."
         case .gridFloating:
             actionMessage = "Packed \(totalVisibleCount - limitedCount) controllable window(s) into a floating grid."
         case .rebuildTileLayout:
-            actionMessage = "Rebuilt the tiled layout for the current desktop."
+            actionMessage = updatedCount == 0
+                ? "No eligible windows were retiled on this desktop."
+                : "Retiled eligible windows into a balanced tiled layout."
         }
 
         var issues: [String] = []
+        if ruleExceptionCount > 0 {
+            issues.append("Skipped \(ruleExceptionCount) Never Auto-Tile window(s).")
+        }
         if limitedCount > 0 {
             issues.append("Skipped \(limitedCount) limited window(s).")
         }

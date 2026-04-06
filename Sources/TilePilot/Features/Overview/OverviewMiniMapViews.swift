@@ -60,6 +60,10 @@ struct OverviewWindowIconControl: View {
         model.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating
     }
 
+    private var neverAutoTileEnabledForApp: Bool {
+        model.isNeverAutoTileEnabled(for: window.app)
+    }
+
     var body: some View {
         iconView
             .frame(width: 16, height: 16)
@@ -89,8 +93,22 @@ struct OverviewWindowIconControl: View {
 
             Divider()
 
-            Button((keepOnTopEnabledForApp ? "Disable " : "Enable ") + "Keep \(window.app) on Top") {
-                model.toggleKeepFrontWhenFloating(for: window.app)
+            Toggle(isOn: Binding(
+                get: { keepOnTopEnabledForApp },
+                set: { enabled in
+                    model.setAppForegroundPolicy(enabled ? .keepFrontWhenFloating : .useDefault, for: window.app)
+                }
+            )) {
+                Text("Keep \(window.app) on Top")
+            }
+
+            Toggle(isOn: Binding(
+                get: { neverAutoTileEnabledForApp },
+                set: { enabled in
+                    model.setNeverAutoTileEnabled(enabled, for: window.app)
+                }
+            )) {
+                Text("Never Auto-Tile \(window.app)")
             }
 
             if !runtimeEnabled {
@@ -391,6 +409,26 @@ private struct OverviewMiniWindowIconButton: View {
                 model.setWindowFloating(windowID: window.id, shouldFloat: false)
             }
             .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
+
+            Divider()
+
+            Toggle(isOn: Binding(
+                get: { model.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating },
+                set: { enabled in
+                    model.setAppForegroundPolicy(enabled ? .keepFrontWhenFloating : .useDefault, for: window.app)
+                }
+            )) {
+                Text("Keep \(window.app) on Top")
+            }
+
+            Toggle(isOn: Binding(
+                get: { model.isNeverAutoTileEnabled(for: window.app) },
+                set: { enabled in
+                    model.setNeverAutoTileEnabled(enabled, for: window.app)
+                }
+            )) {
+                Text("Never Auto-Tile \(window.app)")
+            }
 
             if !runtimeEnabled {
                 Divider()

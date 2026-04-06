@@ -340,13 +340,16 @@ final class StatusBarController: NSObject {
             switch item {
             case .feature(let row):
                 guard let featureID = row.featureID else { continue }
-                let disabledReason = row.disabledReason
+                let disabledReason = pinnedFeatureDisabledReason(row)
                 let leftLabel = disabledReason == nil ? row.title : "\(row.title) (\(disabledReason!))"
                 let menuItem = self.item(
                     leftLabel,
                     action: #selector(runPinnedFeature(_:)),
                     enabled: disabledReason == nil
                 )
+                if let appName = focusedAppNameForPinnedAppFeature(), let state = pinnedFeatureState(featureID, appName: appName) {
+                    menuItem.state = state
+                }
                 let comboRaw = row.shortcutEntry?.combo ?? row.assignedCombo ?? row.defaultCombo
                 applyMenuShortcut(to: menuItem, comboRaw: comboRaw)
                 menuItem.representedObject = featureID.rawValue
@@ -361,6 +364,40 @@ final class StatusBarController: NSObject {
             }
         }
         return true
+    }
+
+    private func focusedAppNameForPinnedAppFeature() -> String? {
+        model.focusedAppName
+    }
+
+    private func pinnedFeatureDisabledReason(_ row: FeatureControlRow) -> String? {
+        if let disabledReason = row.disabledReason {
+            return disabledReason
+        }
+        if let featureID = row.featureID, isPinnedAppScopedFeature(featureID), focusedAppNameForPinnedAppFeature() == nil {
+            return "No focused app"
+        }
+        return nil
+    }
+
+    private func isPinnedAppScopedFeature(_ featureID: FeatureControlID) -> Bool {
+        switch featureID.rawValue {
+        case "app.keep-on-top-when-floating", "app.never-auto-tile":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func pinnedFeatureState(_ featureID: FeatureControlID, appName: String) -> NSControl.StateValue? {
+        switch featureID.rawValue {
+        case "app.keep-on-top-when-floating":
+            return model.appForegroundPolicy(for: appName) == .keepFrontWhenFloating ? .on : .off
+        case "app.never-auto-tile":
+            return model.isNeverAutoTileEnabled(for: appName) ? .on : .off
+        default:
+            return nil
+        }
     }
 
     private func addPinnedDirectionalGroupItems(

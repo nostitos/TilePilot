@@ -4,116 +4,144 @@
 
 # TilePilot
 
-TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical for everyday use without a terminal-first setup flow.
+TilePilot is a native macOS productivity tool inspired by i3.
 
-## What You Can Do
+It helps regular Mac users move toward a predictable, keyboard-driven window workflow without starting from a terminal-first setup. Under the hood it uses `yabai` and `skhd`, but the product goal is broader than “make the helpers run”: TilePilot is meant to make an i3-style way of working feel learnable on macOS.
 
-- Tile or float windows without touching terminal commands
-- Control default behavior (`Manual Tiling`, `Hover Focus`, `Cursor Follows Focus`)
-- Set per-app rules (`Never Tile`, `Always Tile`)
-- Learn and run shortcuts from a GUI
-- Use Guided Setup when helpers, permissions, or services drift
-- Use MegaMap and window overlays for live desktop visibility
-- Edit `yabairc`, `skhdrc`, and helper scripts in one place
+## What That Means
 
-## Requirements
+TilePilot is built around a few ideas that come directly from the kind of workflow i3 is known for:
 
-- macOS 13+
+- stable desktops that stay predictable instead of constantly reordering themselves
+- a small set of repeatable actions for focus, movement, tiling, and recovery
+- tiled windows as the normal working state
+- floating windows as an explicit exception when an app does not tile well
+- keyboard shortcuts as the long-term path, with the GUI acting as scaffolding
+
+TilePilot is not trying to be a literal i3 clone on macOS. It is a practical transition layer for people who want the focus and speed of an i3-style workflow without giving up native macOS setup, visibility, and recovery tools.
+
+## What TilePilot Helps You Do
+
+- learn and run keyboard actions from a GUI before fully relying on memory
+- keep desktops and window state understandable through `Overview`, badges, and `MegaMap`
+- switch windows between floating and tiled states without losing track of what happened
+- rebuild a messy desktop into a usable tiled layout quickly
+- set app-level exceptions such as `Never Auto-Tile App` or `Keep App on Top`
+- manage `yabairc` and `skhdrc` safely without overwriting the rest of your config
+- recover from drifted permissions, helpers, or services through Guided Setup and `System`
+
+## Core Workflow
+
+If you want to use TilePilot the way it is intended, the path looks like this:
+
+1. Use `Overview` to understand what desktops and windows exist right now.
+2. Learn the core actions in `Actions & Shortcuts`.
+3. Let `Behaviors` define the defaults: which desktops tile, which apps never auto-tile, how focus behaves.
+4. Use `Appearance`, `MegaMap`, badges, and the right-click menu as visibility and recovery tools, not as the primary workflow.
+5. Gradually rely more on the keyboard and less on the GUI.
 
 ## Main UI Areas
 
-- `Overview`: windows/desktops overview + focused window controls
-- `Behaviors`: desktop tiling controls, app defaults/rules, focus & cursor controls
-- `Actions & Shortcuts`: unified controls list with shortcut learning + right-click menu pinning
-- `Appearance`: overlays and tiling spacing controls
-- `Config Files`: raw editing for `yabairc`, `skhdrc`, and referenced scripts
-- `System`: essentials checklist + direct fix actions
-  - Advanced sections (collapsed by default): managed `skhdrc` editor, diagnostics logs
+- `Overview`
+  - the daily command center
+  - shows displays, desktops, windows, focused state, and recovery when live state is degraded
+- `Behaviors`
+  - sets the rules behind the workflow
+  - desktop tiling, app rules, focus behavior, cursor behavior, and yabai mouse controls
+- `Actions & Shortcuts`
+  - the action catalog and shortcut learning surface
+  - record shortcuts, edit them, and pin frequent ones to the right-click menu
+- `Appearance`
+  - controls visual feedback and tiling spacing
+  - badges, outline overlay, outline width, screen edge padding, and gap between tiled windows
+- `Config Files`
+  - raw editing for managed config files and scripts
+  - includes backups and restore flows
+- `How It Works`
+  - visual explanations of the main concepts so settings tabs can stay focused on changing behavior
+- `System`
+  - setup, health, update checks, diagnostics, and Guided Setup reopen paths
 
-## How Tiling Decisions Are Made
+## Main Layout Actions
 
-TilePilot resolves behavior in this order:
+TilePilot now names layout actions by their outcome:
 
-1. Desktop behavior (`Desktop Tiling: On/Off`)
-2. App behavior (`Always Tile` / `Never Tile` / `Default`)
-3. Window override (manual per-window toggle)
+- `Float All Windows on This Desktop`
+  - stops tiling the eligible windows on the current desktop so you can move and overlap them freely
+- `Tile All Windows on This Desktop`
+  - tiles the eligible windows on the current desktop and leaves `Never Auto-Tile` apps floating
+- `Arrange Windows into a Floating Grid`
+  - places windows into a grid-like arrangement and leaves them floating
+- `Retile Windows into a Balanced Tiled Layout`
+  - rebuilds the current desktop into a more even tiled layout
+- `Rebalance Tiled Window Sizes`
+  - redistributes space across the tiled windows that are already on the current desktop
 
-Example:
-- If Desktop 3 has tiling `Off`, a window can still behave floating there even when its app is set to `Always Tile`.
-- Re-enable desktop tiling to make that app tile on that desktop.
+This naming is deliberate: the app should tell you where windows will end up, not force you to guess.
 
-## Behavior Apply Model
+## Setup
 
-- Applies immediately (debounced): global default, hover focus, cursor-follows-focus, and per-app behavior picker.
-- Requires `Apply`: manual edits in `Never Tile Apps` and `Always Tile Apps` list editors.
-- The bottom apply bar only appears when list edits are pending.
+### Requirements
 
-## Install (Binary)
+- macOS 13+
+
+### Install
 
 1. Download the latest DMG from [Releases](https://github.com/nostitos/TilePilot/releases/latest).
 2. Drag `TilePilot.app` into `Applications`.
-3. Open TilePilot and follow Guided Setup if helpers or permissions are still missing.
+3. Open TilePilot.
+4. Follow Guided Setup if helpers, permissions, or services still need attention.
 
-## First-Time Setup
+### First-Time Setup
 
 TilePilot ships with bundled `yabai` and `skhd` helpers and installs/manages them for you.
 
 You may still need to approve:
 
 - Accessibility for `TilePilot`, `yabai`, and `skhd`
-- Screen Recording if you want real MegaMap screenshots
+- Screen Recording if you want real `MegaMap` screenshots
 - Start at Login if you want TilePilot available after sign-in
+
+For the most predictable desktop behavior on macOS, TilePilot expects these Mission Control settings:
+
+- `Automatically rearrange Spaces based on most recent use`: `Off`
+- `Displays have separate Spaces`: `On`
+
+Path in macOS Settings:
+
+- `Desktop & Dock` -> `Mission Control`
 
 ## Supported Scope
 
-TilePilot currently focuses on the supported everyday path:
+TilePilot currently focuses on the everyday supported path:
 
 - bundled helper install and recovery
-- floating/tiled window actions
-- right-click menu actions and shortcuts
-- MegaMap with optional Screen Recording
+- keyboard actions, shortcut learning, and right-click menu pinning
+- tiled and floating window control
+- live desktop visibility through `Overview`, overlays, and `MegaMap`
+- safe config management for TilePilot-managed sections
 
 Advanced scripting-addition / SIP-dependent desktop-control workflows are intentionally out of scope for now.
 
-## Interactive Window Badges
+## Privacy and Safety
 
-- TilePilot shows a small state badge on the focused window and optional state outlines.
-- Left-click a badge to toggle that window between `Floating` and `Auto-Tiled`.
-- Right-click a badge for explicit actions:
-  - `Set Floating`
-  - `Set Auto-Tiled`
-  - `Toggle Floating/Auto-Tiled`
-  - `Focus Window`
-- Overlay toggles are available from the menu bar quick menu:
-  - `Window Badges`
-  - `Window Outline Overlay`
-
-## Feature Shortcuts (Unified)
-
-- TilePilot now treats screen-wide controls and regular controls as one shortcut feature list.
-- `Actions & Shortcuts` can show controls even when no shortcut is currently assigned.
-- You can pin feature controls directly to the right-click menu.
-- Screen-wide controls appear in the right-click menu only when pinned.
-- Shortcut assignment is saved in the TilePilot-managed `skhdrc` section (non-managed lines are preserved).
-- If a shortcut combo conflicts with an existing binding, TilePilot blocks save and suggests alternatives.
-
-## Release Defaults Profile
-
-- Each binary release ships a versioned TilePilot defaults profile.
-- On a fresh install, TilePilot applies that profile once (pins, toggles, and TilePilot-managed config sections).
-- On upgrades, TilePilot keeps your settings unchanged.
-- Use `System` -> `Reset to Release Defaults (...)` to force-apply the latest shipped defaults.
-- Reset scope is safe: only TilePilot app state plus TilePilot-managed `skhdrc`/`yabairc` sections are touched.
-
-## Notes
-
+- `MegaMap` screenshots stay in memory only for the current app session and are never written to disk.
 - TilePilot preserves your existing `yabairc` and `skhdrc` content outside the app-managed blocks.
-- TilePilot-managed config blocks use `TILEPILOT ...` markers.
-- `Shift + Option + M` now maps to `Arrange Windows into a Floating Grid`. The legacy `auto-layout-current-desktop.sh` and `readable-current-space.sh` names are kept only as compatibility aliases.
-- `Arrange Windows into a Floating Grid` keeps windows floating in a packed grid.
-- `Retile Windows into a Balanced Tiled Layout` rebuilds the current desktop into a more even tiled layout.
-- Legacy `bootstrap.sh` is treated as a display/desktop reset helper, not a normal day-to-day layout action.
-- MegaMap screenshots stay in memory only for the current app session and are not written to disk.
+- TilePilot-managed config uses `TILEPILOT ...` markers so the app only edits what it owns.
+- Each release ships a versioned defaults profile for fresh installs and explicit reset flows.
+
+## Updates
+
+- TilePilot can check GitHub Releases for newer stable versions.
+- The app links you to the release page rather than silently downloading or installing anything.
+
+## For Power Users
+
+TilePilot still exposes the underlying tools when you want them:
+
+- `Config Files` lets you edit `yabairc`, `skhdrc`, and referenced scripts directly.
+- Legacy aliases are kept where compatibility matters, but the product surfaces use clearer outcome-based names.
+- `bootstrap.sh` is treated as a legacy reset helper, not a normal day-to-day layout action.
 
 ## Developers
 

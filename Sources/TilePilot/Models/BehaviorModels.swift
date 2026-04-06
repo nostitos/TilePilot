@@ -135,7 +135,7 @@ enum AppTilingBehavior: String, Codable, CaseIterable, Sendable {
     var displayName: String {
         switch self {
         case .useDefault: return "Default"
-        case .neverTile: return "Never Tile"
+        case .neverTile: return "Never Auto-Tile"
         case .alwaysTile: return "Always Tile"
         }
     }

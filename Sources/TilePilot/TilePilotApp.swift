@@ -84,16 +84,6 @@ struct TilePilotRootView: View {
     @State private var selectedTab: TilePilotTab = .now
     @State private var hasAppliedInitialTabSelection = false
 
-    private let visibleTabs: [TilePilotTab] = [
-        .now,
-        .windowBehavior,
-        .actions,
-        .appearance,
-        .files,
-        .howItWorks,
-        .system,
-    ]
-
     private var showSetupGuideBinding: Binding<Bool> {
         Binding(
             get: { model.setupGuidePresentationState.isPresented },
@@ -106,11 +96,34 @@ struct TilePilotRootView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
-            Divider()
-            activeTabContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TabView(selection: $selectedTab) {
+            NowDashboardView()
+                .tabItem { Label(TilePilotTab.now.title, systemImage: TilePilotTab.now.systemImage) }
+                .tag(TilePilotTab.now)
+
+            WindowBehaviorDashboardView()
+                .tabItem { Label(TilePilotTab.windowBehavior.title, systemImage: TilePilotTab.windowBehavior.systemImage) }
+                .tag(TilePilotTab.windowBehavior)
+
+            UnifiedControlsDashboardView()
+                .tabItem { Label(TilePilotTab.actions.title, systemImage: TilePilotTab.actions.systemImage) }
+                .tag(TilePilotTab.actions)
+
+            AppearanceDashboardView()
+                .tabItem { Label(TilePilotTab.appearance.title, systemImage: TilePilotTab.appearance.systemImage) }
+                .tag(TilePilotTab.appearance)
+
+            FilesDashboardView()
+                .tabItem { Label(TilePilotTab.files.title, systemImage: TilePilotTab.files.systemImage) }
+                .tag(TilePilotTab.files)
+
+            HowItWorksDashboardView()
+                .tabItem { Label(TilePilotTab.howItWorks.title, systemImage: TilePilotTab.howItWorks.systemImage) }
+                .tag(TilePilotTab.howItWorks)
+
+            SystemDashboardView()
+                .tabItem { Label(TilePilotTab.system.title, systemImage: TilePilotTab.system.systemImage) }
+                .tag(TilePilotTab.system)
         }
         .onChange(of: model.requestedTilePilotTab) { newValue in
             if let newValue {
@@ -139,54 +152,6 @@ struct TilePilotRootView: View {
         .sheet(isPresented: showSetupGuideBinding) {
             SetupGuideView()
                 .environmentObject(model)
-        }
-    }
-
-    private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(visibleTabs, id: \.self) { tab in
-                    Button {
-                        selectedTab = tab
-                    } label: {
-                        Label(tab.title, systemImage: tab.systemImage)
-                            .font(.subheadline.weight(selectedTab == tab ? .semibold : .regular))
-                            .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(selectedTab == tab ? Color.accentColor.opacity(0.12) : Color.clear)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(tab.title)
-                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .background(.regularMaterial)
-    }
-
-    @ViewBuilder
-    private var activeTabContent: some View {
-        switch selectedTab {
-        case .now:
-            NowDashboardView()
-        case .windowBehavior:
-            WindowBehaviorDashboardView()
-        case .actions, .shortcuts:
-            UnifiedControlsDashboardView()
-        case .appearance:
-            AppearanceDashboardView()
-        case .files:
-            FilesDashboardView()
-        case .howItWorks:
-            HowItWorksDashboardView()
-        case .system, .config, .health, .setup, .logs:
-            SystemDashboardView()
         }
     }
 }

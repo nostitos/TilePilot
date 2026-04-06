@@ -885,6 +885,26 @@ private struct MegamapSyntheticDesktopCanvas: View {
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
 
+                        Divider()
+
+                        Toggle(isOn: Binding(
+                            get: { bridge.model.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating },
+                            set: { enabled in
+                                bridge.model.setAppForegroundPolicy(enabled ? .keepFrontWhenFloating : .useDefault, for: window.app)
+                            }
+                        )) {
+                            Text("Keep \(window.app) on Top")
+                        }
+
+                        Toggle(isOn: Binding(
+                            get: { bridge.model.isNeverAutoTileEnabled(for: window.app) },
+                            set: { enabled in
+                                bridge.model.setNeverAutoTileEnabled(enabled, for: window.app)
+                            }
+                        )) {
+                            Text("Never Auto-Tile \(window.app)")
+                        }
+
                         if !runtimeEnabled {
                             Divider()
                             Text("Unavailable: \(runtimeDisabledReason)")
@@ -998,6 +1018,26 @@ private struct MegamapMergedDesktopCanvas: View {
                             bridge.setWindowFloating(window, shouldFloat: false)
                         }
                         .disabled(!runtimeEnabled || !window.runtimeManageable || !window.floating)
+
+                        Divider()
+
+                        Toggle(isOn: Binding(
+                            get: { bridge.model.appForegroundPolicy(for: window.app) == .keepFrontWhenFloating },
+                            set: { enabled in
+                                bridge.model.setAppForegroundPolicy(enabled ? .keepFrontWhenFloating : .useDefault, for: window.app)
+                            }
+                        )) {
+                            Text("Keep \(window.app) on Top")
+                        }
+
+                        Toggle(isOn: Binding(
+                            get: { bridge.model.isNeverAutoTileEnabled(for: window.app) },
+                            set: { enabled in
+                                bridge.model.setNeverAutoTileEnabled(enabled, for: window.app)
+                            }
+                        )) {
+                            Text("Never Auto-Tile \(window.app)")
+                        }
 
                         if !runtimeEnabled {
                             Divider()

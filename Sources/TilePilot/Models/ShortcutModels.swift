@@ -85,6 +85,7 @@ struct DirectionalShortcutBinding: Identifiable, Sendable {
 
 enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
     case desktops
+    case templates
     case windowPlacement
     case tilingLayout
     case windowSize
@@ -99,6 +100,7 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
     var title: String {
         switch self {
         case .desktops: return "Desktops"
+        case .templates: return "Templates"
         case .windowPlacement: return "Window Placement"
         case .tilingLayout: return "Tiling & Layout"
         case .windowSize: return "Window Size"
@@ -115,14 +117,15 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
     var sortRank: Int {
         switch self {
         case .desktops: return 0
-        case .windowPlacement: return 1
-        case .tilingLayout: return 2
-        case .windowSize: return 3
-        case .helpersScripts: return 4
-        case .apps: return 5
-        case .focus: return 6
-        case .displays: return 7
-        case .automation: return 8
+        case .templates: return 1
+        case .windowPlacement: return 2
+        case .tilingLayout: return 3
+        case .windowSize: return 4
+        case .helpersScripts: return 5
+        case .apps: return 6
+        case .focus: return 7
+        case .displays: return 8
+        case .automation: return 9
         case .other: return 98
         case .experimental: return 99
         }

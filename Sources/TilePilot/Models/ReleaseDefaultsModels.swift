@@ -14,6 +14,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let windowOutlineOverlayBaseWidth: Double
     let tiledOverlayAccentColor: OverlayAccentColor
     let floatingOverlayAccentColor: OverlayAccentColor
+    let desktopScrubEnabled: Bool
+    let desktopScrubTriggerModifiers: [DesktopScrubModifier]
     let raiseOnFloatToggleEnabled: Bool
     let appForegroundPolicyByName: [String: AppForegroundPolicy]
     let performanceSettings: PerformanceSettings
@@ -27,6 +29,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         windowOutlineOverlayBaseWidth: Double,
         tiledOverlayAccentColor: OverlayAccentColor,
         floatingOverlayAccentColor: OverlayAccentColor,
+        desktopScrubEnabled: Bool,
+        desktopScrubTriggerModifiers: [DesktopScrubModifier],
         raiseOnFloatToggleEnabled: Bool,
         appForegroundPolicyByName: [String: AppForegroundPolicy],
         performanceSettings: PerformanceSettings
@@ -39,6 +43,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.windowOutlineOverlayBaseWidth = windowOutlineOverlayBaseWidth
         self.tiledOverlayAccentColor = tiledOverlayAccentColor
         self.floatingOverlayAccentColor = floatingOverlayAccentColor
+        self.desktopScrubEnabled = desktopScrubEnabled
+        self.desktopScrubTriggerModifiers = DesktopScrubModifier.normalize(desktopScrubTriggerModifiers)
         self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
         self.appForegroundPolicyByName = appForegroundPolicyByName
         self.performanceSettings = performanceSettings
@@ -53,6 +59,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case windowOutlineOverlayBaseWidth
         case tiledOverlayAccentColor
         case floatingOverlayAccentColor
+        case desktopScrubEnabled
+        case desktopScrubTriggerModifiers
         case raiseOnFloatToggleEnabled
         case appForegroundPolicyByName
         case performanceSettings
@@ -68,6 +76,10 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         windowOutlineOverlayBaseWidth = try container.decodeIfPresent(Double.self, forKey: .windowOutlineOverlayBaseWidth) ?? 2.0
         tiledOverlayAccentColor = try container.decodeIfPresent(OverlayAccentColor.self, forKey: .tiledOverlayAccentColor) ?? .tiledDefault
         floatingOverlayAccentColor = try container.decodeIfPresent(OverlayAccentColor.self, forKey: .floatingOverlayAccentColor) ?? .floatingDefault
+        desktopScrubEnabled = try container.decodeIfPresent(Bool.self, forKey: .desktopScrubEnabled) ?? true
+        desktopScrubTriggerModifiers = DesktopScrubModifier.loadFromUserDefaults(
+            rawValues: try container.decodeIfPresent([String].self, forKey: .desktopScrubTriggerModifiers)
+        )
         raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
         appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
         performanceSettings = try container.decodeIfPresent(PerformanceSettings.self, forKey: .performanceSettings) ?? .balanced

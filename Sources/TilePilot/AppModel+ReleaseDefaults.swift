@@ -151,6 +151,10 @@ extension AppModel {
         UserDefaults.standard.set(state.tiledOverlayAccentColor.userDefaultsArray, forKey: AppModel.tiledOverlayAccentColorDefaultsKey)
         floatingOverlayAccentColor = state.floatingOverlayAccentColor
         UserDefaults.standard.set(state.floatingOverlayAccentColor.userDefaultsArray, forKey: AppModel.floatingOverlayAccentColorDefaultsKey)
+        desktopScrubEnabled = state.desktopScrubEnabled
+        desktopScrubTriggerModifiers = DesktopScrubModifier.normalize(state.desktopScrubTriggerModifiers)
+        persistDesktopScrubSettings()
+        refreshDesktopScrubConfiguration()
         raiseOnFloatToggleEnabled = state.raiseOnFloatToggleEnabled
         UserDefaults.standard.set(raiseOnFloatToggleEnabled, forKey: AppModel.raiseOnFloatToggleDefaultsKey)
         performancePreset = state.performanceSettings.preset

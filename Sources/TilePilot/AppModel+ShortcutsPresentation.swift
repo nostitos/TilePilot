@@ -134,7 +134,7 @@ func buildFeatureControlRows(from baseRows: [UnifiedControlRow]) -> [FeatureCont
         if let mappedDefinition {
             usedFeatureIDs.insert(mappedDefinition.id)
         }
-        let disabledReason = mappedDefinition.map { featureDisabledReason(for: $0.capabilityGate) } ?? row.disabledReason
+        let disabledReason = mappedDefinition.map { featureDisabledReason(for: $0) } ?? row.disabledReason
         let bindingState: FeatureShortcutBindingState
         if let disabledReason {
             bindingState = .disabled(reason: disabledReason)
@@ -177,7 +177,7 @@ func buildFeatureControlRows(from baseRows: [UnifiedControlRow]) -> [FeatureCont
     result.append(contentsOf: featureRowsByID.values)
 
     for definition in featureDefinitions where !usedFeatureIDs.contains(definition.id) {
-        let disabledReason = featureDisabledReason(for: definition.capabilityGate)
+        let disabledReason = featureDisabledReason(for: definition)
         let bindingState: FeatureShortcutBindingState
         if let disabledReason {
             bindingState = .disabled(reason: disabledReason)

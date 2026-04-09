@@ -16,36 +16,38 @@ enum MapWindowPalette {
     private static let tiledBorder = Color(red: 0.20, green: 0.50, blue: 0.95)
     private static let tiledFocusedBorder = Color(red: 0.32, green: 0.66, blue: 1.0)
 
+    // Keep the floating-window palette warm and varied, but stop before red.
+    // In TilePilot, red already reads as an error/problem state elsewhere in the UI.
     private static let warmFamilies: [WarmFamily] = [
         WarmFamily(
-            floatingBorder: Color(red: 0.98, green: 0.74, blue: 0.22),
-            floatingFill: Color(red: 0.98, green: 0.74, blue: 0.22, opacity: 0.14),
-            limitedBorder: Color(red: 0.82, green: 0.72, blue: 0.49),
-            limitedFill: Color(red: 0.82, green: 0.72, blue: 0.49, opacity: 0.11)
+            floatingBorder: Color(red: 0.96, green: 0.83, blue: 0.37),
+            floatingFill: Color(red: 0.96, green: 0.83, blue: 0.37, opacity: 0.14),
+            limitedBorder: Color(red: 0.78, green: 0.70, blue: 0.48),
+            limitedFill: Color(red: 0.78, green: 0.70, blue: 0.48, opacity: 0.11)
         ),
         WarmFamily(
-            floatingBorder: Color(red: 0.99, green: 0.63, blue: 0.20),
-            floatingFill: Color(red: 0.99, green: 0.63, blue: 0.20, opacity: 0.14),
-            limitedBorder: Color(red: 0.83, green: 0.66, blue: 0.44),
-            limitedFill: Color(red: 0.83, green: 0.66, blue: 0.44, opacity: 0.11)
+            floatingBorder: Color(red: 0.95, green: 0.76, blue: 0.31),
+            floatingFill: Color(red: 0.95, green: 0.76, blue: 0.31, opacity: 0.14),
+            limitedBorder: Color(red: 0.77, green: 0.65, blue: 0.42),
+            limitedFill: Color(red: 0.77, green: 0.65, blue: 0.42, opacity: 0.11)
         ),
         WarmFamily(
-            floatingBorder: Color(red: 0.96, green: 0.52, blue: 0.18),
-            floatingFill: Color(red: 0.96, green: 0.52, blue: 0.18, opacity: 0.14),
-            limitedBorder: Color(red: 0.79, green: 0.58, blue: 0.41),
-            limitedFill: Color(red: 0.79, green: 0.58, blue: 0.41, opacity: 0.11)
+            floatingBorder: Color(red: 0.93, green: 0.69, blue: 0.29),
+            floatingFill: Color(red: 0.93, green: 0.69, blue: 0.29, opacity: 0.14),
+            limitedBorder: Color(red: 0.75, green: 0.60, blue: 0.37),
+            limitedFill: Color(red: 0.75, green: 0.60, blue: 0.37, opacity: 0.11)
         ),
         WarmFamily(
-            floatingBorder: Color(red: 0.94, green: 0.42, blue: 0.20),
-            floatingFill: Color(red: 0.94, green: 0.42, blue: 0.20, opacity: 0.14),
-            limitedBorder: Color(red: 0.77, green: 0.53, blue: 0.40),
-            limitedFill: Color(red: 0.77, green: 0.53, blue: 0.40, opacity: 0.11)
+            floatingBorder: Color(red: 0.91, green: 0.61, blue: 0.27),
+            floatingFill: Color(red: 0.91, green: 0.61, blue: 0.27, opacity: 0.14),
+            limitedBorder: Color(red: 0.72, green: 0.54, blue: 0.34),
+            limitedFill: Color(red: 0.72, green: 0.54, blue: 0.34, opacity: 0.11)
         ),
         WarmFamily(
-            floatingBorder: Color(red: 0.88, green: 0.31, blue: 0.22),
-            floatingFill: Color(red: 0.88, green: 0.31, blue: 0.22, opacity: 0.14),
-            limitedBorder: Color(red: 0.73, green: 0.47, blue: 0.40),
-            limitedFill: Color(red: 0.73, green: 0.47, blue: 0.40, opacity: 0.11)
+            floatingBorder: Color(red: 0.89, green: 0.53, blue: 0.26),
+            floatingFill: Color(red: 0.89, green: 0.53, blue: 0.26, opacity: 0.14),
+            limitedBorder: Color(red: 0.69, green: 0.48, blue: 0.32),
+            limitedFill: Color(red: 0.69, green: 0.48, blue: 0.32, opacity: 0.11)
         )
     ]
 

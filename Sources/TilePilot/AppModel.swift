@@ -53,11 +53,14 @@ final class AppModel: ObservableObject {
     private static let pinnedDirectionalGroupsDefaultsKey = "TilePilot.pinnedDirectionalGroupIDs"
     private static let pinnedFeatureControlsDefaultsKey = "TilePilot.pinnedFeatureControlIDs"
     private static let shortcutsCustomOrderDefaultsKey = "TilePilot.shortcutsCustomOrderIDs"
+    static let windowLayoutTemplatesDefaultsKey = "TilePilot.windowLayoutTemplates"
     static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
     static let windowOutlineOverlayBaseWidthDefaultsKey = "TilePilot.windowOutlineOverlayBaseWidth"
     static let tiledOverlayAccentColorDefaultsKey = "TilePilot.tiledOverlayAccentColor"
     static let floatingOverlayAccentColorDefaultsKey = "TilePilot.floatingOverlayAccentColor"
+    static let desktopScrubEnabledDefaultsKey = "TilePilot.desktopScrubEnabled"
+    static let desktopScrubTriggerModifiersDefaultsKey = "TilePilot.desktopScrubTriggerModifiers"
     static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
     static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
     static let performancePresetDefaultsKey = "TilePilot.performancePreset"
@@ -89,6 +92,21 @@ final class AppModel: ObservableObject {
         return mapped
     }
 
+    private static func loadWindowLayoutTemplates() -> [WindowLayoutTemplate] {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: AppModel.windowLayoutTemplatesDefaultsKey),
+              let templates = try? JSONDecoder().decode([WindowLayoutTemplate].self, from: data) else {
+            return []
+        }
+        return templates
+    }
+
+    private static func loadDesktopScrubTriggerModifiers() -> [DesktopScrubModifier] {
+        DesktopScrubModifier.loadFromUserDefaults(
+            rawValues: UserDefaults.standard.stringArray(forKey: AppModel.desktopScrubTriggerModifiersDefaultsKey)
+        )
+    }
+
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
     @Published var managedHelperInstallState: ManagedHelperInstallState?
@@ -111,6 +129,7 @@ final class AppModel: ObservableObject {
     @Published var appUpdateStatus: AppUpdateStatus = .idle
     @Published var appUpdateLastSuccessfulCheckAt: Date? = UserDefaults.standard.object(forKey: AppModel.appUpdateLastSuccessfulCheckAtDefaultsKey) as? Date
     @Published var dismissedAppUpdateVersion: String? = UserDefaults.standard.string(forKey: AppModel.appUpdateDismissedVersionDefaultsKey)
+    @Published var windowLayoutTemplates: [WindowLayoutTemplate] = AppModel.loadWindowLayoutTemplates()
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
@@ -150,6 +169,8 @@ final class AppModel: ObservableObject {
     @Published var actionsLastActionMessage: String?
     @Published var lastErrorMessage: String?
     @Published var lastActionMessage: String?
+    @Published var nativeSpacesScrubFeasibilityReport: NativeSpacesScrubFeasibilityReport?
+    @Published var nativeSpacesScrubFeasibilityReportURL: URL?
     @Published var lastExportURL: URL?
     @Published var lastSetupInstallerURL: URL?
     @Published var lastScriptingAdditionRepairURL: URL?
@@ -264,6 +285,16 @@ final class AppModel: ObservableObject {
         }
         return defaults.double(forKey: AppModel.windowOutlineOverlayBaseWidthDefaultsKey)
     }()
+    @Published var desktopScrubEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.desktopScrubEnabledDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: AppModel.desktopScrubEnabledDefaultsKey)
+    }()
+    @Published var desktopScrubTriggerModifiers: [DesktopScrubModifier] = AppModel.loadDesktopScrubTriggerModifiers()
+    @Published var desktopScrubStatusMessage: String?
+    @Published var desktopScrubStatusIsError = false
 
     let doctorService = DoctorService()
     let bootstrapService = BootstrapService()
@@ -275,6 +306,7 @@ final class AppModel: ObservableObject {
     let releaseDefaultsService = ReleaseDefaultsService()
     let megamapCaptureService = MegamapCaptureService()
     let appUpdateService = AppUpdateService()
+    let nativeSpacesScrubSpikeCoordinator = NativeSpacesScrubSpikeCoordinator()
     private let keepOnTopCoordinator = KeepOnTopCoordinator()
     private(set) var overviewDisplayPreviews: [OverviewDisplayPreview] = []
     private(set) var overviewDisplaySections: [OverviewDisplaySection] = []
@@ -334,6 +366,7 @@ final class AppModel: ObservableObject {
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
+        refreshDesktopScrubConfiguration()
         Task { [weak self] in
             await self?.ensureReleaseDefaultsInitializedIfNeeded()
         }
@@ -396,6 +429,7 @@ final class AppModel: ObservableObject {
         managedHelperAutoUpgradeTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
+        nativeSpacesScrubSpikeCoordinator.disableInteractiveScrubMode()
     }
 
     private static func loadPersistedAppUpdateStatus() -> AppUpdateStatus {
@@ -1264,7 +1298,11 @@ final class AppModel: ObservableObject {
     }
 
     var hasActiveOverlayConsumer: Bool {
-        hasVisibleTilePilotWindow || hasVisibleWindowBadgePanels
+        // Badge/outline overlays are a first-class runtime surface even when
+        // TilePilot is not the active app. If we require an already-visible
+        // panel before refreshing them, background overlays can get stuck off
+        // forever after a transient disappearance.
+        showWindowBadgeOverlay || showWindowOutlineOverlay || hasVisibleTilePilotWindow || hasVisibleWindowBadgePanels
     }
 
     var hasVisibleWindowBadgePanels = false

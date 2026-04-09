@@ -765,15 +765,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleDeepLink(_ url: URL) {
         guard url.scheme?.lowercased() == "tilepilot" else { return }
         let host = url.host?.lowercased() ?? ""
-        guard host == "feature" else { return }
-        let featureRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
-        guard !featureRaw.isEmpty else { return }
+        switch host {
+        case "feature":
+            let featureRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
+            guard !featureRaw.isEmpty else { return }
 
-        model.acknowledgeInitialStatusIfNeeded()
-        Task { [weak self] in
-            guard let self else { return }
-            await self.model.refreshLiveState()
-            self.model.runFeatureControl(FeatureControlID(rawValue: featureRaw), source: .shortcutsUI)
+            model.acknowledgeInitialStatusIfNeeded()
+            Task { [weak self] in
+                guard let self else { return }
+                await self.model.refreshLiveState()
+                self.model.runFeatureControl(FeatureControlID(rawValue: featureRaw), source: .shortcutsUI)
+            }
+        case "internal":
+            let actionRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
+            model.acknowledgeInitialStatusIfNeeded()
+            switch actionRaw {
+            case "native-spaces-scrub-spike":
+                guard model.experimentalNativeSpacesScrubSpikeEnabled else { return }
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.model.runExperimentalNativeSpacesScrubSpike()
+                }
+            case "enable-native-spaces-scrub":
+                guard model.experimentalNativeSpacesScrubSpikeEnabled else { return }
+                model.enableExperimentalNativeSpacesScrubInteraction()
+            case "disable-native-spaces-scrub":
+                model.disableExperimentalNativeSpacesScrubInteraction()
+            default:
+                return
+            }
+        default:
+            return
         }
     }
 

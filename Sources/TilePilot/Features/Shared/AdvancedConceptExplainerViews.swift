@@ -179,6 +179,85 @@ struct HoverFocusExplainerDiagram: View {
     }
 }
 
+struct DesktopScrubExplainerDiagram: View {
+    var body: some View {
+        ExplainerTwoUp {
+            ExplainerStage(title: "Hold the trigger keys") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        scrubKey("⇧")
+                        scrubKey("⌃")
+                        scrubKey("⌥")
+                    }
+
+                    HStack(spacing: 12) {
+                        roundedDesktop("1", active: true)
+                        roundedDesktop("2", active: false)
+                        roundedDesktop("3", active: false)
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "cursorarrow")
+                            .font(.title3)
+                        Text("Move the mouse left or right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } trailing: {
+            ExplainerStage(title: "Release to switch") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        roundedDesktop("1", active: false)
+                        roundedDesktop("2", active: true)
+                        roundedDesktop("3", active: false)
+                    }
+
+                    ZStack {
+                        Capsule()
+                            .fill(Color.blue.opacity(0.14))
+                            .frame(width: 130, height: 18)
+                        Image(systemName: "arrow.left.and.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.blue)
+                    }
+
+                    Text("Escape cancels the scrub and leaves the current desktop alone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func scrubKey(_ symbol: String) -> some View {
+        Text(symbol)
+            .font(.subheadline.weight(.semibold))
+            .frame(width: 34, height: 26)
+            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+    }
+
+    private func roundedDesktop(_ label: String, active: Bool) -> some View {
+        Text("#\(label)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(active ? Color.white : Color.primary)
+            .frame(width: 42, height: 28)
+            .background(
+                Capsule()
+                    .fill(active ? Color.blue : Color.secondary.opacity(0.10))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(active ? Color.blue : Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+    }
+}
+
 struct RightClickMenuExplainerDiagram: View {
     var body: some View {
         ExplainerStage(title: "Pin items here") {

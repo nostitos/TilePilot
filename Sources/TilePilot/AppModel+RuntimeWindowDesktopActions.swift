@@ -62,6 +62,12 @@ private struct RuntimeLayoutWindow: Decodable {
 
 @MainActor
 extension AppModel {
+    func applyWindowLayoutTemplate(templateID: UUID) {
+        Task { [weak self] in
+            await self?.applyWindowLayoutTemplateInternal(templateID: templateID)
+        }
+    }
+
     func bringFloatingWindowsToFrontCurrentDesktop() {
         Task { [weak self] in
             guard let self else { return }
@@ -526,6 +532,88 @@ extension AppModel {
         await refreshDoctor()
     }
 
+    private func applyWindowLayoutTemplateInternal(templateID: UUID) async {
+        guard let template = windowLayoutTemplate(withID: templateID) else {
+            await MainActor.run {
+                self.lastErrorMessage = "Template no longer exists."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        if let disabledReason = templateApplyDisabledReason(template) {
+            await MainActor.run {
+                self.lastErrorMessage = disabledReason
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        guard !template.slots.isEmpty else {
+            await MainActor.run {
+                self.lastErrorMessage = "Template has no slots yet."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        guard let state = await currentDesktopVisibleWindowsForBulkLayout(),
+              let display = state.display else {
+            return
+        }
+
+        let eligibleWindows = state.windows.filter(\.isRuntimeManageable)
+        let limitedCount = state.windows.filter { !$0.isRuntimeManageable }.count
+        let assignment = assignTemplateWindows(
+            for: template,
+            from: eligibleWindows
+        )
+        let assignedWindows = assignment.assignments.map(\.window)
+
+        guard !assignedWindows.isEmpty else {
+            await MainActor.run {
+                self.lastErrorMessage = "No windows matched this template on the current desktop."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        let floatResult = await setFloatingStateForWindows(
+            assignedWindows.filter { !$0.floating },
+            shouldFloat: true
+        )
+        if floatResult.updated > 0 {
+            try? await Task.sleep(for: .milliseconds(120))
+        }
+
+        let frameResult = await applyTemplateFrames(
+            assignments: assignment.assignments,
+            display: display
+        )
+
+        var issues: [String] = []
+        if assignment.emptyConstrainedSlotCount > 0 {
+            issues.append("Left \(assignment.emptyConstrainedSlotCount) constrained slot(s) empty.")
+        }
+        if limitedCount > 0 {
+            issues.append("Skipped \(limitedCount) limited window(s).")
+        }
+        let extraCount = max(0, assignment.extraWindowCount)
+        if extraCount > 0 {
+            issues.append("Left \(extraCount) extra eligible window(s) unchanged.")
+        }
+        let failedCount = floatResult.failed + frameResult.failed
+        if failedCount > 0 {
+            issues.append("\(failedCount) window(s) could not be placed.")
+        }
+
+        await MainActor.run {
+            self.lastActionMessage = "Applied template \(template.name) to \(assignedWindows.count) window(s)."
+            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+        }
+        await refreshLiveState()
+    }
+
     private func currentDesktopVisibleWindowsForBulkLayout() async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
         var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
         if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
@@ -604,6 +692,111 @@ extension AppModel {
         for window in windows {
             let toggled = await setWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
             if toggled {
+                updated += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        return (updated, failed)
+    }
+
+    private func orderedTemplateCandidateWindows(from windows: [WindowState]) -> [WindowState] {
+        guard let focusedIndex = windows.firstIndex(where: \.focused) else {
+            return windows
+        }
+        var ordered = windows
+        let focused = ordered.remove(at: focusedIndex)
+        ordered.insert(focused, at: 0)
+        return ordered
+    }
+
+    private func assignTemplateWindows(
+        for template: WindowLayoutTemplate,
+        from eligibleWindows: [WindowState]
+    ) -> (assignments: [(slot: WindowLayoutSlot, window: WindowState)], emptyConstrainedSlotCount: Int, extraWindowCount: Int) {
+        let orderedSlots = WindowLayoutTemplate.sortedSlots(template.slots)
+        let constrainedSlots = orderedSlots.filter { !$0.allowedApps.isEmpty }
+        let unconstrainedSlots = orderedSlots.filter(\.allowedApps.isEmpty)
+        let stableWindows = eligibleWindows
+        var usedWindowIDs = Set<Int>()
+        var assignments: [(slot: WindowLayoutSlot, window: WindowState)] = []
+        var emptyConstrainedSlotCount = 0
+
+        for slot in constrainedSlots {
+            let allowedKeys = Set(slot.allowedApps.map(normalizedAppRuleKey).filter { !$0.isEmpty })
+            guard !allowedKeys.isEmpty else { continue }
+            guard let match = stableWindows.first(where: { window in
+                !usedWindowIDs.contains(window.id) && allowedKeys.contains(normalizedAppRuleKey(window.app))
+            }) else {
+                emptyConstrainedSlotCount += 1
+                continue
+            }
+            usedWindowIDs.insert(match.id)
+            assignments.append((slot: slot, window: match))
+        }
+
+        let remainingWindows = orderedTemplateCandidateWindows(
+            from: stableWindows.filter { !usedWindowIDs.contains($0.id) }
+        )
+        var remainingIterator = remainingWindows.makeIterator()
+        for slot in unconstrainedSlots {
+            guard let match = remainingIterator.next() else { break }
+            usedWindowIDs.insert(match.id)
+            assignments.append((slot: slot, window: match))
+        }
+
+        let orderedAssignments = assignments.sorted { lhs, rhs in
+            let ordered = WindowLayoutTemplate.sortedSlots([lhs.slot, rhs.slot])
+            return ordered.first?.id == lhs.slot.id
+        }
+        return (
+            assignments: orderedAssignments,
+            emptyConstrainedSlotCount: emptyConstrainedSlotCount,
+            extraWindowCount: max(0, stableWindows.count - orderedAssignments.count)
+        )
+    }
+
+    private func applyTemplateFrames(
+        assignments: [(slot: WindowLayoutSlot, window: WindowState)],
+        display: DisplayState
+    ) async -> (updated: Int, failed: Int) {
+        guard !assignments.isEmpty else { return (0, 0) }
+
+        var updated = 0
+        var failed = 0
+
+        for assignment in assignments {
+            let window = assignment.window
+            let slot = assignment.slot
+            let absoluteFrame = CGRect(
+                x: display.frameX + (slot.normalizedX * display.frameW),
+                y: display.frameY + (slot.normalizedY * display.frameH),
+                width: max(80, slot.normalizedWidth * display.frameW),
+                height: max(60, slot.normalizedHeight * display.frameH)
+            ).integral
+
+            let resizeResult = await doctorService.runSupportCommand(
+                yabaiCommand(
+                    ["-m", "window", String(window.id), "--resize", "abs:\(Int(absoluteFrame.width)):\(Int(absoluteFrame.height))"],
+                    timeout: 1.5
+                )
+            )
+            await MainActor.run {
+                appendCommandLog(from: resizeResult)
+            }
+
+            let moveResult = await doctorService.runSupportCommand(
+                yabaiCommand(
+                    ["-m", "window", String(window.id), "--move", "abs:\(Int(absoluteFrame.minX)):\(Int(absoluteFrame.minY))"],
+                    timeout: 1.5
+                )
+            )
+            await MainActor.run {
+                appendCommandLog(from: moveResult)
+            }
+
+            if resizeResult.isSuccess && moveResult.isSuccess {
                 updated += 1
             } else {
                 failed += 1

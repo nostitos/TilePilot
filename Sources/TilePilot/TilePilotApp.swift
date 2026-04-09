@@ -4,6 +4,7 @@ import SwiftUI
 enum TilePilotTab: Hashable {
     case now
     case appearance
+    case templates
     case windowBehavior
     case actions
     case shortcuts
@@ -22,6 +23,8 @@ enum TilePilotTab: Hashable {
             return "Overview"
         case .appearance:
             return "Appearance"
+        case .templates:
+            return "Templates"
         case .windowBehavior:
             return "Behaviors"
         case .actions, .shortcuts:
@@ -41,6 +44,8 @@ enum TilePilotTab: Hashable {
             return "rectangle.3.group"
         case .appearance:
             return "paintbrush.pointed"
+        case .templates:
+            return "rectangle.3.offgrid"
         case .windowBehavior:
             return "hand.raised.square"
         case .actions, .shortcuts:
@@ -113,6 +118,10 @@ struct TilePilotRootView: View {
                 .tabItem { Label(TilePilotTab.appearance.title, systemImage: TilePilotTab.appearance.systemImage) }
                 .tag(TilePilotTab.appearance)
 
+            TemplatesDashboardView()
+                .tabItem { Label(TilePilotTab.templates.title, systemImage: TilePilotTab.templates.systemImage) }
+                .tag(TilePilotTab.templates)
+
             FilesDashboardView()
                 .tabItem { Label(TilePilotTab.files.title, systemImage: TilePilotTab.files.systemImage) }
                 .tag(TilePilotTab.files)
@@ -125,6 +134,7 @@ struct TilePilotRootView: View {
                 .tabItem { Label(TilePilotTab.system.title, systemImage: TilePilotTab.system.systemImage) }
                 .tag(TilePilotTab.system)
         }
+        .environment(\.controlActiveState, .key)
         .onChange(of: model.requestedTilePilotTab) { newValue in
             if let newValue {
                 selectedTab = newValue.canonicalVisibleTab

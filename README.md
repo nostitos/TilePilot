@@ -24,9 +24,12 @@ TilePilot is not trying to be a literal i3 clone on macOS. It is a practical tra
 
 - learn and run keyboard actions from a GUI before fully relying on memory
 - keep desktops and window state understandable through `Overview`, badges, and `MegaMap`
+- scrub between desktops with the mouse by holding a trigger and moving left or right
 - switch windows between floating and tiled states without losing track of what happened
 - rebuild a messy desktop into a usable tiled layout quickly
 - set app-level exceptions such as `Never Auto-Tile App` or `Keep App on Top`
+- create reusable floating layout templates for a display and apply them to the current desktop
+- import the current desktop layout into a template and constrain slots to specific apps
 - manage `yabairc` and `skhdrc` safely without overwriting the rest of your config
 - recover from drifted permissions, helpers, or services through Guided Setup and `System`
 
@@ -37,8 +40,9 @@ If you want to use TilePilot the way it is intended, the path looks like this:
 1. Use `Overview` to understand what desktops and windows exist right now.
 2. Learn the core actions in `Actions & Shortcuts`.
 3. Let `Behaviors` define the defaults: which desktops tile, which apps never auto-tile, how focus behaves.
-4. Use `Appearance`, `MegaMap`, badges, and the right-click menu as visibility and recovery tools, not as the primary workflow.
-5. Gradually rely more on the keyboard and less on the GUI.
+4. Use `Templates` when you want an exact floating layout for a display instead of a general tiled layout.
+5. Use `Appearance`, `MegaMap`, badges, and the right-click menu as visibility and recovery tools, not as the primary workflow.
+6. Gradually rely more on the keyboard and less on the GUI.
 
 ## Main UI Areas
 
@@ -47,13 +51,16 @@ If you want to use TilePilot the way it is intended, the path looks like this:
   - shows displays, desktops, windows, focused state, and recovery when live state is degraded
 - `Behaviors`
   - sets the rules behind the workflow
-  - desktop tiling, app rules, focus behavior, cursor behavior, and yabai mouse controls
+  - desktop tiling, desktop scrub, app rules, focus behavior, cursor behavior, and yabai mouse controls
 - `Actions & Shortcuts`
   - the action catalog and shortcut learning surface
   - record shortcuts, edit them, and pin frequent ones to the right-click menu
 - `Appearance`
   - controls visual feedback and tiling spacing
   - badges, outline overlay, outline width, screen edge padding, and gap between tiled windows
+- `Templates`
+  - manages exact floating layouts for the current display shape
+  - draw slots, split and duplicate them, import the current desktop layout, and constrain slots to specific apps
 - `Config Files`
   - raw editing for managed config files and scripts
   - includes backups and restore flows
@@ -78,6 +85,17 @@ TilePilot now names layout actions by their outcome:
   - redistributes space across the tiled windows that are already on the current desktop
 
 This naming is deliberate: the app should tell you where windows will end up, not force you to guess.
+
+## Desktop Scrub
+
+TilePilot also supports mouse-driven desktop scrubbing:
+
+- hold the selected trigger keys
+- move the mouse left or right to scrub between desktops
+- release to commit the desktop switch
+- press `Escape` to cancel
+
+You can enable it and change the trigger keys in `Behaviors`.
 
 ## Setup
 
@@ -118,6 +136,7 @@ TilePilot currently focuses on the everyday supported path:
 - bundled helper install and recovery
 - keyboard actions, shortcut learning, and right-click menu pinning
 - tiled and floating window control
+- exact floating layout templates with app-aware slot rules
 - live desktop visibility through `Overview`, overlays, and `MegaMap`
 - safe config management for TilePilot-managed sections
 

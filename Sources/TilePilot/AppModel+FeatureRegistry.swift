@@ -26,7 +26,7 @@ extension AppModel {
     }
 
     var featureDefinitions: [FeatureDefinition] {
-        [
+        var definitions: [FeatureDefinition] = [
             FeatureDefinition(
                 id: "screen.set-floating-all-visible",
                 group: .tilingLayout,
@@ -363,6 +363,26 @@ extension AppModel {
                 isExperimental: false
             ),
         ]
+        definitions.append(contentsOf: windowLayoutTemplates.map(templateFeatureDefinition))
+        return definitions
+    }
+
+    func templateFeatureDefinition(_ template: WindowLayoutTemplate) -> FeatureDefinition {
+        let featureID = templateFeatureID(for: template)
+        return FeatureDefinition(
+            id: featureID,
+            group: .templates,
+            title: "Apply Template: \(template.name)",
+            description: "Applies this floating window template to the current desktop on matching display shapes.",
+            backend: .tilePilotAction,
+            capabilityGate: .yabaiRuntime,
+            defaultCombo: nil,
+            commandMatchers: [tilePilotFeatureURL(featureID)],
+            matchAllCommandMatchers: false,
+            preferredCommand: tilePilotFeatureCommand(featureID),
+            actionID: nil,
+            isExperimental: false
+        )
     }
 
     func featureDefinition(for entry: ShortcutEntry) -> FeatureDefinition? {

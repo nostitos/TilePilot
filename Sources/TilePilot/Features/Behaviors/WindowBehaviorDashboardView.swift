@@ -10,6 +10,7 @@ struct WindowBehaviorDashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     precedenceCard
+                    desktopScrubCard
                     mouseDraggingCard
                     desktopBehaviorCard
                     defaultBehaviorCard
@@ -342,6 +343,61 @@ struct WindowBehaviorDashboardView: View {
         }
     }
 
+    private var desktopScrubCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Hold the trigger keys, move the mouse left or right, release to switch desktops. Press Escape to cancel.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Enable Desktop Scrub", isOn: Binding(
+                    get: { model.desktopScrubEnabled },
+                    set: { model.setDesktopScrubEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("Current Trigger")
+                        .frame(minWidth: 140, alignment: .leading)
+
+                    Text(model.desktopScrubTriggerSymbolsText)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+
+                    Text(model.desktopScrubTriggerWordsText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Trigger Keys")
+                        .font(.subheadline.weight(.semibold))
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
+                        ForEach(DesktopScrubModifier.allCases) { modifier in
+                            desktopScrubModifierButton(modifier)
+                        }
+                    }
+
+                    Text("Pick at least two keys.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let statusMessage = model.desktopScrubStatusMessage {
+                    Text(statusMessage)
+                        .font(.caption2)
+                        .foregroundStyle(model.desktopScrubStatusIsError ? .orange : .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Desktop Scrub", systemImage: "arrow.left.arrow.right.circle")
+        }
+    }
+
     private var applyBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -435,6 +491,29 @@ struct WindowBehaviorDashboardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func desktopScrubModifierButton(_ modifier: DesktopScrubModifier) -> some View {
+        let isSelected = model.desktopScrubTriggerModifiers.contains(modifier)
+
+        return Button {
+            model.toggleDesktopScrubModifier(modifier)
+        } label: {
+            Text(modifier.chipLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.12))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
     }
 }
 

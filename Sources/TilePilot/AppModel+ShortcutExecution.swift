@@ -37,6 +37,10 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         toggleNeverAutoTile(for: appName)
         return
     }
+    if let templateID = templateID(from: featureID) {
+        applyWindowLayoutTemplate(templateID: templateID)
+        return
+    }
     if featureID.rawValue == "screen.bring-floating-front" {
         bringFloatingWindowsToFrontCurrentDesktop()
         return
@@ -214,6 +218,16 @@ func featureDisabledReason(for gate: FeatureCapabilityGate) -> String? {
     case .scriptingAddition:
         return "Not supported by TilePilot."
     }
+}
+
+func featureDisabledReason(for definition: FeatureDefinition) -> String? {
+    if let templateID = templateID(from: definition.id) {
+        guard let template = windowLayoutTemplate(withID: templateID) else {
+            return "Template no longer exists."
+        }
+        return templateApplyDisabledReason(template)
+    }
+    return featureDisabledReason(for: definition.capabilityGate)
 }
 
 func normalizedShortcutCombo(_ combo: String) -> String {

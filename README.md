@@ -92,8 +92,7 @@ TilePilot also supports mouse-driven desktop scrubbing:
 
 - hold the selected trigger keys
 - move the mouse left or right to scrub between desktops
-- release to commit the desktop switch
-- press `Escape` to cancel
+- let go of the trigger keys and macOS settles on the desktop you scrubbed to
 
 You can enable it and change the trigger keys in `Behaviors`.
 

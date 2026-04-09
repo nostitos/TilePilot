@@ -35,7 +35,7 @@ final class NativeSpacesScrubSpikeCoordinator {
 
     var interactiveScrubTriggerDescription: String {
         let triggerWords = DesktopScrubModifier.wordsText(for: DesktopScrubModifier.from(flags: scrubTriggerModifiers))
-        return "Hold \(triggerWords), move the mouse horizontally, release the modifiers to commit, press Escape to cancel."
+        return "Hold \(triggerWords), move the mouse horizontally, then let go and macOS settles on that desktop."
     }
 
     var interactiveScrubEnabled: Bool {

@@ -346,7 +346,7 @@ struct WindowBehaviorDashboardView: View {
     private var desktopScrubCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Hold the trigger keys, move the mouse left or right, release to switch desktops. Press Escape to cancel.")
+                Text("Hold the trigger keys, move the mouse left or right, then let go to settle on that desktop.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 

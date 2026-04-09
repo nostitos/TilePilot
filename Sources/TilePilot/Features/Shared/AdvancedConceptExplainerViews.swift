@@ -206,7 +206,7 @@ struct DesktopScrubExplainerDiagram: View {
                 }
             }
         } trailing: {
-            ExplainerStage(title: "Release to switch") {
+            ExplainerStage(title: "Let go and settle there") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
                         roundedDesktop("1", active: false)
@@ -223,7 +223,7 @@ struct DesktopScrubExplainerDiagram: View {
                             .foregroundStyle(.blue)
                     }
 
-                    Text("Escape cancels the scrub and leaves the current desktop alone.")
+                    Text("When you let go of the trigger keys, macOS settles on the desktop you scrubbed to.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

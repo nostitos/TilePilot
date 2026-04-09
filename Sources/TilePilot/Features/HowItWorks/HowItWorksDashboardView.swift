@@ -49,7 +49,7 @@ struct HowItWorksDashboardView: View {
             }
             conceptCard(
                 title: "Desktop Scrub",
-                summary: "Hold the trigger keys, move the mouse left or right, release to switch desktops, and press Escape to cancel."
+                summary: "Hold the trigger keys, move the mouse left or right, then let go and macOS settles on that desktop."
             ) {
                 DesktopScrubExplainerDiagram()
             }

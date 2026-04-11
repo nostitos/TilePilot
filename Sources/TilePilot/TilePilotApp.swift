@@ -139,6 +139,7 @@ struct TilePilotRootView: View {
             if let newValue {
                 selectedTab = newValue.canonicalVisibleTab
                 model.currentVisibleTab = selectedTab
+                model.publishLatestLiveStateForCurrentTab(force: true)
                 _ = model.consumeRequestedTilePilotTab()
             }
         }
@@ -147,6 +148,7 @@ struct TilePilotRootView: View {
                 NSColorPanel.shared.orderOut(nil)
             }
             model.currentVisibleTab = newValue
+            model.publishLatestLiveStateForCurrentTab(force: true)
         }
         .task {
             if !hasAppliedInitialTabSelection {
@@ -154,6 +156,7 @@ struct TilePilotRootView: View {
                 hasAppliedInitialTabSelection = true
             }
             model.currentVisibleTab = selectedTab
+            model.publishLatestLiveStateForCurrentTab(force: true)
             model.startIfNeeded()
             if model.doctorSnapshot == nil {
                 await model.refreshDoctor()

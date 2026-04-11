@@ -8,17 +8,11 @@ extension AppModel {
     }
 
     var availableAppNamesFromLiveState: [String] {
-        let names = Set((liveStateSnapshot?.windows ?? []).map(\.app).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-        return names.sorted()
+        cachedAvailableAppNamesFromLiveState
     }
 
     var appNamesForBehaviorEditor: [String] {
-        let names = Set(availableAppNamesFromLiveState)
-            .union(windowBehaviorPolicyDraft.neverTileApps)
-            .union(windowBehaviorPolicyDraft.alwaysTileApps)
-            .union(stagedNeverTileApps)
-            .union(stagedAlwaysTileApps)
-        return names.sorted()
+        cachedAppNamesForBehaviorEditor
     }
 
     var focusedWindowState: WindowState? {
@@ -202,16 +196,19 @@ extension AppModel {
         focusedWindowState != nil && doctorSnapshot != nil
     }
 
-    func refreshWindowBadges(forceRepair: Bool = false) {
+    func refreshWindowBadges(forceRepair: Bool = false, contentSignature: String? = nil) {
         guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
+            lastWindowBadgeRefreshSignature = nil
             applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
         guard let snapshot = currentSnapshotForRuntimeConsumers else {
+            lastWindowBadgeRefreshSignature = nil
             applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
         guard snapshot.source == .yabai, !snapshot.degraded else {
+            lastWindowBadgeRefreshSignature = nil
             applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
@@ -241,6 +238,7 @@ extension AppModel {
             return window.frameW > 40 && window.frameH > 24
         }
         guard !sizeFiltered.isEmpty else {
+            lastWindowBadgeRefreshSignature = nil
             applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
@@ -253,6 +251,7 @@ extension AppModel {
             visibleSpaceCandidates = sizeFiltered.filter { visibleSpaceIndexes.contains($0.space) }
         }
         guard !visibleSpaceCandidates.isEmpty else {
+            lastWindowBadgeRefreshSignature = nil
             applyWindowBadgeState([], hoveredWindowID: nil, forcePublish: forceRepair)
             return
         }
@@ -300,6 +299,7 @@ extension AppModel {
             )
         }
         applyWindowBadgeState(badges, hoveredWindowID: nil, forcePublish: forceRepair)
+        lastWindowBadgeRefreshSignature = currentWindowBadgeRefreshSignature(contentSignature: contentSignature)
     }
 
     func updateHoveredWindowForBadges(candidates: [WindowState]? = nil) {
@@ -376,7 +376,7 @@ extension AppModel {
         )
     }
 
-    private func applyWindowBadgeState(_ badges: [WindowBadgeState], hoveredWindowID: Int?, forcePublish: Bool = false) {
+    func applyWindowBadgeState(_ badges: [WindowBadgeState], hoveredWindowID: Int?, forcePublish: Bool = false) {
         if forcePublish || windowBadges != badges {
             windowBadges = badges
         }
@@ -384,7 +384,7 @@ extension AppModel {
             hoveredWindowIDForBadges = hoveredWindowID
         }
         if forcePublish {
-            windowBadgeOverlayRefreshNonce &+= 1
+            windowBadgeOverlayRefreshSubject.send(())
         }
     }
 
@@ -402,7 +402,8 @@ extension AppModel {
 
     private func topmostOnScreenBadgeCandidate(from windows: [WindowState]) -> WindowState? {
         guard !windows.isEmpty else { return nil }
-        let windowIDs = Set(windows.map(\.id))
+        let windowsByID = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0) })
+        let windowIDs = Set(windowsByID.keys)
         guard let rawInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
               !rawInfo.isEmpty else {
             return nil
@@ -417,11 +418,43 @@ extension AppModel {
                   windowIDs.contains(number) else {
                 continue
             }
-            if let match = windows.first(where: { $0.id == number }) {
+            if let match = windowsByID[number] {
                 return match
             }
         }
 
         return nil
+    }
+
+    func rebuildLiveStateDerivedCaches() {
+        let names = Set(
+            (liveStateSnapshot?.windows ?? [])
+                .map(\.app)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+        cachedAvailableAppNamesFromLiveState = names.sorted()
+        rebuildBehaviorEditorAppNamesCache()
+    }
+
+    func rebuildBehaviorEditorAppNamesCache() {
+        let names = Set(cachedAvailableAppNamesFromLiveState)
+            .union(windowBehaviorPolicyDraft.neverTileApps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .union(windowBehaviorPolicyDraft.alwaysTileApps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .union(stagedNeverTileApps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .union(stagedAlwaysTileApps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter { !$0.isEmpty }
+        cachedAppNamesForBehaviorEditor = names.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    func currentWindowBadgeRefreshSignature(contentSignature: String? = nil) -> String? {
+        guard let snapshot = currentSnapshotForRuntimeConsumers, snapshot.source == .yabai, !snapshot.degraded else {
+            return nil
+        }
+        let baseSignature = contentSignature ?? liveStateContentSignature(for: snapshot)
+        let frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        return "\(baseSignature)###badge|\(frontmostPID)|\(showWindowBadgeOverlay ? 1 : 0)|\(showWindowOutlineOverlay ? 1 : 0)"
     }
 }

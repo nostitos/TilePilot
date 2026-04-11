@@ -4,6 +4,8 @@ struct WindowBehaviorDashboardView: View {
     @EnvironmentObject private var model: AppModel
     @State private var newNeverTileApp: String = ""
     @State private var newAlwaysTileApp: String = ""
+    @State private var desktopScrubSensitivityDraft = 1.0
+    @State private var isEditingDesktopScrubSensitivity = false
 
     var body: some View {
         NavigationStack {
@@ -20,6 +22,13 @@ struct WindowBehaviorDashboardView: View {
                 .padding()
             }
             .navigationTitle("TilePilot")
+            .onAppear {
+                syncDesktopScrubDraftsFromModel()
+            }
+            .onChange(of: model.desktopScrubSensitivity) { newValue in
+                guard !isEditingDesktopScrubSensitivity else { return }
+                desktopScrubSensitivityDraft = newValue
+            }
             .safeAreaInset(edge: .bottom) {
                 if model.isAppRuleListApplyRequired {
                     VStack(spacing: 0) {
@@ -345,45 +354,43 @@ struct WindowBehaviorDashboardView: View {
 
     private var desktopScrubCard: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Hold the trigger keys, move the mouse left or right, then let go to settle on that desktop.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                Toggle("Enable Desktop Scrub", isOn: Binding(
-                    get: { model.desktopScrubEnabled },
-                    set: { model.setDesktopScrubEnabled($0) }
-                ))
-                .toggleStyle(.switch)
-
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Current Trigger")
-                        .frame(minWidth: 140, alignment: .leading)
-
-                    Text(model.desktopScrubTriggerSymbolsText)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.12), in: Capsule())
-
-                    Text(model.desktopScrubTriggerWordsText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Trigger Keys")
-                        .font(.subheadline.weight(.semibold))
-
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
-                        ForEach(DesktopScrubModifier.allCases) { modifier in
-                            desktopScrubModifierButton(modifier)
-                        }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 18) {
+                        desktopScrubEnableGroup
+                        desktopScrubCurrentTriggerGroup
+                        desktopScrubSensitivityGroup
+                        desktopScrubInvertMovementGroup
+                        Spacer(minLength: 0)
                     }
 
-                    Text("Pick at least two keys.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 18) {
+                            desktopScrubEnableGroup
+                            desktopScrubCurrentTriggerGroup
+                            Spacer(minLength: 0)
+                        }
+                        HStack(alignment: .top, spacing: 18) {
+                            desktopScrubSensitivityGroup
+                            desktopScrubInvertMovementGroup
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 18) {
+                        desktopScrubTriggerKeysGroup
+                        Spacer(minLength: 0)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        desktopScrubTriggerKeysGroup
+                    }
                 }
 
                 if let statusMessage = model.desktopScrubStatusMessage {
@@ -396,6 +403,102 @@ struct WindowBehaviorDashboardView: View {
         } label: {
             Label("Desktop Scrub", systemImage: "arrow.left.arrow.right.circle")
         }
+    }
+
+    private var desktopScrubEnableGroup: some View {
+        desktopScrubSettingGroup(title: "Enable", bubble: nil) {
+            Toggle("", isOn: Binding(
+                get: { model.desktopScrubEnabled },
+                set: { model.setDesktopScrubEnabled($0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
+        .frame(width: 72, alignment: .leading)
+    }
+
+    private var desktopScrubCurrentTriggerGroup: some View {
+        desktopScrubSettingGroup(title: "Current Trigger", bubble: nil) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.desktopScrubTriggerSummaryText)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+
+                Text(model.desktopScrubTriggerWordsText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(width: 220, alignment: .leading)
+    }
+
+    private var desktopScrubTriggerKeysGroup: some View {
+        desktopScrubSettingGroup(
+            title: "Trigger Keys",
+            bubble: "Hold these modifier keys while scrubbing. Pick at least two. You can also require one extra letter or number key."
+        ) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 8) {
+                    ForEach(DesktopScrubModifier.allCases) { modifier in
+                        desktopScrubModifierButton(modifier)
+                    }
+
+                    Text("Character")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    desktopScrubCharacterKeyPicker
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ForEach(DesktopScrubModifier.allCases) { modifier in
+                            desktopScrubModifierButton(modifier)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Character")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        desktopScrubCharacterKeyPicker
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var desktopScrubSensitivityGroup: some View {
+        desktopScrubSettingGroup(
+            title: "Sensitivity",
+            bubble: "Higher sensitivity covers more desktop distance with the same mouse movement."
+        ) {
+            desktopScrubSlider(
+                value: $desktopScrubSensitivityDraft,
+                valueText: "\(desktopScrubValueText(desktopScrubSensitivityDraft))x",
+                range: 0.4 ... 5.0,
+                onEditingChanged: handleDesktopScrubSensitivityEditingChanged
+            )
+        }
+        .frame(width: 170, alignment: .leading)
+    }
+
+    private var desktopScrubInvertMovementGroup: some View {
+        desktopScrubSettingGroup(
+            title: "Invert Movement",
+            bubble: "Flips which way the scrub moves when your mouse moves left or right."
+        ) {
+            Toggle("", isOn: Binding(
+                get: { model.desktopScrubInvertDirection },
+                set: { model.setDesktopScrubInvertDirection($0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
+        .frame(width: 124, alignment: .leading)
     }
 
     private var applyBar: some View {
@@ -493,6 +596,56 @@ struct WindowBehaviorDashboardView: View {
         }
     }
 
+    private func desktopScrubSettingGroup<Content: View>(
+        title: String,
+        bubble: String?,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                if let bubble {
+                    DesktopScrubInfoBubbleButton(text: bubble)
+                }
+            }
+
+            content()
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func desktopScrubSlider(
+        value: Binding<Double>,
+        valueText: String,
+        range: ClosedRange<Double>,
+        onEditingChanged: @escaping (Bool) -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Slider(value: value, in: range, step: 0.1, onEditingChanged: onEditingChanged)
+                .frame(width: 92)
+
+            Text(valueText)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .trailing)
+        }
+    }
+
+    private var desktopScrubCharacterKeyPicker: some View {
+        Picker("", selection: Binding(
+            get: { model.desktopScrubTriggerCharacter },
+            set: { model.setDesktopScrubTriggerCharacter($0) }
+        )) {
+            ForEach(DesktopScrubCharacterKey.allCases) { key in
+                Text(key.displayName).tag(key)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(width: 84, alignment: .leading)
+    }
+
     private func desktopScrubModifierButton(_ modifier: DesktopScrubModifier) -> some View {
         let isSelected = model.desktopScrubTriggerModifiers.contains(modifier)
 
@@ -500,8 +653,7 @@ struct WindowBehaviorDashboardView: View {
             model.toggleDesktopScrubModifier(modifier)
         } label: {
             Text(modifier.chipLabel)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(
                     Capsule()
@@ -514,6 +666,43 @@ struct WindowBehaviorDashboardView: View {
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
+    }
+
+    private func syncDesktopScrubDraftsFromModel() {
+        desktopScrubSensitivityDraft = model.desktopScrubSensitivity
+    }
+
+    private func handleDesktopScrubSensitivityEditingChanged(_ isEditing: Bool) {
+        isEditingDesktopScrubSensitivity = isEditing
+        guard !isEditing else { return }
+        model.setDesktopScrubSensitivity(desktopScrubSensitivityDraft)
+    }
+
+    private func desktopScrubValueText(_ value: Double) -> String {
+        String(format: "%.1f", value)
+    }
+}
+
+private struct DesktopScrubInfoBubbleButton: View {
+    let text: String
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Image(systemName: "info.circle")
+                .font(.caption)
+                .foregroundStyle(isPresented ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .padding(12)
+                .frame(width: 240, alignment: .leading)
+        }
     }
 }
 

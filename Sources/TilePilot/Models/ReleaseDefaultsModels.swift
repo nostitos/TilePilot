@@ -16,6 +16,9 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let floatingOverlayAccentColor: OverlayAccentColor
     let desktopScrubEnabled: Bool
     let desktopScrubTriggerModifiers: [DesktopScrubModifier]
+    let desktopScrubTriggerCharacter: DesktopScrubCharacterKey
+    let desktopScrubSensitivity: Double
+    let desktopScrubInvertDirection: Bool
     let raiseOnFloatToggleEnabled: Bool
     let appForegroundPolicyByName: [String: AppForegroundPolicy]
     let performanceSettings: PerformanceSettings
@@ -31,6 +34,9 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         floatingOverlayAccentColor: OverlayAccentColor,
         desktopScrubEnabled: Bool,
         desktopScrubTriggerModifiers: [DesktopScrubModifier],
+        desktopScrubTriggerCharacter: DesktopScrubCharacterKey,
+        desktopScrubSensitivity: Double,
+        desktopScrubInvertDirection: Bool,
         raiseOnFloatToggleEnabled: Bool,
         appForegroundPolicyByName: [String: AppForegroundPolicy],
         performanceSettings: PerformanceSettings
@@ -45,6 +51,9 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.floatingOverlayAccentColor = floatingOverlayAccentColor
         self.desktopScrubEnabled = desktopScrubEnabled
         self.desktopScrubTriggerModifiers = DesktopScrubModifier.normalize(desktopScrubTriggerModifiers)
+        self.desktopScrubTriggerCharacter = desktopScrubTriggerCharacter
+        self.desktopScrubSensitivity = desktopScrubSensitivity
+        self.desktopScrubInvertDirection = desktopScrubInvertDirection
         self.raiseOnFloatToggleEnabled = raiseOnFloatToggleEnabled
         self.appForegroundPolicyByName = appForegroundPolicyByName
         self.performanceSettings = performanceSettings
@@ -61,6 +70,9 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case floatingOverlayAccentColor
         case desktopScrubEnabled
         case desktopScrubTriggerModifiers
+        case desktopScrubTriggerCharacter
+        case desktopScrubSensitivity
+        case desktopScrubInvertDirection
         case raiseOnFloatToggleEnabled
         case appForegroundPolicyByName
         case performanceSettings
@@ -80,6 +92,9 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         desktopScrubTriggerModifiers = DesktopScrubModifier.loadFromUserDefaults(
             rawValues: try container.decodeIfPresent([String].self, forKey: .desktopScrubTriggerModifiers)
         )
+        desktopScrubTriggerCharacter = try container.decodeIfPresent(DesktopScrubCharacterKey.self, forKey: .desktopScrubTriggerCharacter) ?? .none
+        desktopScrubSensitivity = try container.decodeIfPresent(Double.self, forKey: .desktopScrubSensitivity) ?? 1.0
+        desktopScrubInvertDirection = try container.decodeIfPresent(Bool.self, forKey: .desktopScrubInvertDirection) ?? true
         raiseOnFloatToggleEnabled = try container.decode(Bool.self, forKey: .raiseOnFloatToggleEnabled)
         appForegroundPolicyByName = try container.decode([String: AppForegroundPolicy].self, forKey: .appForegroundPolicyByName)
         performanceSettings = try container.decodeIfPresent(PerformanceSettings.self, forKey: .performanceSettings) ?? .balanced

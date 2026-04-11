@@ -246,21 +246,15 @@ extension AppModel {
 
     func appTilingBehavior(for appName: String) -> AppTilingBehavior {
         let key = normalizedAppRuleKey(appName)
-        if windowBehaviorPolicyDraft.neverTileApps.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return .neverTile
-        }
-        if windowBehaviorPolicyDraft.alwaysTileApps.contains(where: { normalizedAppRuleKey($0) == key }) {
-            return .alwaysTile
-        }
-        return externalYabaiAppBehaviorByName[key] ?? .useDefault
+        return cachedAppTilingBehaviorByNormalizedName[key] ?? .useDefault
     }
 
     func appForegroundPolicy(for appName: String) -> AppForegroundPolicy {
         let key = normalizedAppRuleKey(appName)
-        if let exact = appForegroundPolicyByName[key] {
+        if let exact = cachedAppForegroundPolicyByExactNormalizedName[key] {
             return exact
         }
-        if let legacy = appForegroundPolicyByName[legacyTruncatedAppRuleKey(for: key)] {
+        if let legacy = cachedAppForegroundPolicyByLegacyNormalizedName[legacyTruncatedAppRuleKey(for: key)] {
             return legacy
         }
         return .useDefault
@@ -542,6 +536,32 @@ extension AppModel {
     func persistAppForegroundPolicies() {
         let raw = appForegroundPolicyByName.mapValues(\.rawValue)
         UserDefaults.standard.set(raw, forKey: AppModel.appForegroundPolicyByNameDefaultsKey)
+    }
+
+    func rebuildAppBehaviorLookupCaches() {
+        var tilingByKey = externalYabaiAppBehaviorByName
+        for appName in windowBehaviorPolicyDraft.alwaysTileApps {
+            let key = normalizedAppRuleKey(appName)
+            guard !key.isEmpty else { continue }
+            tilingByKey[key] = .alwaysTile
+        }
+        for appName in windowBehaviorPolicyDraft.neverTileApps {
+            let key = normalizedAppRuleKey(appName)
+            guard !key.isEmpty else { continue }
+            tilingByKey[key] = .neverTile
+        }
+        cachedAppTilingBehaviorByNormalizedName = tilingByKey
+
+        var exactForegroundPolicies: [String: AppForegroundPolicy] = [:]
+        var legacyForegroundPolicies: [String: AppForegroundPolicy] = [:]
+        for (rawKey, policy) in appForegroundPolicyByName {
+            let normalizedKey = normalizedAppRuleKey(rawKey)
+            guard !normalizedKey.isEmpty else { continue }
+            exactForegroundPolicies[normalizedKey] = policy
+            legacyForegroundPolicies[legacyTruncatedAppRuleKey(for: normalizedKey)] = policy
+        }
+        cachedAppForegroundPolicyByExactNormalizedName = exactForegroundPolicies
+        cachedAppForegroundPolicyByLegacyNormalizedName = legacyForegroundPolicies
     }
 
     func applyWindowBehaviorRuntime(previous: ManagedWindowBehaviorPolicy, current: ManagedWindowBehaviorPolicy) async {

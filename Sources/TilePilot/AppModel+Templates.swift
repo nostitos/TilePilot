@@ -319,9 +319,10 @@ extension AppModel {
 
     func deleteWindowLayoutTemplateSlot(templateID: UUID, slotID: UUID) {
         guard let templateIndex = windowLayoutTemplates.firstIndex(where: { $0.id == templateID }) else { return }
-        let originalCount = windowLayoutTemplates[templateIndex].slots.count
-        let filtered = normalizedTemplateSlotZOrder(
-            windowLayoutTemplates[templateIndex].slots.filter { $0.id != slotID }
+        let originalSlots = canvasOrderedTemplateSlots(windowLayoutTemplates[templateIndex].slots)
+        let originalCount = originalSlots.count
+        let filtered = normalizedTemplateSlotZOrderPreservingOrder(
+            originalSlots.filter { $0.id != slotID }
         )
         guard filtered.count != originalCount else { return }
         windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(slots: filtered)
@@ -363,7 +364,7 @@ extension AppModel {
         canvasOrdered.insert(first, at: canvasIndex)
         canvasOrdered.insert(second, at: min(canvasIndex + 1, canvasOrdered.count))
         windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
-            slots: normalizedTemplateSlotZOrder(canvasOrdered)
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
         )
         persistWindowLayoutTemplates()
         return [first.id, second.id]
@@ -376,7 +377,43 @@ extension AppModel {
         let slot = canvasOrdered.remove(at: index)
         canvasOrdered.append(slot)
         windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
-            slots: normalizedTemplateSlotZOrder(canvasOrdered)
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
+        )
+        persistWindowLayoutTemplates()
+    }
+
+    func sendWindowLayoutTemplateSlotToBack(templateID: UUID, slotID: UUID) {
+        guard let templateIndex = windowLayoutTemplates.firstIndex(where: { $0.id == templateID }) else { return }
+        var canvasOrdered = canvasOrderedTemplateSlots(windowLayoutTemplates[templateIndex].slots)
+        guard let index = canvasOrdered.firstIndex(where: { $0.id == slotID }) else { return }
+        let slot = canvasOrdered.remove(at: index)
+        canvasOrdered.insert(slot, at: 0)
+        windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
+        )
+        persistWindowLayoutTemplates()
+    }
+
+    func moveWindowLayoutTemplateSlotForward(templateID: UUID, slotID: UUID) {
+        guard let templateIndex = windowLayoutTemplates.firstIndex(where: { $0.id == templateID }) else { return }
+        var canvasOrdered = canvasOrderedTemplateSlots(windowLayoutTemplates[templateIndex].slots)
+        guard let index = canvasOrdered.firstIndex(where: { $0.id == slotID }),
+              index < canvasOrdered.count - 1 else { return }
+        canvasOrdered.swapAt(index, index + 1)
+        windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
+        )
+        persistWindowLayoutTemplates()
+    }
+
+    func moveWindowLayoutTemplateSlotBackward(templateID: UUID, slotID: UUID) {
+        guard let templateIndex = windowLayoutTemplates.firstIndex(where: { $0.id == templateID }) else { return }
+        var canvasOrdered = canvasOrderedTemplateSlots(windowLayoutTemplates[templateIndex].slots)
+        guard let index = canvasOrdered.firstIndex(where: { $0.id == slotID }),
+              index > 0 else { return }
+        canvasOrdered.swapAt(index, index - 1)
+        windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
         )
         persistWindowLayoutTemplates()
     }
@@ -406,7 +443,7 @@ extension AppModel {
         )
         canvasOrdered.append(duplicate)
         windowLayoutTemplates[templateIndex] = windowLayoutTemplates[templateIndex].with(
-            slots: normalizedTemplateSlotZOrder(canvasOrdered)
+            slots: normalizedTemplateSlotZOrderPreservingOrder(canvasOrdered)
         )
         persistWindowLayoutTemplates()
         return duplicate.id

@@ -57,7 +57,7 @@ final class WindowBadgeOverlayController {
     }
 
     private func bind() {
-        model.$windowBadges
+        model.windowBadgesSubject
             .receive(on: RunLoop.main)
             .sink { [weak self] badges in
                 self?.scheduleOverlayUpdate(with: badges)
@@ -107,7 +107,7 @@ final class WindowBadgeOverlayController {
             }
             .store(in: &cancellables)
 
-        model.$windowBadgeOverlayRefreshNonce
+        model.windowBadgeOverlayRefreshSubject
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.invalidateAndReapplyOverlays()

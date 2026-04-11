@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import Foundation
 import SwiftUI
 
@@ -61,6 +62,9 @@ final class AppModel: ObservableObject {
     static let floatingOverlayAccentColorDefaultsKey = "TilePilot.floatingOverlayAccentColor"
     static let desktopScrubEnabledDefaultsKey = "TilePilot.desktopScrubEnabled"
     static let desktopScrubTriggerModifiersDefaultsKey = "TilePilot.desktopScrubTriggerModifiers"
+    static let desktopScrubTriggerCharacterDefaultsKey = "TilePilot.desktopScrubTriggerCharacter"
+    static let desktopScrubSensitivityDefaultsKey = "TilePilot.desktopScrubSensitivity"
+    static let desktopScrubInvertDirectionDefaultsKey = "TilePilot.desktopScrubInvertDirection"
     static let raiseOnFloatToggleDefaultsKey = "TilePilot.raiseOnFloatToggle"
     static let appForegroundPolicyByNameDefaultsKey = "TilePilot.appForegroundPolicyByName"
     static let performancePresetDefaultsKey = "TilePilot.performancePreset"
@@ -107,10 +111,39 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private static func loadDesktopScrubTriggerCharacter() -> DesktopScrubCharacterKey {
+        let defaults = UserDefaults.standard
+        guard let raw = defaults.string(forKey: AppModel.desktopScrubTriggerCharacterDefaultsKey),
+              let key = DesktopScrubCharacterKey(rawValue: raw) else {
+            return .none
+        }
+        return key
+    }
+
+    private static func loadDesktopScrubSensitivity() -> Double {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.desktopScrubSensitivityDefaultsKey) == nil {
+            return 1.0
+        }
+        return defaults.double(forKey: AppModel.desktopScrubSensitivityDefaultsKey)
+    }
+
+    private static func loadDesktopScrubInvertDirection() -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppModel.desktopScrubInvertDirectionDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: AppModel.desktopScrubInvertDirectionDefaultsKey)
+    }
+
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var bootstrapSnapshot: SetupBootstrapSnapshot?
     @Published var managedHelperInstallState: ManagedHelperInstallState?
-    @Published private(set) var liveStateSnapshot: LiveStateSnapshot?
+    @Published private(set) var liveStateSnapshot: LiveStateSnapshot? {
+        didSet {
+            rebuildLiveStateDerivedCaches()
+        }
+    }
     @Published var megamapDisplaySections: [MegamapDisplaySection] = []
     @Published var isRefreshingMegamap = false
     @Published var megamapCaptureProgress: MegamapCaptureProgress?
@@ -121,9 +154,15 @@ final class AppModel: ObservableObject {
     @Published var megamapCacheArmed: Bool = UserDefaults.standard.bool(forKey: AppModel.megamapCacheArmedDefaultsKey)
     @Published var setupGuidePresentationState: SetupGuidePresentationState = .hidden
     @Published var helperMigrationPrompt: HelperMigrationPromptState?
-    @Published var windowBadges: [WindowBadgeState] = []
-    @Published var windowBadgeOverlayRefreshNonce: UInt64 = 0
-    @Published var hoveredWindowIDForBadges: Int?
+    let windowBadgesSubject = CurrentValueSubject<[WindowBadgeState], Never>([])
+    let windowBadgeOverlayRefreshSubject = PassthroughSubject<Void, Never>()
+    var windowBadges: [WindowBadgeState] = [] {
+        didSet {
+            guard oldValue != windowBadges else { return }
+            windowBadgesSubject.send(windowBadges)
+        }
+    }
+    var hoveredWindowIDForBadges: Int?
     @Published private(set) var requestedTilePilotTab: TilePilotTab?
     @Published private(set) var requestedSystemPanelSection: SystemPanelSection?
     @Published var appUpdateStatus: AppUpdateStatus = .idle
@@ -139,11 +178,27 @@ final class AppModel: ObservableObject {
     @Published private(set) var requestedFileEditorTarget: EditorTarget?
     @Published var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
     @Published var managedConfigDraft: String = ""
-    @Published var editableFiles: [EditableConfigFile] = []
-    @Published var selectedEditableFilePath: String?
+    @Published var editableFiles: [EditableConfigFile] = [] {
+        didSet {
+            rebuildSelectedEditableFileCache()
+        }
+    }
+    @Published var selectedEditableFilePath: String? {
+        didSet {
+            rebuildSelectedEditableFileCache()
+        }
+    }
     @Published var selectedEditableFileBackups: [ConfigBackupInfo] = []
-    @Published var selectedEditableFileExists = false
-    @Published var selectedEditableFileKind: EditableFileKind = .other
+    @Published var selectedEditableFileExists = false {
+        didSet {
+            rebuildSelectedEditableFileCache()
+        }
+    }
+    @Published var selectedEditableFileKind: EditableFileKind = .other {
+        didSet {
+            rebuildSelectedEditableFileCache()
+        }
+    }
     @Published var editableFileDraft: String = ""
     @Published var editableFileOriginal: String = ""
     @Published var editableFileJumpTargetLine: Int?
@@ -156,7 +211,7 @@ final class AppModel: ObservableObject {
     @Published var commandLogs: [CommandLogEntry] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var isRefreshingBootstrap = false
-    @Published private(set) var isRefreshingLiveState = false
+    private(set) var isRefreshingLiveState = false
     @Published private(set) var isRefreshingShortcuts = false
     @Published var isRefreshingConfig = false
     @Published var isSavingConfig = false
@@ -189,14 +244,31 @@ final class AppModel: ObservableObject {
     @Published var isRefreshingYabaiConfig = false
     @Published var isSavingYabaiConfig = false
     @Published var isRestoringYabaiConfig = false
-    @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default
+    @Published var windowBehaviorPolicyDraft = ManagedWindowBehaviorPolicy.default {
+        didSet {
+            rebuildAppBehaviorLookupCaches()
+            rebuildBehaviorEditorAppNamesCache()
+        }
+    }
     @Published var windowBehaviorAutosaveActionMessage: String?
     @Published var windowBehaviorAutosaveErrorMessage: String?
-    @Published var stagedNeverTileApps: [String] = []
-    @Published var stagedAlwaysTileApps: [String] = []
+    @Published var stagedNeverTileApps: [String] = [] {
+        didSet {
+            rebuildBehaviorEditorAppNamesCache()
+        }
+    }
+    @Published var stagedAlwaysTileApps: [String] = [] {
+        didSet {
+            rebuildBehaviorEditorAppNamesCache()
+        }
+    }
     @Published var isApplyingStagedAppRules = false
     @Published var raiseOnFloatToggleEnabled: Bool = true
-    @Published var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName()
+    @Published var appForegroundPolicyByName: [String: AppForegroundPolicy] = AppModel.loadAppForegroundPolicyByName() {
+        didSet {
+            rebuildAppBehaviorLookupCaches()
+        }
+    }
     @Published var performancePreset: PerformancePreset = {
         let defaults = UserDefaults.standard
         guard let raw = defaults.string(forKey: AppModel.performancePresetDefaultsKey),
@@ -293,6 +365,9 @@ final class AppModel: ObservableObject {
         return defaults.bool(forKey: AppModel.desktopScrubEnabledDefaultsKey)
     }()
     @Published var desktopScrubTriggerModifiers: [DesktopScrubModifier] = AppModel.loadDesktopScrubTriggerModifiers()
+    @Published var desktopScrubTriggerCharacter: DesktopScrubCharacterKey = AppModel.loadDesktopScrubTriggerCharacter()
+    @Published var desktopScrubSensitivity: Double = AppModel.loadDesktopScrubSensitivity()
+    @Published var desktopScrubInvertDirection: Bool = AppModel.loadDesktopScrubInvertDirection()
     @Published var desktopScrubStatusMessage: String?
     @Published var desktopScrubStatusIsError = false
 
@@ -323,12 +398,19 @@ final class AppModel: ObservableObject {
     private(set) var cachedPinnedShortcutEntries: [ShortcutEntry] = []
     private(set) var cachedPinnedDirectionalGroupBindings: [(group: DirectionalShortcutGroup, bindings: [DirectionalShortcutBinding])] = []
     private(set) var cachedPinnedShortcutContextItems: [PinnedShortcutContextItem] = []
+    var cachedAvailableAppNamesFromLiveState: [String] = []
+    var cachedAppNamesForBehaviorEditor: [String] = []
+    var cachedSelectedEditableFile: EditableConfigFile?
+    var cachedAppTilingBehaviorByNormalizedName: [String: AppTilingBehavior] = [:]
+    var cachedAppForegroundPolicyByExactNormalizedName: [String: AppForegroundPolicy] = [:]
+    var cachedAppForegroundPolicyByLegacyNormalizedName: [String: AppForegroundPolicy] = [:]
     @Published var runtimeDiagnostics = RuntimeDiagnostics()
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var managedHelperAutoUpgradeTask: Task<Void, Never>?
     var hasDismissedAutomaticSetupGuideThisSession = false
     private var lastLiveStateContentSignature: String?
+    private var lastLiveStateUIPublishAt: Date?
     var latestLiveStateSnapshot: LiveStateSnapshot?
     private var overviewCachesDirty = true
     private var shortcutPresentationCachesDirty = true
@@ -340,6 +422,7 @@ final class AppModel: ObservableObject {
     private var consecutiveHealthySamples = 0
     private let degradedEnterThreshold = 3
     private let degradedExitThreshold = 5
+    var lastWindowBadgeRefreshSignature: String?
     var megamapCaptureRecordsByDesktopID: [String: MegamapCaptureRecord] = [:]
     var megamapDesktopMessagesByID: [String: String] = [:]
     var megamapLastCaptureDateByDesktopID: [String: Date] = [:]
@@ -350,7 +433,11 @@ final class AppModel: ObservableObject {
     var originalWindowBehaviorPolicy = ManagedWindowBehaviorPolicy.default
     var originalYabaiManagedConfigSection: String = ""
     var scriptHeaderDescriptionCache: [String: String?] = [:]
-    var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:]
+    var externalYabaiAppBehaviorByName: [String: AppTilingBehavior] = [:] {
+        didSet {
+            rebuildAppBehaviorLookupCaches()
+        }
+    }
     private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
     let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
     var hasAttemptedReleaseDefaultsInitialization = false
@@ -362,6 +449,10 @@ final class AppModel: ObservableObject {
 
     init() {
         appUpdateStatus = Self.loadPersistedAppUpdateStatus()
+        rebuildLiveStateDerivedCaches()
+        rebuildAppBehaviorLookupCaches()
+        rebuildBehaviorEditorAppNamesCache()
+        rebuildSelectedEditableFileCache()
     }
 
     func startIfNeeded() {
@@ -549,9 +640,22 @@ final class AppModel: ObservableObject {
 
     func publishLiveStateSnapshotIfNeeded(_ snapshot: LiveStateSnapshot? = nil, force: Bool = false) {
         let target = snapshot ?? latestLiveStateSnapshot
-        guard force || hasOnScreenTilePilotWindow else { return }
+        guard hasOnScreenTilePilotWindow else { return }
+        if !force {
+            guard let minimumInterval = liveStateUIPublishMinimumInterval(for: currentVisibleTab) else { return }
+            if minimumInterval > 0,
+               let lastLiveStateUIPublishAt,
+               Date().timeIntervalSince(lastLiveStateUIPublishAt) < minimumInterval {
+                return
+            }
+        }
         guard liveStateSnapshot != target else { return }
         liveStateSnapshot = target
+        lastLiveStateUIPublishAt = Date()
+    }
+
+    func publishLatestLiveStateForCurrentTab(force: Bool = false) {
+        publishLiveStateSnapshotIfNeeded(latestLiveStateSnapshot ?? liveStateSnapshot, force: force)
     }
 
     func refreshLiveState() async {
@@ -572,7 +676,7 @@ final class AppModel: ObservableObject {
             recordRuntimeBurst(.unchangedPoll)
             mutateRuntimeDiagnostics { $0.liveStateUnchangedPollCount += 1 }
             if hasVisibleWindowBadgePanels {
-                refreshWindowBadgesIfNeeded(forceRepair: true)
+                refreshWindowBadgesIfNeeded(forceRepair: true, contentSignature: contentSignature)
             }
             updateRuntimeDiagnosticsMode(for: snapshot)
             await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
@@ -583,7 +687,7 @@ final class AppModel: ObservableObject {
         mutateRuntimeDiagnostics { $0.liveStatePublishedCount += 1 }
         updateOverviewCachesForCurrentVisibility(with: snapshot)
         publishLiveStateSnapshotIfNeeded(snapshot)
-        refreshWindowBadgesIfNeeded()
+        refreshWindowBadgesIfNeeded(contentSignature: contentSignature)
         updateRuntimeDiagnosticsMode(for: snapshot)
         await applyForegroundPolicyTransitions(previous: previousSnapshot, current: snapshot)
         await enforceKeepOnTopPoliciesIfNeeded(for: snapshot)
@@ -1280,12 +1384,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func refreshWindowBadgesIfNeeded(forceRepair: Bool = false) {
+    private func refreshWindowBadgesIfNeeded(forceRepair: Bool = false, contentSignature: String? = nil) {
         guard showWindowBadgeOverlay || showWindowOutlineOverlay else {
-            refreshWindowBadges(forceRepair: forceRepair)
+            lastWindowBadgeRefreshSignature = nil
+            refreshWindowBadges(forceRepair: forceRepair, contentSignature: contentSignature)
             return
         }
         guard hasActiveOverlayConsumer else {
+            lastWindowBadgeRefreshSignature = nil
             if !windowBadges.isEmpty {
                 windowBadges = []
             }
@@ -1294,7 +1400,14 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        refreshWindowBadges(forceRepair: forceRepair)
+        let signature = currentWindowBadgeRefreshSignature(contentSignature: contentSignature)
+        if let signature, signature == lastWindowBadgeRefreshSignature {
+            if forceRepair {
+                applyWindowBadgeState(windowBadges, hoveredWindowID: hoveredWindowIDForBadges, forcePublish: true)
+            }
+            return
+        }
+        refreshWindowBadges(forceRepair: forceRepair, contentSignature: contentSignature)
     }
 
     var hasActiveOverlayConsumer: Bool {
@@ -1353,7 +1466,7 @@ final class AppModel: ObservableObject {
         return "Mixed"
     }
 
-    private func liveStateContentSignature(for snapshot: LiveStateSnapshot) -> String {
+    func liveStateContentSignature(for snapshot: LiveStateSnapshot) -> String {
         let displays = snapshot.displays.map {
             "\($0.id)|\($0.name)|\($0.frameX)|\($0.frameY)|\($0.frameW)|\($0.frameH)|\($0.focused)|\($0.windowCount)|\($0.source.rawValue)"
         }.joined(separator: "||")
@@ -1389,5 +1502,16 @@ final class AppModel: ObservableObject {
             interval = min(interval, 0.8)
         }
         return interval
+    }
+
+    private func liveStateUIPublishMinimumInterval(for tab: TilePilotTab) -> TimeInterval? {
+        switch tab {
+        case .now:
+            return 0
+        case .windowBehavior:
+            return 3.0
+        default:
+            return nil
+        }
     }
 }

@@ -7,15 +7,7 @@ extension AppModel {
     }
 
     var selectedEditableFile: EditableConfigFile? {
-        guard let path = selectedEditableFilePath else { return nil }
-        return editableFiles.first(where: { $0.path == path }) ??
-            EditableConfigFile(
-                path: path,
-                displayName: URL(fileURLWithPath: path).lastPathComponent,
-                kind: selectedEditableFileKind,
-                exists: selectedEditableFileExists,
-                isDiscovered: true
-            )
+        cachedSelectedEditableFile
     }
 
     var isEditableFileDraftDirty: Bool {
@@ -209,6 +201,26 @@ extension AppModel {
         runSupportCommand(
             yabaiCommand(["--restart-service"], timeout: 2.0),
             successMessage: "Requested yabai service restart."
+        )
+    }
+
+    func rebuildSelectedEditableFileCache() {
+        guard let path = selectedEditableFilePath else {
+            cachedSelectedEditableFile = nil
+            return
+        }
+
+        if let discovered = editableFiles.first(where: { $0.path == path }) {
+            cachedSelectedEditableFile = discovered
+            return
+        }
+
+        cachedSelectedEditableFile = EditableConfigFile(
+            path: path,
+            displayName: URL(fileURLWithPath: path).lastPathComponent,
+            kind: selectedEditableFileKind,
+            exists: selectedEditableFileExists,
+            isDiscovered: true
         )
     }
 }

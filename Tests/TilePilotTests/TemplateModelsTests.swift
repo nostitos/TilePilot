@@ -52,6 +52,17 @@ final class TemplateModelsTests: XCTestCase {
         XCTAssertEqual(slot.allowedApps, ["Slack", "Telegram"])
     }
 
+    func testNormalizedTemplateSlotZOrderPreservingOrderKeepsCanvasSequence() {
+        let a = WindowLayoutSlot(normalizedX: 0.05, normalizedY: 0.05, normalizedWidth: 0.2, normalizedHeight: 0.2, zIndex: 0)
+        let b = WindowLayoutSlot(normalizedX: 0.35, normalizedY: 0.05, normalizedWidth: 0.2, normalizedHeight: 0.2, zIndex: 1)
+        let c = WindowLayoutSlot(normalizedX: 0.65, normalizedY: 0.05, normalizedWidth: 0.2, normalizedHeight: 0.2, zIndex: 2)
+
+        let reordered = normalizedTemplateSlotZOrderPreservingOrder([a, c, b])
+
+        XCTAssertEqual(reordered.map(\.id), [a.id, c.id, b.id])
+        XCTAssertEqual(reordered.map(\.zIndex), [0, 1, 2])
+    }
+
     func testClampedNormalizedTemplateRectStaysWithinCanvasBounds() {
         let rect = clampedNormalizedTemplateRect(CGRect(x: 0.92, y: 0.95, width: 0.2, height: 0.2))
 

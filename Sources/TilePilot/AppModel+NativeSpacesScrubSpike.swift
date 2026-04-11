@@ -20,12 +20,50 @@ extension AppModel {
     }
 
     var desktopScrubTriggerWordsText: String {
-        DesktopScrubModifier.wordsText(for: desktopScrubTriggerModifiers)
+        let modifierText = DesktopScrubModifier.wordsText(for: desktopScrubTriggerModifiers)
+        if desktopScrubTriggerCharacter == .none {
+            return modifierText
+        }
+        return "\(modifierText) + \(desktopScrubTriggerCharacter.keyDisplayText)"
+    }
+
+    var desktopScrubTriggerSummaryText: String {
+        let modifierSymbols = DesktopScrubModifier.symbolsText(for: desktopScrubTriggerModifiers)
+        if desktopScrubTriggerCharacter == .none {
+            return modifierSymbols
+        }
+        return "\(modifierSymbols) + \(desktopScrubTriggerCharacter.keyDisplayText)"
+    }
+
+    var desktopScrubSensitivityDisplayText: String {
+        String(format: "%.1f", desktopScrubSensitivity)
+    }
+
+    func setDesktopScrubInvertDirection(_ enabled: Bool) {
+        guard desktopScrubInvertDirection != enabled else { return }
+        desktopScrubInvertDirection = enabled
+        persistDesktopScrubSettings()
+        refreshDesktopScrubConfiguration()
+    }
+
+    func setDesktopScrubTriggerCharacter(_ key: DesktopScrubCharacterKey) {
+        guard desktopScrubTriggerCharacter != key else { return }
+        desktopScrubTriggerCharacter = key
+        persistDesktopScrubSettings()
+        refreshDesktopScrubConfiguration()
     }
 
     func setDesktopScrubEnabled(_ enabled: Bool) {
         guard desktopScrubEnabled != enabled else { return }
         desktopScrubEnabled = enabled
+        persistDesktopScrubSettings()
+        refreshDesktopScrubConfiguration()
+    }
+
+    func setDesktopScrubSensitivity(_ value: Double) {
+        let clamped = min(max(value, 0.4), 5.0)
+        guard abs(desktopScrubSensitivity - clamped) > 0.001 else { return }
+        desktopScrubSensitivity = clamped
         persistDesktopScrubSettings()
         refreshDesktopScrubConfiguration()
     }
@@ -51,7 +89,10 @@ extension AppModel {
     func refreshDesktopScrubConfiguration() {
         let configured = nativeSpacesScrubSpikeCoordinator.configureInteractiveScrub(
             enabled: desktopScrubEnabled,
-            triggerModifiers: desktopScrubTriggerFlags
+            triggerModifiers: desktopScrubTriggerFlags,
+            triggerCharacter: desktopScrubTriggerCharacter,
+            sensitivity: desktopScrubSensitivity,
+            invertDirection: desktopScrubInvertDirection
         )
 
         if desktopScrubEnabled, !configured {
@@ -68,6 +109,10 @@ extension AppModel {
         let defaults = UserDefaults.standard
         defaults.set(desktopScrubEnabled, forKey: AppModel.desktopScrubEnabledDefaultsKey)
         defaults.set(desktopScrubTriggerModifiers.map(\.rawValue), forKey: AppModel.desktopScrubTriggerModifiersDefaultsKey)
+        defaults.set(desktopScrubTriggerCharacter.rawValue, forKey: AppModel.desktopScrubTriggerCharacterDefaultsKey)
+        defaults.set(desktopScrubSensitivity, forKey: AppModel.desktopScrubSensitivityDefaultsKey)
+        defaults.removeObject(forKey: "TilePilot.desktopScrubAcceleration")
+        defaults.set(desktopScrubInvertDirection, forKey: AppModel.desktopScrubInvertDirectionDefaultsKey)
     }
 
     func enableExperimentalNativeSpacesScrubInteraction() {
@@ -79,7 +124,10 @@ extension AppModel {
 
         let configured = nativeSpacesScrubSpikeCoordinator.configureInteractiveScrub(
             enabled: true,
-            triggerModifiers: DesktopScrubModifier.flags(for: DesktopScrubModifier.defaultSelection)
+            triggerModifiers: DesktopScrubModifier.flags(for: DesktopScrubModifier.defaultSelection),
+            triggerCharacter: .none,
+            sensitivity: 1.0,
+            invertDirection: true
         )
         if configured {
             lastErrorMessage = nil

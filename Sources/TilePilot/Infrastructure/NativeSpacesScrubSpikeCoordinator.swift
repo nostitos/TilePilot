@@ -27,6 +27,10 @@ final class NativeSpacesScrubSpikeCoordinator {
     private var startedDockSwipeGesture = false
     private var interactiveHorizontalScale: Double = 1.0 / 1600.0
     private var scrubTriggerModifiers: NSEvent.ModifierFlags = DesktopScrubModifier.flags(for: DesktopScrubModifier.defaultSelection)
+    private var scrubTriggerCharacter: DesktopScrubCharacterKey = .none
+    private var isTriggerCharacterHeld = false
+    private var scrubSensitivity = 1.0
+    private var scrubInvertDirection = true
     private let scrubPerEventDeltaClamp = 0.18
     private let scrubOriginOffsetClamp = 3.0
     private let scrubActivationThreshold = 0.5
@@ -35,18 +39,35 @@ final class NativeSpacesScrubSpikeCoordinator {
 
     var interactiveScrubTriggerDescription: String {
         let triggerWords = DesktopScrubModifier.wordsText(for: DesktopScrubModifier.from(flags: scrubTriggerModifiers))
-        return "Hold \(triggerWords), move the mouse horizontally, then let go and macOS settles on that desktop."
+        if scrubTriggerCharacter == .none {
+            return "Hold \(triggerWords), move the mouse horizontally, then let go and macOS settles on that desktop."
+        }
+        return "Hold \(triggerWords) + \(scrubTriggerCharacter.keyDisplayText), move the mouse horizontally, then let go and macOS settles on that desktop."
     }
 
     var interactiveScrubEnabled: Bool {
         isInteractiveScrubArmed
     }
 
-    func configureInteractiveScrub(enabled: Bool, triggerModifiers: NSEvent.ModifierFlags) -> Bool {
+    func configureInteractiveScrub(
+        enabled: Bool,
+        triggerModifiers: NSEvent.ModifierFlags,
+        triggerCharacter: DesktopScrubCharacterKey,
+        sensitivity: Double,
+        invertDirection: Bool
+    ) -> Bool {
         scrubTriggerModifiers = triggerModifiers.intersection([.shift, .control, .option, .command])
+        scrubTriggerCharacter = triggerCharacter
+        isTriggerCharacterHeld = false
+        scrubSensitivity = min(max(sensitivity, 0.4), 5.0)
+        scrubInvertDirection = invertDirection
 
         guard enabled else {
             disableInteractiveScrubMode()
+            return true
+        }
+
+        if isInteractiveScrubArmed {
             return true
         }
 
@@ -190,6 +211,7 @@ final class NativeSpacesScrubSpikeCoordinator {
         let mask =
             (1 << CGEventType.flagsChanged.rawValue) |
             (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue) |
             (1 << CGEventType.mouseMoved.rawValue) |
             (1 << CGEventType.leftMouseDragged.rawValue) |
             (1 << CGEventType.rightMouseDragged.rawValue) |
@@ -198,7 +220,7 @@ final class NativeSpacesScrubSpikeCoordinator {
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
             guard let userInfo else { return Unmanaged.passUnretained(event) }
             let coordinator = Unmanaged<NativeSpacesScrubSpikeCoordinator>.fromOpaque(userInfo).takeUnretainedValue()
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 coordinator.handleInteractiveCGEvent(type: type, event: event)
             }
             return Unmanaged.passUnretained(event)
@@ -239,6 +261,7 @@ final class NativeSpacesScrubSpikeCoordinator {
         }
         interactiveEventTapRunLoopSource = nil
         interactiveEventTap = nil
+        isTriggerCharacterHeld = false
         for observer in interactiveNotificationObservers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -263,10 +286,26 @@ final class NativeSpacesScrubSpikeCoordinator {
             guard abs(deltaX) > scrubActivationThreshold else { return }
             handleInteractiveMouseDelta(deltaX)
         case .keyDown:
-            guard isInteractiveScrubbing else { return }
             if event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+                guard isInteractiveScrubbing else { return }
                 endInteractiveScrub(commit: false)
+                return
             }
+
+            if scrubTriggerCharacter != .none, eventMatchesTriggerCharacter(event) {
+                isTriggerCharacterHeld = true
+                let triggerActive = scrubTriggerIsActive(NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue)))
+                if triggerActive, !isInteractiveScrubbing {
+                    beginInteractiveScrub()
+                }
+                return
+            }
+
+        case .keyUp:
+            guard scrubTriggerCharacter != .none, eventMatchesTriggerCharacter(event) else { return }
+            isTriggerCharacterHeld = false
+            guard isInteractiveScrubbing else { return }
+            endInteractiveScrub(commit: true)
         default:
             break
         }
@@ -274,7 +313,17 @@ final class NativeSpacesScrubSpikeCoordinator {
 
     private func scrubTriggerIsActive(_ flags: NSEvent.ModifierFlags) -> Bool {
         let relevant = flags.intersection([.shift, .control, .option, .command])
-        return relevant == scrubTriggerModifiers
+        guard relevant == scrubTriggerModifiers else { return false }
+        if scrubTriggerCharacter == .none {
+            return true
+        }
+        return isTriggerCharacterHeld
+    }
+
+    private func eventMatchesTriggerCharacter(_ event: CGEvent) -> Bool {
+        guard scrubTriggerCharacter != .none else { return false }
+        let eventKey = DesktopScrubCharacterKey.from(keyCode: event.getIntegerValueField(.keyboardEventKeycode))
+        return eventKey == scrubTriggerCharacter
     }
 
     private func beginInteractiveScrub() {
@@ -290,7 +339,9 @@ final class NativeSpacesScrubSpikeCoordinator {
     private func handleInteractiveMouseDelta(_ rawDeltaX: CGFloat) {
         guard abs(rawDeltaX) > scrubActivationThreshold else { return }
         accumulatedHorizontalDelta += rawDeltaX
-        let stepDelta = max(min(-Double(rawDeltaX) * interactiveHorizontalScale, scrubPerEventDeltaClamp), -scrubPerEventDeltaClamp)
+        let directionMultiplier = scrubInvertDirection ? 1.0 : -1.0
+        let scaledDelta = directionMultiplier * Double(rawDeltaX) * interactiveHorizontalScale * scrubSensitivity
+        let stepDelta = max(min(scaledDelta, scrubPerEventDeltaClamp), -scrubPerEventDeltaClamp)
         let targetOffset = max(min(dockSwipeOriginOffset + stepDelta, scrubOriginOffsetClamp), -scrubOriginOffsetClamp)
         let appliedDelta = targetOffset - dockSwipeOriginOffset
         guard abs(appliedDelta) > .ulpOfOne else { return }

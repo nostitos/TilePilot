@@ -22,5 +22,19 @@ final class DesktopScrubModelsTests: XCTestCase {
 
         XCTAssertEqual(DesktopScrubModifier.from(flags: flags), modifiers)
     }
+
+    func testCharacterKeyParsesLettersAndDigitsFromText() {
+        XCTAssertEqual(DesktopScrubCharacterKey.from(eventCharacters: "a"), .a)
+        XCTAssertEqual(DesktopScrubCharacterKey.from(eventCharacters: "A"), .a)
+        XCTAssertEqual(DesktopScrubCharacterKey.from(eventCharacters: "4"), .four)
+        XCTAssertNil(DesktopScrubCharacterKey.from(eventCharacters: "ab"))
+    }
+
+    func testCharacterKeyParsesLettersAndDigitsFromKeyCodes() {
+        XCTAssertEqual(DesktopScrubCharacterKey.from(keyCode: 0), .a)
+        XCTAssertEqual(DesktopScrubCharacterKey.from(keyCode: 18), .one)
+        XCTAssertEqual(DesktopScrubCharacterKey.from(keyCode: 29), .zero)
+        XCTAssertNil(DesktopScrubCharacterKey.from(keyCode: 53))
+    }
 }
 #endif

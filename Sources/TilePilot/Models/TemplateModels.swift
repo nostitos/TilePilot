@@ -218,6 +218,12 @@ func normalizedTemplateSlotZOrder(_ slots: [WindowLayoutSlot]) -> [WindowLayoutS
     }
 }
 
+func normalizedTemplateSlotZOrderPreservingOrder(_ slots: [WindowLayoutSlot]) -> [WindowLayoutSlot] {
+    slots.enumerated().map { index, slot in
+        slot.with(zIndex: index)
+    }
+}
+
 func splitTemplateSlotRect(_ rect: CGRect, axis: TemplateSlotSplitAxis) -> (CGRect, CGRect)? {
     switch axis {
     case .vertical:

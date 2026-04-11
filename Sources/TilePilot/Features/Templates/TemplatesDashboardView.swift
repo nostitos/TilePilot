@@ -30,6 +30,13 @@ struct TemplatesDashboardView: View {
             .map { $0 + 1 }
     }
 
+    private var selectedSlotLayer: Int? {
+        guard let selectedTemplate, let selectedSlotID else { return nil }
+        return canvasOrderedTemplateSlots(selectedTemplate.slots)
+            .firstIndex(where: { $0.id == selectedSlotID })
+            .map { $0 + 1 }
+    }
+
     private var importDisabledReason: String? {
         model.currentOverviewTemplateImportDisabledReason(displayID: selectedImportDisplayID)
     }
@@ -386,6 +393,9 @@ struct TemplatesDashboardView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
                         templateMetaChip("Slot \(selectedSlotNumber)", systemImage: "square.on.square")
+                        if let selectedSlotLayer {
+                            templateMetaChip("Layer \(selectedSlotLayer) / \(template.slots.count)", systemImage: "square.3.layers.3d")
+                        }
                         if selectedSlot.allowedApps.isEmpty {
                             templateMetaChip("Any App", systemImage: "app")
                         } else {
@@ -395,6 +405,38 @@ struct TemplatesDashboardView: View {
                         Spacer(minLength: 0)
 
                         InfoBubbleButton(text: "Leave this empty for Any App. If you add apps here, TilePilot only fills this slot with those app windows.")
+                    }
+
+                    HStack(spacing: 8) {
+                        Button("Send to Back") {
+                            model.sendWindowLayoutTemplateSlotToBack(templateID: template.id, slotID: selectedSlot.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(selectedSlotLayer == 1)
+
+                        Button("Backward") {
+                            model.moveWindowLayoutTemplateSlotBackward(templateID: template.id, slotID: selectedSlot.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(selectedSlotLayer == 1)
+
+                        Button("Forward") {
+                            model.moveWindowLayoutTemplateSlotForward(templateID: template.id, slotID: selectedSlot.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(selectedSlotLayer == template.slots.count)
+
+                        Button("Bring to Front") {
+                            model.bringWindowLayoutTemplateSlotToFront(templateID: template.id, slotID: selectedSlot.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(selectedSlotLayer == template.slots.count)
+
+                        Spacer(minLength: 0)
                     }
 
                     if selectedSlot.allowedApps.isEmpty {
@@ -731,6 +773,7 @@ private struct TemplateCanvasEditor: View {
                     TemplateCanvasSlotView(
                         slot: slot,
                         index: slotNumbers[slot.id] ?? 0,
+                        layerIndex: slot.zIndex + 1,
                         canvasSize: canvasSize,
                         isSelected: selectedSlotID == slot.id,
                         isDropTargeted: dropTargetSlotID == slot.id,
@@ -998,6 +1041,7 @@ private struct TemplateCanvasEditor: View {
 private struct TemplateCanvasSlotView: View {
     let slot: WindowLayoutSlot
     let index: Int
+    let layerIndex: Int
     let canvasSize: CGSize
     let isSelected: Bool
     let isDropTargeted: Bool
@@ -1046,6 +1090,20 @@ private struct TemplateCanvasSlotView: View {
                         .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
                 )
                 .padding(8)
+
+            VStack {
+                Spacer(minLength: 0)
+                HStack {
+                    Label("\(layerIndex)", systemImage: "square.3.layers.3d")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.20), in: Capsule())
+                        .foregroundStyle(.white.opacity(0.95))
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(8)
         }
         .frame(width: max(28, rect.width), height: max(28, rect.height))
         .offset(x: rect.minX, y: rect.minY)

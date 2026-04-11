@@ -590,6 +590,10 @@ extension AppModel {
             assignments: assignment.assignments,
             display: display
         )
+        let stackingResult = await applyTemplateStacking(
+            assignments: assignment.assignments,
+            spaceIndex: state.spaceIndex
+        )
 
         var issues: [String] = []
         if assignment.emptyConstrainedSlotCount > 0 {
@@ -602,7 +606,7 @@ extension AppModel {
         if extraCount > 0 {
             issues.append("Left \(extraCount) extra eligible window(s) unchanged.")
         }
-        let failedCount = floatResult.failed + frameResult.failed
+        let failedCount = floatResult.failed + frameResult.failed + stackingResult.failed
         if failedCount > 0 {
             issues.append("\(failedCount) window(s) could not be placed.")
         }
@@ -801,6 +805,41 @@ extension AppModel {
             } else {
                 failed += 1
             }
+        }
+
+        return (updated, failed)
+    }
+
+    private func applyTemplateStacking(
+        assignments: [(slot: WindowLayoutSlot, window: WindowState)],
+        spaceIndex: Int
+    ) async -> (updated: Int, failed: Int) {
+        guard assignments.count > 1 else { return (0, 0) }
+
+        let orderedAssignments = assignments.sorted { lhs, rhs in
+            if lhs.slot.zIndex != rhs.slot.zIndex {
+                return lhs.slot.zIndex < rhs.slot.zIndex
+            }
+            let geometric = WindowLayoutTemplate.sortedSlots([lhs.slot, rhs.slot])
+            return geometric.first?.id == lhs.slot.id
+        }
+
+        var updated = 0
+        var failed = 0
+
+        for assignment in orderedAssignments {
+            let raised = await raiseWindowOnly(
+                windowID: assignment.window.id,
+                targetSpace: spaceIndex,
+                bypassCooldown: true,
+                allowFocusFallback: false
+            )
+            if raised {
+                updated += 1
+            } else {
+                failed += 1
+            }
+            try? await Task.sleep(for: .milliseconds(35))
         }
 
         return (updated, failed)

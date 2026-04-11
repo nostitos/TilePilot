@@ -1,7 +1,7 @@
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.13-defaults.2"
+    static let currentProfileVersion = "v0.2.13-defaults.4"
 
     private let fileManager = FileManager.default
 
@@ -32,6 +32,9 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                 floatingOverlayAccentColor: .floatingDefault,
                 desktopScrubEnabled: true,
                 desktopScrubTriggerModifiers: DesktopScrubModifier.defaultSelection,
+                desktopScrubTriggerCharacter: .none,
+                desktopScrubSensitivity: 1.0,
+                desktopScrubInvertDirection: true,
                 raiseOnFloatToggleEnabled: true,
                 appForegroundPolicyByName: [:],
                 performanceSettings: .responsive
@@ -89,6 +92,9 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             "TilePilot.floatingOverlayAccentColor",
             "TilePilot.desktopScrubEnabled",
             "TilePilot.desktopScrubTriggerModifiers",
+            "TilePilot.desktopScrubTriggerCharacter",
+            "TilePilot.desktopScrubSensitivity",
+            "TilePilot.desktopScrubInvertDirection",
             "TilePilot.raiseOnFloatToggle",
             "TilePilot.appForegroundPolicyByName",
             "TilePilot.performanceHideMinimizedHelperWindowsInMaps",

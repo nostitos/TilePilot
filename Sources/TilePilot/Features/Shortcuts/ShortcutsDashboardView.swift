@@ -15,10 +15,6 @@ struct ShortcutsDashboardView: View {
     @State private var showDesktopMoveAdvanced = false
     @State private var isReordering = false
     @State private var reorderPinnedDraftIDs: [String] = []
-    @State private var recordingFeatureID: FeatureControlID?
-    @State private var recordingShortcutStableKey: String?
-    @State private var shortcutRecordMonitor: Any?
-    @State private var shortcutGlobalRecordMonitor: Any?
 
     var body: some View {
         NavigationStack {
@@ -62,13 +58,13 @@ struct ShortcutsDashboardView: View {
                 }
             }
             .onDisappear {
-                stopShortcutRecording()
+                model.stopShortcutRecording()
             }
         }
     }
 
-    private var filteredItems: [ShortcutsDisplayItem] {
-        return model.flatShortcutsItems(query: searchText)
+    private var filteredSections: [ShortcutsCatalogSection] {
+        model.groupedFlatShortcutsSections(query: searchText)
     }
 
     private var pinnedReorderItems: [PinnedShortcutContextItem] {
@@ -188,7 +184,7 @@ struct ShortcutsDashboardView: View {
                 .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 6, trailing: 0))
                 .listRowSeparator(.hidden)
 
-            if filteredItems.isEmpty {
+            if filteredSections.isEmpty {
                 EmptyStateView(
                     title: model.shortcutEntries.isEmpty ? "No controls loaded" : "No matching controls",
                     systemImage: "keyboard",
@@ -214,10 +210,17 @@ struct ShortcutsDashboardView: View {
                     .listRowSeparator(.hidden)
                 }
             } else {
-                ForEach(filteredItems) { item in
-                    flatShortcutsRow(item)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                        .listRowSeparator(.hidden)
+                ForEach(filteredSections) { section in
+                    Section {
+                        ForEach(section.items) { item in
+                            flatShortcutsRow(item)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                                .listRowSeparator(.hidden)
+                        }
+                    } header: {
+                        shortcutsSectionHeader(section.group)
+                    }
+                    .textCase(nil)
                 }
             }
         }
@@ -528,66 +531,70 @@ struct ShortcutsDashboardView: View {
         let displayed = Array(mapped.prefix(3))
         let hasMore = mapped.count > displayed.count
 
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                Text("Jump to Desktop #")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                Button("Open macOS Keyboard Shortcuts") {
-                    model.openMissionControlKeyboardShortcuts()
-                }
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .environment(\.controlActiveState, .key)
-            }
+        return HStack(alignment: .top, spacing: 10) {
+            catalogGroupIcon(.desktops)
 
-            if mapped.isEmpty {
-                Text("No Jump shortcuts are configured yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack(alignment: .top, spacing: 10) {
-                    HStack(spacing: 6) {
-                        ForEach(displayed, id: \.entry.id) { sample in
-                            Button {
-                                model.selectShortcut(sample.entry)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    HStack(alignment: .center, spacing: 6) {
-                                        Text(model.displayShortcutComboWords(sample.entry))
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .lineLimit(1)
-                                        shortcutSymbolCaps(for: sample.entry, glyphSize: 13, highlighted: true)
-                                    }
-                                    Text("Desktop \(sample.desktop)")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-                            .help("\(model.displayShortcutComboWords(sample.entry)) jumps to Desktop \(sample.desktop).")
-                        }
-                        if hasMore {
-                            Text("...")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                        }
-                    }
-
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Jump to Desktop #")
+                        .font(.subheadline.weight(.semibold))
                     Spacer(minLength: 0)
+                    Button("Open macOS Keyboard Shortcuts") {
+                        model.openMissionControlKeyboardShortcuts()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .environment(\.controlActiveState, .key)
+                }
 
-                    Text("Then: Keyboard Shortcuts → Desktop Controls (Mission Control).")
-                        .font(.caption2)
+                if mapped.isEmpty {
+                    Text("No Jump shortcuts are configured yet.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
+                } else {
+                    HStack(alignment: .top, spacing: 10) {
+                        HStack(spacing: 6) {
+                            ForEach(displayed, id: \.entry.id) { sample in
+                                Button {
+                                    model.selectShortcut(sample.entry)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        HStack(alignment: .center, spacing: 6) {
+                                            Text(model.displayShortcutComboWords(sample.entry))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .lineLimit(1)
+                                            shortcutSymbolCaps(for: sample.entry, glyphSize: 13, highlighted: true)
+                                        }
+                                        Text("Desktop \(sample.desktop)")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                                .help("\(model.displayShortcutComboWords(sample.entry)) jumps to Desktop \(sample.desktop).")
+                            }
+                            if hasMore {
+                                Text("...")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Text("Then: Keyboard Shortcuts → Desktop Controls (Mission Control).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                    }
                 }
             }
         }
@@ -603,33 +610,37 @@ struct ShortcutsDashboardView: View {
             return lhs.sourceLine < rhs.sourceLine
         }
 
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                Label("Unsupported Desktop Move", systemImage: "minus.circle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
+        return HStack(alignment: .top, spacing: 10) {
+            catalogGroupIcon(.experimental)
 
-            Text("TilePilot does not support this desktop-move shortcut family.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            DisclosureGroup(
-                isExpanded: $showDesktopMoveAdvanced,
-                content: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(sortedEntries, id: \.id) { entry in
-                            shortcutRow(entry)
-                        }
-                    }
-                    .padding(.top, 4)
-                },
-                label: {
-                    Text(showDesktopMoveAdvanced ? "Hide Unsupported Desktop Move Shortcuts" : "Show Unsupported Desktop Move Shortcuts")
-                        .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    Label("Unsupported Desktop Move", systemImage: "minus.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
-            )
+
+                Text("TilePilot does not support this desktop-move shortcut family.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                DisclosureGroup(
+                    isExpanded: $showDesktopMoveAdvanced,
+                    content: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(sortedEntries, id: \.id) { entry in
+                                shortcutRow(entry)
+                            }
+                        }
+                        .padding(.top, 4)
+                    },
+                    label: {
+                        Text(showDesktopMoveAdvanced ? "Hide Unsupported Desktop Move Shortcuts" : "Show Unsupported Desktop Move Shortcuts")
+                            .font(.caption.weight(.semibold))
+                    }
+                )
+            }
         }
         .padding(8)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -638,6 +649,7 @@ struct ShortcutsDashboardView: View {
     private func shortcutRow(_ entry: ShortcutEntry) -> some View {
         let featureRow = model.featureControlRow(forShortcutEntry: entry)
         let featureID = featureRow?.featureID
+        let group = featureRow?.group ?? model.unifiedGroup(for: entry)
         let title = model.shortcutTitle(entry)
         let secondaryText = model.shortcutSecondaryText(entry)
         return HStack(alignment: .center, spacing: 4) {
@@ -655,6 +667,8 @@ struct ShortcutsDashboardView: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .frame(minWidth: 24)
+
+            catalogGroupIcon(group)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -750,9 +764,7 @@ struct ShortcutsDashboardView: View {
                     .frame(width: 24, height: 1)
             }
 
-            Image(systemName: row.shortcutEntry == nil ? "keyboard.badge.ellipsis" : "cursorarrow.click.2")
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
+            catalogGroupIcon(row.group)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.title)
@@ -831,7 +843,7 @@ struct ShortcutsDashboardView: View {
 
     @ViewBuilder
     private func shortcutRecordControl(for featureID: FeatureControlID) -> some View {
-        if recordingFeatureID == featureID {
+        if model.recordingFeatureID == featureID {
             HStack(spacing: 4) {
                 Text("Type Shortcut")
                     .font(.system(size: 12, weight: .semibold))
@@ -841,7 +853,7 @@ struct ShortcutsDashboardView: View {
                     .background(Color.accentColor.opacity(0.14), in: Capsule())
 
                 Button {
-                    stopShortcutRecording()
+                    model.stopShortcutRecording()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -863,7 +875,7 @@ struct ShortcutsDashboardView: View {
                 .frame(minWidth: shortcutClearButtonMinWidth)
 
                 Button("Record Shortcut") {
-                    beginShortcutRecording(for: featureID)
+                    model.beginShortcutRecording(for: featureID)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -872,7 +884,7 @@ struct ShortcutsDashboardView: View {
             }
         } else {
             Button("Record Shortcut") {
-                beginShortcutRecording(for: featureID)
+                model.beginShortcutRecording(for: featureID)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -881,97 +893,9 @@ struct ShortcutsDashboardView: View {
         }
     }
 
-    private func beginShortcutRecording(for featureID: FeatureControlID) {
-        stopShortcutRecording()
-        prepareWindowForShortcutRecording()
-        recordingFeatureID = featureID
-        recordingShortcutStableKey = nil
-        shortcutRecordMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
-            guard recordingFeatureID == featureID else { return event }
-            let consumed = handleRecordedShortcutEvent(event, for: featureID)
-            return consumed ? nil : event
-        }
-        shortcutGlobalRecordMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
-            Task { @MainActor in
-                guard recordingFeatureID == featureID else { return }
-                _ = handleRecordedShortcutEvent(event, for: featureID)
-            }
-        }
-    }
-
-    private func beginShortcutRecording(for entry: ShortcutEntry) {
-        stopShortcutRecording()
-        prepareWindowForShortcutRecording()
-        recordingFeatureID = nil
-        recordingShortcutStableKey = entry.stableKey
-        shortcutRecordMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
-            guard recordingShortcutStableKey == entry.stableKey else { return event }
-            let consumed = handleRecordedShortcutEvent(event, for: entry)
-            return consumed ? nil : event
-        }
-        shortcutGlobalRecordMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
-            Task { @MainActor in
-                guard recordingShortcutStableKey == entry.stableKey else { return }
-                _ = handleRecordedShortcutEvent(event, for: entry)
-            }
-        }
-    }
-
-    private func stopShortcutRecording() {
-        if let monitor = shortcutRecordMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = shortcutGlobalRecordMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        shortcutRecordMonitor = nil
-        shortcutGlobalRecordMonitor = nil
-        recordingFeatureID = nil
-        recordingShortcutStableKey = nil
-    }
-
-    private func prepareWindowForShortcutRecording() {
-        NSApp.activate(ignoringOtherApps: true)
-        let targetWindow = NSApp.keyWindow
-            ?? NSApp.mainWindow
-            ?? NSApp.windows.first(where: { $0.isVisible })
-        targetWindow?.makeKeyAndOrderFront(nil)
-        targetWindow?.makeFirstResponder(nil)
-    }
-
-    private func handleRecordedShortcutEvent(_ event: NSEvent, for featureID: FeatureControlID) -> Bool {
-        guard event.type == .keyDown else { return false }
-        if event.keyCode == 53 { // escape
-            stopShortcutRecording()
-            return true
-        }
-
-        guard let combo = recordedShortcutCombo(from: event) else {
-            return false
-        }
-        model.assignShortcut(combo: combo, to: featureID)
-        stopShortcutRecording()
-        return true
-    }
-
-    private func handleRecordedShortcutEvent(_ event: NSEvent, for entry: ShortcutEntry) -> Bool {
-        guard event.type == .keyDown else { return false }
-        if event.keyCode == 53 { // escape
-            stopShortcutRecording()
-            return true
-        }
-
-        guard let combo = recordedShortcutCombo(from: event) else {
-            return false
-        }
-        model.assignShortcut(combo: combo, to: entry)
-        stopShortcutRecording()
-        return true
-    }
-
     @ViewBuilder
     private func shortcutRecordControl(for entry: ShortcutEntry) -> some View {
-        if recordingShortcutStableKey == entry.stableKey {
+        if model.recordingShortcutStableKey == entry.stableKey {
             HStack(spacing: 4) {
                 Text("Type Shortcut")
                     .font(.system(size: 12, weight: .semibold))
@@ -981,7 +905,7 @@ struct ShortcutsDashboardView: View {
                     .background(Color.accentColor.opacity(0.14), in: Capsule())
 
                 Button {
-                    stopShortcutRecording()
+                    model.stopShortcutRecording()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -992,120 +916,12 @@ struct ShortcutsDashboardView: View {
             }
         } else {
             Button("Record Shortcut") {
-                beginShortcutRecording(for: entry)
+                model.beginShortcutRecording(for: entry)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .font(.system(size: 12, weight: .semibold))
             .frame(minWidth: shortcutRecordButtonMinWidth)
-        }
-    }
-
-    private func recordedShortcutCombo(from event: NSEvent) -> String? {
-        guard let keyToken = skhdKeyToken(for: event.keyCode) ?? fallbackKeyToken(from: event) else { return nil }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        var modifiers: [String] = []
-        if flags.contains(.control) { modifiers.append("ctrl") }
-        if flags.contains(.shift) { modifiers.append("shift") }
-        if flags.contains(.option) { modifiers.append("alt") }
-        if flags.contains(.command) { modifiers.append("cmd") }
-        if flags.contains(.function) { modifiers.append("fn") }
-
-        if modifiers.isEmpty {
-            return keyToken
-        }
-        return "\(modifiers.joined(separator: " + ")) - \(keyToken)"
-    }
-
-    private func fallbackKeyToken(from event: NSEvent) -> String? {
-        guard let raw = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return nil
-        }
-        if raw.count == 1, let scalar = raw.unicodeScalars.first {
-            if CharacterSet.alphanumerics.contains(scalar) {
-                return raw.lowercased()
-            }
-            switch raw {
-            case "`", "~": return "0x32"
-            case "=": return "="
-            case "-": return "-"
-            case "[": return "["
-            case "]": return "]"
-            case ";": return ";"
-            case "'": return "'"
-            case "\\": return "\\"
-            case ",": return ","
-            case ".": return "."
-            case "/": return "/"
-            default: return nil
-            }
-        }
-        return nil
-    }
-
-    private func skhdKeyToken(for keyCode: UInt16) -> String? {
-        switch keyCode {
-        case 0: return "a"
-        case 1: return "s"
-        case 2: return "d"
-        case 3: return "f"
-        case 4: return "h"
-        case 5: return "g"
-        case 6: return "z"
-        case 7: return "x"
-        case 8: return "c"
-        case 9: return "v"
-        case 11: return "b"
-        case 12: return "q"
-        case 13: return "w"
-        case 14: return "e"
-        case 15: return "r"
-        case 16: return "y"
-        case 17: return "t"
-        case 18: return "1"
-        case 19: return "2"
-        case 20: return "3"
-        case 21: return "4"
-        case 22: return "6"
-        case 23: return "5"
-        case 24: return "="
-        case 25: return "9"
-        case 26: return "7"
-        case 27: return "-"
-        case 28: return "8"
-        case 29: return "0"
-        case 30: return "]"
-        case 31: return "o"
-        case 32: return "u"
-        case 33: return "["
-        case 34: return "i"
-        case 35: return "p"
-        case 36: return "return"
-        case 37: return "l"
-        case 38: return "j"
-        case 39: return "'"
-        case 40: return "k"
-        case 41: return ";"
-        case 42: return "\\"
-        case 43: return ","
-        case 44: return "/"
-        case 45: return "n"
-        case 46: return "m"
-        case 47: return "."
-        case 48: return "tab"
-        case 49: return "space"
-        case 50: return "0x32"
-        case 51: return "backspace"
-        case 52: return "enter"
-        case 53: return "escape"
-        case 55, 54, 56, 60, 58, 61, 59, 62, 63:
-            return nil
-        case 123: return "left"
-        case 124: return "right"
-        case 125: return "down"
-        case 126: return "up"
-        default:
-            return nil
         }
     }
 
@@ -1240,8 +1056,18 @@ struct ShortcutsDashboardView: View {
             return lhs.entry.sourceLine < rhs.entry.sourceLine
         }
         let byDirection = Dictionary(uniqueKeysWithValues: orderedEntries.map { ($0.direction, $0.entry) })
+        let catalogGroup = switch summary.kind {
+        case .moveWindow, .swapWindow:
+            UnifiedControlGroup.windowPlacement
+        case .resizeWindow:
+            UnifiedControlGroup.windowSize
+        case .focusWindow:
+            UnifiedControlGroup.focus
+        }
 
         return HStack(alignment: .center, spacing: 10) {
+            catalogGroupIcon(catalogGroup)
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .center, spacing: 8) {
                     Text(directionalFamilyTitle(summary.kind))
@@ -1505,6 +1331,27 @@ struct ShortcutsDashboardView: View {
 
     private func directionalGroup(from kind: DirectionalShortcutFamilySummary.Kind) -> DirectionalShortcutGroup? {
         DirectionalShortcutGroup(rawValue: kind.rawValue)
+    }
+
+    private func shortcutsSectionHeader(_ group: UnifiedControlGroup) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: group.systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            Text(group.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+
+    private func catalogGroupIcon(_ group: UnifiedControlGroup) -> some View {
+        Image(systemName: group.systemImage)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 18)
     }
 
     private func directionArrowSymbolName(_ direction: DirectionalShortcutFamilySummary.Direction) -> String {

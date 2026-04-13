@@ -1,7 +1,8 @@
+import AppKit
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.2.13-defaults.4"
+    static let currentProfileVersion = "v0.3.2-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -25,6 +26,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                     "directional.resizeWindow",
                     "directional.focusWindow",
                 ],
+                windowLayoutTemplates: [starterTemplate()],
                 showWindowBadgeOverlay: true,
                 showWindowOutlineOverlay: true,
                 windowOutlineOverlayBaseWidth: 1.0,
@@ -81,6 +83,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
 
     func hasLegacyUserDefaultsFootprint(_ defaults: UserDefaults = .standard) -> Bool {
         let keys = [
+            "TilePilot.windowLayoutTemplates",
             "TilePilot.pinnedShortcutKeys",
             "TilePilot.pinnedDirectionalGroupIDs",
             "TilePilot.pinnedFeatureControlIDs",
@@ -127,6 +130,50 @@ final class ReleaseDefaultsService: @unchecked Sendable {
 
     private func featureCommand(_ featureID: String) -> String {
         "/usr/bin/open -g \"tilepilot://feature/\(featureID)\""
+    }
+
+    private func starterTemplate() -> WindowLayoutTemplate {
+        let descriptor = starterTemplateDisplayDescriptor()
+        return WindowLayoutTemplate(
+            id: UUID(uuidString: "0E79A9DE-A4B7-4D9E-B3A8-7D2A0E24F101") ?? UUID(),
+            name: "Sample Template",
+            sourceDisplayName: descriptor.sourceDisplayName,
+            displayShapeKey: descriptor.shapeKey,
+            slots: [
+                WindowLayoutSlot(
+                    id: UUID(uuidString: "0E79A9DE-A4B7-4D9E-B3A8-7D2A0E24F201") ?? UUID(),
+                    normalizedX: 0.04,
+                    normalizedY: 0.08,
+                    normalizedWidth: 0.56,
+                    normalizedHeight: 0.84,
+                    zIndex: 0
+                ),
+                WindowLayoutSlot(
+                    id: UUID(uuidString: "0E79A9DE-A4B7-4D9E-B3A8-7D2A0E24F202") ?? UUID(),
+                    normalizedX: 0.64,
+                    normalizedY: 0.08,
+                    normalizedWidth: 0.32,
+                    normalizedHeight: 0.36,
+                    zIndex: 1
+                ),
+                WindowLayoutSlot(
+                    id: UUID(uuidString: "0E79A9DE-A4B7-4D9E-B3A8-7D2A0E24F203") ?? UUID(),
+                    normalizedX: 0.64,
+                    normalizedY: 0.50,
+                    normalizedWidth: 0.32,
+                    normalizedHeight: 0.42,
+                    zIndex: 2
+                ),
+            ]
+        )
+    }
+
+    private func starterTemplateDisplayDescriptor() -> (sourceDisplayName: String, shapeKey: DisplayShapeKey) {
+        if let screen = NSScreen.main ?? NSScreen.screens.first,
+           let shapeKey = DisplayShapeKey.from(width: screen.frame.width, height: screen.frame.height) {
+            return (screen.localizedName, shapeKey)
+        }
+        return ("Current Display", DisplayShapeKey(aspectRatio: 1.6))
     }
 
     private func defaultsDirectoryURL() -> URL {

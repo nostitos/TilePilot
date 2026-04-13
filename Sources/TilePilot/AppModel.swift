@@ -175,6 +175,8 @@ final class AppModel: ObservableObject {
     @Published var pinnedFeatureControlIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedFeatureControlsDefaultsKey) ?? []
     @Published var shortcutsCustomOrderIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.shortcutsCustomOrderDefaultsKey) ?? []
     @Published var selectedShortcutStableKey: String?
+    @Published var recordingFeatureID: FeatureControlID?
+    @Published var recordingShortcutStableKey: String?
     @Published private(set) var requestedFileEditorTarget: EditorTarget?
     @Published var releaseDefaultsStatus: ReleaseDefaultsStatus = .neverApplied(currentVersion: ReleaseDefaultsService.currentProfileVersion)
     @Published var managedConfigDraft: String = ""
@@ -408,6 +410,8 @@ final class AppModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var managedHelperAutoUpgradeTask: Task<Void, Never>?
+    var shortcutRecordMonitor: Any?
+    var shortcutGlobalRecordMonitor: Any?
     var hasDismissedAutomaticSetupGuideThisSession = false
     private var lastLiveStateContentSignature: String?
     private var lastLiveStateUIPublishAt: Date?
@@ -520,6 +524,7 @@ final class AppModel: ObservableObject {
         managedHelperAutoUpgradeTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
+        stopShortcutRecording()
         nativeSpacesScrubSpikeCoordinator.disableInteractiveScrubMode()
     }
 

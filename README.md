@@ -136,6 +136,7 @@ TilePilot currently focuses on the everyday supported path:
 - keyboard actions, shortcut learning, and right-click menu pinning
 - tiled and floating window control
 - exact floating layout templates with app-aware slot rules
+- a built-in sample template so new installs can try Templates immediately
 - live desktop visibility through `Overview`, overlays, and `MegaMap`
 - safe config management for TilePilot-managed sections
 

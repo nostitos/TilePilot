@@ -9,6 +9,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let pinnedFeatureControlIDs: [String]
     let pinnedDirectionalGroupIDs: [String]
     let shortcutsCustomOrderIDs: [String]
+    let windowLayoutTemplates: [WindowLayoutTemplate]
     let showWindowBadgeOverlay: Bool
     let showWindowOutlineOverlay: Bool
     let windowOutlineOverlayBaseWidth: Double
@@ -27,6 +28,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         pinnedFeatureControlIDs: [String],
         pinnedDirectionalGroupIDs: [String],
         shortcutsCustomOrderIDs: [String] = [],
+        windowLayoutTemplates: [WindowLayoutTemplate] = [],
         showWindowBadgeOverlay: Bool,
         showWindowOutlineOverlay: Bool,
         windowOutlineOverlayBaseWidth: Double,
@@ -44,6 +46,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.pinnedFeatureControlIDs = pinnedFeatureControlIDs
         self.pinnedDirectionalGroupIDs = pinnedDirectionalGroupIDs
         self.shortcutsCustomOrderIDs = shortcutsCustomOrderIDs
+        self.windowLayoutTemplates = windowLayoutTemplates
         self.showWindowBadgeOverlay = showWindowBadgeOverlay
         self.showWindowOutlineOverlay = showWindowOutlineOverlay
         self.windowOutlineOverlayBaseWidth = windowOutlineOverlayBaseWidth
@@ -63,6 +66,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case pinnedFeatureControlIDs
         case pinnedDirectionalGroupIDs
         case shortcutsCustomOrderIDs
+        case windowLayoutTemplates
         case showWindowBadgeOverlay
         case showWindowOutlineOverlay
         case windowOutlineOverlayBaseWidth
@@ -83,6 +87,7 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         pinnedFeatureControlIDs = try container.decode([String].self, forKey: .pinnedFeatureControlIDs)
         pinnedDirectionalGroupIDs = try container.decode([String].self, forKey: .pinnedDirectionalGroupIDs)
         shortcutsCustomOrderIDs = try container.decodeIfPresent([String].self, forKey: .shortcutsCustomOrderIDs) ?? []
+        windowLayoutTemplates = try container.decodeIfPresent([WindowLayoutTemplate].self, forKey: .windowLayoutTemplates) ?? []
         showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
         showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
         windowOutlineOverlayBaseWidth = try container.decodeIfPresent(Double.self, forKey: .windowOutlineOverlayBaseWidth) ?? 2.0

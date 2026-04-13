@@ -765,9 +765,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleDeepLink(_ url: URL) {
         guard url.scheme?.lowercased() == "tilepilot" else { return }
         let host = url.host?.lowercased() ?? ""
-        switch host {
+        let trimmedPath = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        let routeKind: String
+        let routeRaw: String
+        if host == "feature" || host == "internal" {
+            routeKind = host
+            routeRaw = trimmedPath.removingPercentEncoding ?? ""
+        } else if host.isEmpty,
+                  let slashIndex = trimmedPath.firstIndex(of: "/") {
+            routeKind = String(trimmedPath[..<slashIndex]).lowercased()
+            routeRaw = String(trimmedPath[trimmedPath.index(after: slashIndex)...]).removingPercentEncoding ?? ""
+        } else {
+            return
+        }
+
+        switch routeKind {
         case "feature":
-            let featureRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
+            let featureRaw = routeRaw
             guard !featureRaw.isEmpty else { return }
 
             model.acknowledgeInitialStatusIfNeeded()
@@ -777,7 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.model.runFeatureControl(FeatureControlID(rawValue: featureRaw), source: .shortcutsUI)
             }
         case "internal":
-            let actionRaw = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).removingPercentEncoding ?? ""
+            let actionRaw = routeRaw
             model.acknowledgeInitialStatusIfNeeded()
             switch actionRaw {
             case "native-spaces-scrub-spike":

@@ -114,6 +114,23 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    var systemImage: String {
+        switch self {
+        case .desktops: return "rectangle.3.group"
+        case .templates: return "rectangle.3.offgrid"
+        case .windowPlacement: return "macwindow.on.rectangle"
+        case .tilingLayout: return "square.grid.3x3"
+        case .windowSize: return "arrow.up.left.and.arrow.down.right"
+        case .helpersScripts: return "terminal"
+        case .apps: return "app"
+        case .focus: return "cursorarrow.motionlines"
+        case .displays: return "display.2"
+        case .automation: return "bolt.horizontal"
+        case .other: return "ellipsis.circle"
+        case .experimental: return "flask"
+        }
+    }
+
     var sortRank: Int {
         switch self {
         case .desktops: return 0
@@ -130,6 +147,13 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
         case .experimental: return 99
         }
     }
+}
+
+struct ShortcutsCatalogSection: Identifiable, Sendable {
+    let group: UnifiedControlGroup
+    let items: [ShortcutsDisplayItem]
+
+    var id: String { group.rawValue }
 }
 
 struct UnifiedControlRow: Identifiable, Sendable {

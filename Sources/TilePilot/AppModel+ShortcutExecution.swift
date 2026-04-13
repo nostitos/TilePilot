@@ -3,12 +3,22 @@ import Foundation
 @MainActor
 extension AppModel {
 func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, appContext: String? = nil) {
-    guard let row = featureControlRow(forID: featureID) else {
+    let row = featureControlRow(forID: featureID)
+    let definition = featureDefinitions.first(where: { $0.id == featureID })
+
+    guard row != nil || definition != nil else {
         lastErrorMessage = "Feature is no longer available."
         lastActionMessage = nil
         return
     }
-    if let disabledReason = row.disabledReason {
+
+    if row == nil {
+        rebuildShortcutPresentationCaches()
+    }
+
+    let resolvedRow = featureControlRow(forID: featureID)
+    let disabledReason = resolvedRow?.disabledReason ?? definition.flatMap(featureDisabledReason(for:))
+    if let disabledReason {
         lastErrorMessage = disabledReason
         lastActionMessage = nil
         return
@@ -73,16 +83,16 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         refreshMegamap()
         return
     }
-    if let entry = row.shortcutEntry {
+    if let entry = resolvedRow?.shortcutEntry {
         runShortcut(entry)
         return
     }
-    if let actionID = row.actionID {
+    if let actionID = resolvedRow?.actionID ?? definition?.actionID {
         performTilePilotAction(actionID)
         return
     }
-    if let command = row.preferredCommand {
-        runShortcutCommand(command, shortcutLabel: row.title)
+    if let command = resolvedRow?.preferredCommand ?? definition?.preferredCommand {
+        runShortcutCommand(command, shortcutLabel: resolvedRow?.title ?? definition?.title ?? "Feature")
         return
     }
     lastErrorMessage = "No shortcut assigned yet. Use Set Shortcut in Shortcuts."
@@ -119,8 +129,7 @@ func assignShortcut(combo: String, to featureID: FeatureControlID) {
         return
     }
 
-    let command = NSString(string: preferredCommand).expandingTildeInPath
-    upsertManagedFeatureShortcut(featureID: featureID, combo: combo, command: command)
+    upsertManagedFeatureShortcut(featureID: featureID, combo: combo, command: preferredCommand)
     saveManagedConfigSection()
 }
 

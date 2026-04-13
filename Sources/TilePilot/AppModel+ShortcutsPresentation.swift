@@ -259,6 +259,43 @@ func filteredFeatureControlRows(query: String) -> [FeatureControlRow] {
     }
 }
 
+func shortcutsCatalogGroup(for item: ShortcutsDisplayItem) -> UnifiedControlGroup {
+    switch item {
+    case .featureRow(let row):
+        return row.group
+    case .directionalFamily(let group, _):
+        switch group {
+        case .moveWindow, .swapWindow:
+            return .windowPlacement
+        case .resizeWindow:
+            return .windowSize
+        case .focusWindow:
+            return .focus
+        }
+    case .desktopJumpFamily:
+        return .desktops
+    case .desktopMoveFamily:
+        return .experimental
+    }
+}
+
+func groupedFlatShortcutsSections(query: String) -> [ShortcutsCatalogSection] {
+    let orderedItems = flatShortcutsItems(query: query)
+    guard !orderedItems.isEmpty else { return [] }
+
+    var groupedItems: [UnifiedControlGroup: [ShortcutsDisplayItem]] = [:]
+    for item in orderedItems {
+        groupedItems[shortcutsCatalogGroup(for: item), default: []].append(item)
+    }
+
+    return UnifiedControlGroup.allCases
+        .sorted { lhs, rhs in lhs.sortRank < rhs.sortRank }
+        .compactMap { group in
+            guard let items = groupedItems[group], !items.isEmpty else { return nil }
+            return ShortcutsCatalogSection(group: group, items: items)
+        }
+}
+
 func flatShortcutsItems(query: String) -> [ShortcutsDisplayItem] {
     let baseItems = buildFlatShortcutsItemsBaseOrder()
     let orderedItems = applyShortcutsCustomOrder(baseItems)

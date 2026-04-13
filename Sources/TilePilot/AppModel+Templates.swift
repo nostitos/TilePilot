@@ -466,7 +466,7 @@ extension AppModel {
         return baseTrimmed + " Copy"
     }
 
-    private func persistWindowLayoutTemplates() {
+    func persistWindowLayoutTemplates() {
         let defaults = UserDefaults.standard
         if windowLayoutTemplates.isEmpty {
             defaults.removeObject(forKey: AppModel.windowLayoutTemplatesDefaultsKey)

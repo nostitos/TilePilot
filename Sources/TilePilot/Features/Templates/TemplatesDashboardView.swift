@@ -65,16 +65,19 @@ struct TemplatesDashboardView: View {
             .padding(12)
             .navigationTitle("TilePilot")
             .task {
+                model.rebuildShortcutPresentationCaches()
                 syncDisplaySelectionIfNeeded()
                 syncImportDisplaySelectionIfNeeded()
                 syncSelectedTemplateIfNeeded()
             }
             .onAppear {
+                model.rebuildShortcutPresentationCaches()
                 syncDisplaySelectionIfNeeded()
                 syncImportDisplaySelectionIfNeeded()
                 syncSelectedTemplateIfNeeded()
             }
             .onChange(of: selectedTemplateID) { _ in
+                model.stopShortcutRecording()
                 selectedSlotID = nil
                 newAllowedAppDraft = ""
                 isDrawingNewSlot = false
@@ -95,6 +98,9 @@ struct TemplatesDashboardView: View {
                 if focusedID == nil {
                     commitSidebarTemplateRenameIfNeeded()
                 }
+            }
+            .onDisappear {
+                model.stopShortcutRecording()
             }
         }
     }
@@ -515,19 +521,106 @@ struct TemplatesDashboardView: View {
     }
 
     private func templateUsageCard(for template: WindowLayoutTemplate) -> some View {
-        GroupBox {
-            HStack(spacing: 10) {
-                Text("Available in Actions & Shortcuts as `Apply Template: \(template.name)`.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        let featureID = model.templateFeatureID(for: template)
+        let featureRow = model.featureControlRow(forID: featureID)
+        let assignedCombo = featureRow?.shortcutEntry?.combo ?? featureRow?.assignedCombo
+        let assignedShortcutExists = featureRow?.shortcutEntry != nil
+        let isPinned = model.isFeaturePinned(featureID)
+        let disabledReason = featureRow?.disabledReason
 
-                Spacer(minLength: 0)
+        return GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let assignedCombo, !assignedCombo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(model.displayShortcutComboSymbols(from: assignedCombo))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
 
-                InfoBubbleButton(text: "You can assign a shortcut or pin this template action to the right-click menu.")
+                            Text(model.displayShortcutComboWords(from: assignedCombo))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text("No shortcut")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 6) {
+                        if model.recordingFeatureID == featureID {
+                            HStack(spacing: 4) {
+                                Text("Type Shortcut")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.14), in: Capsule())
+
+                                Button {
+                                    model.stopShortcutRecording()
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        } else {
+                            if assignedShortcutExists {
+                                Button("Clear") {
+                                    model.removeShortcut(for: featureID)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            Button("Record Shortcut") {
+                                model.beginShortcutRecording(for: featureID)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        Button("Test") {
+                            model.runFeatureControl(featureID, source: .shortcutsUI)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(disabledReason != nil || model.activeActionID != nil)
+
+                        Button(isPinned ? "Unpin" : "Pin") {
+                            model.toggleFeaturePinned(featureID)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Text("Also appears in Actions & Shortcuts → Templates")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 0)
+                }
+
+                if let disabledReason, !disabledReason.isEmpty {
+                    Label(disabledReason, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Actions & Shortcuts", systemImage: "keyboard")
+            Label("Template Shortcut", systemImage: "keyboard")
         }
     }
 

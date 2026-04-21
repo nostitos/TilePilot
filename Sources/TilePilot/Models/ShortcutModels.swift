@@ -86,6 +86,7 @@ struct DirectionalShortcutBinding: Identifiable, Sendable {
 enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
     case desktops
     case templates
+    case workSets
     case windowPlacement
     case tilingLayout
     case windowSize
@@ -101,6 +102,7 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
         switch self {
         case .desktops: return "Desktops"
         case .templates: return "Templates"
+        case .workSets: return "Work Sets"
         case .windowPlacement: return "Window Placement"
         case .tilingLayout: return "Tiling & Layout"
         case .windowSize: return "Window Size"
@@ -118,6 +120,7 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
         switch self {
         case .desktops: return "rectangle.3.group"
         case .templates: return "rectangle.3.offgrid"
+        case .workSets: return "square.stack.3d.up"
         case .windowPlacement: return "macwindow.on.rectangle"
         case .tilingLayout: return "square.grid.3x3"
         case .windowSize: return "arrow.up.left.and.arrow.down.right"
@@ -135,14 +138,15 @@ enum UnifiedControlGroup: String, CaseIterable, Codable, Sendable {
         switch self {
         case .desktops: return 0
         case .templates: return 1
-        case .windowPlacement: return 2
-        case .tilingLayout: return 3
-        case .windowSize: return 4
-        case .helpersScripts: return 5
-        case .apps: return 6
-        case .focus: return 7
-        case .displays: return 8
-        case .automation: return 9
+        case .workSets: return 2
+        case .windowPlacement: return 3
+        case .tilingLayout: return 4
+        case .windowSize: return 5
+        case .helpersScripts: return 6
+        case .apps: return 7
+        case .focus: return 8
+        case .displays: return 9
+        case .automation: return 10
         case .other: return 98
         case .experimental: return 99
         }

@@ -128,7 +128,7 @@ extension AppModel {
 
         let result = replacingExternalInstall
             ? await self.helperService.installBundledHelpersReplacingExternalServices()
-            : await self.helperService.installBundledHelpers()
+            : await self.helperService.installBundledHelpers(startServicesAfterInstall: false)
 
         await MainActor.run {
             self.isLaunchingSetupInstaller = false
@@ -263,6 +263,10 @@ extension AppModel {
 
     func restartYabaiBestEffort() {
         if helperService.hasManagedHelperInstall() {
+            if managedHelperInstallState?.launchAgentsInstalled != true {
+                startHelperServicesBestEffort()
+                return
+            }
             runSupportCommand(
                 yabaiCommand(["--restart-service"], timeout: 2.0),
                 successMessage: "Requested yabai service restart."
@@ -282,18 +286,26 @@ extension AppModel {
                 skhdCommand(["--reload"], timeout: 2.0)
             )
             var fallbackResult: CommandResult?
+            var managedStartResult: ManagedHelperOperationResult?
 
             if !reloadResult.isSuccess {
-                let fallbackCommand = helperService.hasManagedHelperInstall()
-                    ? skhdCommand(["--restart-service"], timeout: 2.0)
-                    : skhdCommand(["--start-service"], timeout: 2.0)
-                fallbackResult = await self.doctorService.runSupportCommand(fallbackCommand)
+                if helperService.hasManagedHelperInstall(), self.managedHelperInstallState?.launchAgentsInstalled != true {
+                    managedStartResult = await self.helperService.startManagedServices()
+                } else {
+                    let fallbackCommand = helperService.hasManagedHelperInstall()
+                        ? skhdCommand(["--restart-service"], timeout: 2.0)
+                        : skhdCommand(["--start-service"], timeout: 2.0)
+                    fallbackResult = await self.doctorService.runSupportCommand(fallbackCommand)
+                }
             }
 
             await MainActor.run {
                 self.appendCommandLog(from: reloadResult)
                 if let fallbackResult {
                     self.appendCommandLog(from: fallbackResult)
+                }
+                if let managedStartResult {
+                    self.applyManagedHelperOperationResult(managedStartResult)
                 }
 
                 if reloadResult.isSuccess {
@@ -304,10 +316,14 @@ extension AppModel {
                         ? "Requested skhd service restart."
                         : "Requested skhd service start."
                     self.lastErrorMessage = nil
+                } else if let managedStartResult, managedStartResult.errorMessage == nil {
+                    self.lastActionMessage = managedStartResult.successMessage ?? "Started TilePilot helper services."
+                    self.lastErrorMessage = nil
                 } else {
                     let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                     let stderrFallback = fallbackResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let stderr = [stderrReload, stderrFallback].filter { !$0.isEmpty }.joined(separator: " | ")
+                    let stderrManaged = managedStartResult?.errorMessage ?? ""
+                    let stderr = [stderrReload, stderrFallback, stderrManaged].filter { !$0.isEmpty }.joined(separator: " | ")
                     self.lastErrorMessage = stderr.isEmpty
                         ? "Could not restart skhd."
                         : "skhd reload/start failed: \(trimForUI(stderr))"

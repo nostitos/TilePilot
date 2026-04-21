@@ -136,12 +136,15 @@ extension AppModel {
         pinnedDirectionalGroupIDs = Array(NSOrderedSet(array: state.pinnedDirectionalGroupIDs)) as? [String] ?? state.pinnedDirectionalGroupIDs
         shortcutsCustomOrderIDs = Array(NSOrderedSet(array: state.shortcutsCustomOrderIDs)) as? [String] ?? state.shortcutsCustomOrderIDs
         windowLayoutTemplates = state.windowLayoutTemplates
+        workSets = state.workSets
+        activeWorkSetIDsByScope = state.activeWorkSetIDsByScope
         pinnedShortcutKeys = []
         persistPinnedFeatureControlIDs()
         persistPinnedDirectionalGroupIDs()
         persistPinnedShortcutKeys()
         persistShortcutsCustomOrderIDs()
         persistWindowLayoutTemplates()
+        persistWorkSets()
 
         showWindowBadgeOverlay = state.showWindowBadgeOverlay
         UserDefaults.standard.set(showWindowBadgeOverlay, forKey: AppModel.showWindowBadgeOverlayDefaultsKey)

@@ -55,6 +55,8 @@ final class AppModel: ObservableObject {
     private static let pinnedFeatureControlsDefaultsKey = "TilePilot.pinnedFeatureControlIDs"
     private static let shortcutsCustomOrderDefaultsKey = "TilePilot.shortcutsCustomOrderIDs"
     static let windowLayoutTemplatesDefaultsKey = "TilePilot.windowLayoutTemplates"
+    static let workSetsDefaultsKey = "TilePilot.workSets"
+    static let activeWorkSetIDsByScopeDefaultsKey = "TilePilot.activeWorkSetIDsByScope"
     static let showWindowBadgeOverlayDefaultsKey = "TilePilot.showWindowBadgeOverlay"
     static let showWindowOutlineOverlayDefaultsKey = "TilePilot.showWindowOutlineOverlay"
     static let windowOutlineOverlayBaseWidthDefaultsKey = "TilePilot.windowOutlineOverlayBaseWidth"
@@ -103,6 +105,19 @@ final class AppModel: ObservableObject {
             return []
         }
         return templates
+    }
+
+    private static func loadWorkSets() -> [WorkSet] {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: AppModel.workSetsDefaultsKey),
+              let workSets = try? JSONDecoder().decode([WorkSet].self, from: data) else {
+            return []
+        }
+        return workSets
+    }
+
+    private static func loadActiveWorkSetIDsByScope() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: AppModel.activeWorkSetIDsByScopeDefaultsKey) as? [String: String] ?? [:]
     }
 
     private static func loadDesktopScrubTriggerModifiers() -> [DesktopScrubModifier] {
@@ -169,6 +184,9 @@ final class AppModel: ObservableObject {
     @Published var appUpdateLastSuccessfulCheckAt: Date? = UserDefaults.standard.object(forKey: AppModel.appUpdateLastSuccessfulCheckAtDefaultsKey) as? Date
     @Published var dismissedAppUpdateVersion: String? = UserDefaults.standard.string(forKey: AppModel.appUpdateDismissedVersionDefaultsKey)
     @Published var windowLayoutTemplates: [WindowLayoutTemplate] = AppModel.loadWindowLayoutTemplates()
+    @Published var workSets: [WorkSet] = AppModel.loadWorkSets()
+    @Published var activeWorkSetIDsByScope: [String: String] = AppModel.loadActiveWorkSetIDsByScope()
+    @Published var workSetBackdropPresentations: [WorkSetScopeKey: WorkSetBackdropPresentation] = [:]
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []
@@ -416,6 +434,7 @@ final class AppModel: ObservableObject {
     private var lastLiveStateContentSignature: String?
     private var lastLiveStateUIPublishAt: Date?
     var latestLiveStateSnapshot: LiveStateSnapshot?
+    var dismissedWorkSetBackdropIDsByScope: [WorkSetScopeKey: UUID] = [:]
     private var overviewCachesDirty = true
     private var shortcutPresentationCachesDirty = true
     private var runtimeBurstSamples: [RuntimeBurstSource: [Date]] = [:]
@@ -692,6 +711,9 @@ final class AppModel: ObservableObject {
         mutateRuntimeDiagnostics { $0.liveStatePublishedCount += 1 }
         updateOverviewCachesForCurrentVisibility(with: snapshot)
         publishLiveStateSnapshotIfNeeded(snapshot)
+        if currentVisibleTab == .actions, !workSets.isEmpty || !windowLayoutTemplates.isEmpty {
+            rebuildShortcutPresentationCaches()
+        }
         refreshWindowBadgesIfNeeded(contentSignature: contentSignature)
         updateRuntimeDiagnosticsMode(for: snapshot)
         await applyForegroundPolicyTransitions(previous: previousSnapshot, current: snapshot)
@@ -960,6 +982,17 @@ final class AppModel: ObservableObject {
             targetSpace: targetSpace,
             bypassCooldown: bypassCooldown,
             allowFocusFallback: allowFocusFallback
+        )
+    }
+
+    func raiseWindowUsingAccessibilityOnly(
+        windowID: Int,
+        bypassCooldown: Bool = false
+    ) -> Bool {
+        keepOnTopCoordinator.raiseWindowUsingAccessibilityOnly(
+            on: self,
+            windowID: windowID,
+            bypassCooldown: bypassCooldown
         )
     }
 
@@ -1256,6 +1289,7 @@ final class AppModel: ObservableObject {
                         isMinimized: $0.isMinimized,
                         isHidden: $0.isHidden,
                         hasWindowServerMatch: $0.hasWindowServerMatch,
+                        windowServerOrderIndex: $0.windowServerOrderIndex,
                         source: .stale,
                         lastUpdatedAt: previous.lastUpdatedAt
                     )
@@ -1515,6 +1549,8 @@ final class AppModel: ObservableObject {
             return 0
         case .windowBehavior:
             return 3.0
+        case .templates, .workSets:
+            return 1.0
         default:
             return nil
         }

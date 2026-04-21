@@ -586,8 +586,8 @@ struct NowDashboardView: View {
                     .init(label: "Open Accessibility Settings", prominent: false, handler: {
                         model.openAccessibilitySettings()
                     }),
-                    .init(label: model.primarySetupAction == .startHelperServices ? model.primarySetupActionLabel : "Start Helper Services", prominent: false, handler: {
-                        if model.primarySetupAction == .startHelperServices {
+                    .init(label: model.primarySetupAction == .reviewAccessibility ? model.primarySetupActionLabel : "Start Helper Services", prominent: false, handler: {
+                        if model.primarySetupAction == .startHelperServices || model.primarySetupAction == .reviewAccessibility {
                             model.performPrimarySetupAction()
                         } else {
                             model.startHelperServicesBestEffort()
@@ -628,7 +628,7 @@ struct NowDashboardView: View {
     private func presentOverviewRecoveryGuide(for degradedReason: String?) {
         if needsAccessibilityRecoveryHint(for: degradedReason) {
             if model.hasIncompleteEssentialSetupGuideSteps {
-                model.presentSetupGuide(source: .manual, startingAt: .startHelperServices)
+                model.presentSetupGuide(source: .manual, startingAt: .accessibility)
             } else {
                 model.presentSetupGuide(source: .manual, startingAt: .accessibility)
             }
@@ -636,7 +636,7 @@ struct NowDashboardView: View {
         }
 
         if model.hasIncompleteEssentialSetupGuideSteps {
-            model.presentSetupGuide(source: .manual, startingAt: .startHelperServices)
+            model.presentSetupGuide(source: .manual, startingAt: .accessibility)
         } else {
             model.presentSetupGuide()
         }

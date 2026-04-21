@@ -148,6 +148,10 @@ struct SystemDashboardView: View {
                             Text(row.detail)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if row.id == "mission-control" {
+                                MissionControlChecklistView(items: model.missionControlChecklistItems)
+                                    .padding(.top, 6)
+                            }
                             HStack(spacing: 8) {
                                 ForEach(row.actions, id: \.self) { action in
                                     Button(action.label) {

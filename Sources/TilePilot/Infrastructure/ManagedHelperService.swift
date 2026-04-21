@@ -84,7 +84,7 @@ final class ManagedHelperService: @unchecked Sendable {
         return try? decoder.decode(ManagedHelperInstallState.self, from: data)
     }
 
-    func installBundledHelpers(bundle: Bundle = .main) async -> ManagedHelperOperationResult {
+    func installBundledHelpers(bundle: Bundle = .main, startServicesAfterInstall: Bool? = nil) async -> ManagedHelperOperationResult {
         guard let manifest = bundledManifest(bundle: bundle) else {
             return ManagedHelperOperationResult(
                 installState: loadInstallState(),
@@ -96,6 +96,7 @@ final class ManagedHelperService: @unchecked Sendable {
 
         do {
             try ensureManagedDirectories()
+            let previousState = loadInstallState()
             var installed: [ManagedInstalledHelper] = []
             for definition in manifest.helpers {
                 guard let bundledURL = bundledHelperURL(for: definition.helper, bundle: bundle) else {
@@ -119,12 +120,24 @@ final class ManagedHelperService: @unchecked Sendable {
                 )
             }
 
-            let launchAgentLogs = try await installOrUpdateLaunchAgents()
+            let shouldStartServices = startServicesAfterInstall ?? shouldBootstrapManagedServicesAfterInstall(previousState: previousState)
+            let launchAgentLogs: [CommandLogEntry]
+            let launchAgentsInstalled: Bool
+            let servicesBootstrapped: Bool
+            if shouldStartServices {
+                launchAgentLogs = try await installOrUpdateLaunchAgents()
+                launchAgentsInstalled = true
+                servicesBootstrapped = launchAgentLogs.allSatisfy { $0.errorType == .none && ($0.exitStatus ?? 0) == 0 }
+            } else {
+                launchAgentLogs = []
+                launchAgentsInstalled = false
+                servicesBootstrapped = false
+            }
             let installState = ManagedHelperInstallState(
                 updatedAt: Date(),
                 helpers: installed.sorted { $0.helper.rawValue < $1.helper.rawValue },
-                launchAgentsInstalled: true,
-                servicesBootstrapped: launchAgentLogs.allSatisfy { $0.errorType == .none && ($0.exitStatus ?? 0) == 0 }
+                launchAgentsInstalled: launchAgentsInstalled,
+                servicesBootstrapped: servicesBootstrapped
             )
             try writeInstallState(installState)
             return ManagedHelperOperationResult(
@@ -132,7 +145,7 @@ final class ManagedHelperService: @unchecked Sendable {
                 commandLogs: launchAgentLogs,
                 successMessage: installState.servicesBootstrapped
                     ? "Installed TilePilot helpers."
-                    : "Installed TilePilot helpers, but one or more services still need to be started.",
+                    : "Installed TilePilot helpers. Review Accessibility, then start helper services.",
                 errorMessage: nil
             )
         } catch {
@@ -183,7 +196,7 @@ final class ManagedHelperService: @unchecked Sendable {
     func installBundledHelpersReplacingExternalServices(bundle: Bundle = .main) async -> ManagedHelperOperationResult {
         let existingInstalls = await detectExistingExternalHelpers()
         let stopLogs = await stopExternalHelperServices(existingInstalls)
-        let installResult = await installBundledHelpers(bundle: bundle)
+        let installResult = await installBundledHelpers(bundle: bundle, startServicesAfterInstall: true)
         let successMessage: String?
         if installResult.errorMessage == nil, !existingInstalls.isEmpty {
             successMessage = "Stopped external helper services and installed TilePilot helpers."
@@ -215,7 +228,7 @@ final class ManagedHelperService: @unchecked Sendable {
                 installState: installState,
                 commandLogs: logs,
                 successMessage: installState.servicesBootstrapped ? "Started TilePilot helper services." : nil,
-                errorMessage: installState.servicesBootstrapped ? nil : "TilePilot could not start one or more helper services automatically."
+                errorMessage: installState.servicesBootstrapped ? nil : "TilePilot could not start one or more helper services. Review Accessibility for TilePilot, yabai, and skhd, then try again."
             )
         } catch {
             return ManagedHelperOperationResult(
@@ -241,12 +254,21 @@ final class ManagedHelperService: @unchecked Sendable {
         let processResult = await runner.run(.init("/usr/bin/pgrep", ["-x", helper.executableName], timeout: 1.0))
         let plistURL = launchAgentURL(for: helper)
         let hasLaunchAgent = FileManager.default.fileExists(atPath: plistURL.path)
+        let hasManagedBinary = FileManager.default.isExecutableFile(atPath: managedHelperURL(for: helper).path)
         if processResult.isSuccess {
             let detail = hasLaunchAgent ? "Running from TilePilot-managed LaunchAgent." : "Running from an external install."
             return SetupCheckItem(id: "helper-service-\(helper.rawValue)", title: "\(helper.displayName) service", state: .installed, detail: detail)
         }
         if hasLaunchAgent {
             return SetupCheckItem(id: "helper-service-\(helper.rawValue)", title: "\(helper.displayName) service", state: .warning, detail: "Installed but not running.")
+        }
+        if hasManagedBinary {
+            return SetupCheckItem(
+                id: "helper-service-\(helper.rawValue)",
+                title: "\(helper.displayName) service",
+                state: .warning,
+                detail: "Installed by TilePilot but not started yet. Review Accessibility, then start helper services."
+            )
         }
         return SetupCheckItem(id: "helper-service-\(helper.rawValue)", title: "\(helper.displayName) service", state: .missing, detail: "Not running yet.")
     }
@@ -410,6 +432,15 @@ final class ManagedHelperService: @unchecked Sendable {
         for helper in ManagedHelperKind.allCases {
             let plist = launchAgentPlist(for: helper)
             try plist.write(to: launchAgentURL(for: helper), atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func shouldBootstrapManagedServicesAfterInstall(previousState: ManagedHelperInstallState?) -> Bool {
+        if previousState?.launchAgentsInstalled == true {
+            return true
+        }
+        return ManagedHelperKind.allCases.contains { helper in
+            FileManager.default.fileExists(atPath: launchAgentURL(for: helper).path)
         }
     }
 

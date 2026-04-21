@@ -10,6 +10,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
     let pinnedDirectionalGroupIDs: [String]
     let shortcutsCustomOrderIDs: [String]
     let windowLayoutTemplates: [WindowLayoutTemplate]
+    let workSets: [WorkSet]
+    let activeWorkSetIDsByScope: [String: String]
     let showWindowBadgeOverlay: Bool
     let showWindowOutlineOverlay: Bool
     let windowOutlineOverlayBaseWidth: Double
@@ -29,6 +31,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         pinnedDirectionalGroupIDs: [String],
         shortcutsCustomOrderIDs: [String] = [],
         windowLayoutTemplates: [WindowLayoutTemplate] = [],
+        workSets: [WorkSet] = [],
+        activeWorkSetIDsByScope: [String: String] = [:],
         showWindowBadgeOverlay: Bool,
         showWindowOutlineOverlay: Bool,
         windowOutlineOverlayBaseWidth: Double,
@@ -47,6 +51,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         self.pinnedDirectionalGroupIDs = pinnedDirectionalGroupIDs
         self.shortcutsCustomOrderIDs = shortcutsCustomOrderIDs
         self.windowLayoutTemplates = windowLayoutTemplates
+        self.workSets = workSets
+        self.activeWorkSetIDsByScope = activeWorkSetIDsByScope
         self.showWindowBadgeOverlay = showWindowBadgeOverlay
         self.showWindowOutlineOverlay = showWindowOutlineOverlay
         self.windowOutlineOverlayBaseWidth = windowOutlineOverlayBaseWidth
@@ -67,6 +73,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         case pinnedDirectionalGroupIDs
         case shortcutsCustomOrderIDs
         case windowLayoutTemplates
+        case workSets
+        case activeWorkSetIDsByScope
         case showWindowBadgeOverlay
         case showWindowOutlineOverlay
         case windowOutlineOverlayBaseWidth
@@ -88,6 +96,8 @@ struct ReleaseDefaultsUserState: Codable, Sendable {
         pinnedDirectionalGroupIDs = try container.decode([String].self, forKey: .pinnedDirectionalGroupIDs)
         shortcutsCustomOrderIDs = try container.decodeIfPresent([String].self, forKey: .shortcutsCustomOrderIDs) ?? []
         windowLayoutTemplates = try container.decodeIfPresent([WindowLayoutTemplate].self, forKey: .windowLayoutTemplates) ?? []
+        workSets = try container.decodeIfPresent([WorkSet].self, forKey: .workSets) ?? []
+        activeWorkSetIDsByScope = try container.decodeIfPresent([String: String].self, forKey: .activeWorkSetIDsByScope) ?? [:]
         showWindowBadgeOverlay = try container.decode(Bool.self, forKey: .showWindowBadgeOverlay)
         showWindowOutlineOverlay = try container.decode(Bool.self, forKey: .showWindowOutlineOverlay)
         windowOutlineOverlayBaseWidth = try container.decodeIfPresent(Double.self, forKey: .windowOutlineOverlayBaseWidth) ?? 2.0

@@ -1,0 +1,720 @@
+import Foundation
+
+struct WorkSetDesktopContext: Sendable {
+    let scopeKey: WorkSetScopeKey
+    let display: DisplayState
+    let windows: [WindowState]
+}
+
+@MainActor
+extension AppModel {
+    private static let workSetFeaturePrefix = "workset.activate."
+    static let cycleWorkSetsFeatureID: FeatureControlID = "workset.cycle-current-desktop"
+
+    func workSetFeatureID(for workSet: WorkSet) -> FeatureControlID {
+        FeatureControlID(rawValue: Self.workSetFeaturePrefix + workSet.id.uuidString.lowercased())
+    }
+
+    func workSetID(from featureID: FeatureControlID) -> UUID? {
+        guard featureID.rawValue.hasPrefix(Self.workSetFeaturePrefix) else { return nil }
+        let raw = String(featureID.rawValue.dropFirst(Self.workSetFeaturePrefix.count))
+        return UUID(uuidString: raw)
+    }
+
+    func workSet(withID id: UUID) -> WorkSet? {
+        workSets.first(where: { $0.id == id })
+    }
+
+    var currentDesktopWorkSetContext: WorkSetDesktopContext? {
+        currentDesktopWorkSetContext(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+    }
+
+    var currentDesktopWorkSetScopeKey: WorkSetScopeKey? {
+        currentDesktopWorkSetContext?.scopeKey
+    }
+
+    var currentDesktopWorkSets: [WorkSet] {
+        guard let scopeKey = currentDesktopWorkSetScopeKey else { return [] }
+        return workSets(for: scopeKey)
+    }
+
+    var currentDesktopPaletteWindows: [WindowState] {
+        guard let scopeKey = currentDesktopWorkSetScopeKey else { return [] }
+        return paletteWindows(for: scopeKey)
+    }
+
+    var visibleWorkSetContexts: [WorkSetDesktopContext] {
+        visibleWorkSetContexts(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+    }
+
+    func activeWorkSetID(for scopeKey: WorkSetScopeKey) -> UUID? {
+        guard let raw = activeWorkSetIDsByScope[scopeKey.id] else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    func isActiveWorkSet(_ workSet: WorkSet) -> Bool {
+        activeWorkSetID(for: workSet.scopeKey) == workSet.id
+    }
+
+    func setActiveWorkSetID(_ workSetID: UUID?, for scopeKey: WorkSetScopeKey) {
+        if let workSetID {
+            activeWorkSetIDsByScope[scopeKey.id] = workSetID.uuidString.lowercased()
+        } else {
+            activeWorkSetIDsByScope.removeValue(forKey: scopeKey.id)
+        }
+        persistActiveWorkSetIDsByScope()
+    }
+
+    func workSetActivationDisabledReason(_ workSet: WorkSet) -> String? {
+        if let runtimeReason = yabaiRuntimeControlDisabledReason, !canRunYabaiRuntimeCommands {
+            return runtimeReason
+        }
+        guard !workSet.members.isEmpty else {
+            return "Work Set has no windows yet."
+        }
+        guard let currentScopeKey = currentDesktopWorkSetScopeKey else {
+            return "Current desktop data is unavailable right now."
+        }
+        guard currentScopeKey == workSet.scopeKey else {
+            return "Switch to Desktop \(workSet.scopeKey.spaceIndex) on \(workSet.sourceDisplayName) to activate this Work Set."
+        }
+        return nil
+    }
+
+    func workSetResolvedMembers(for workSet: WorkSet) -> [WorkSetResolvedMember] {
+        workSetResolvedMembers(for: workSet, in: currentDesktopWorkSetContext)
+    }
+
+    func workSetResolvedMembers(for workSet: WorkSet, in context: WorkSetDesktopContext?) -> [WorkSetResolvedMember] {
+        guard let context, context.scopeKey == workSet.scopeKey else {
+            return workSet.members.map { WorkSetResolvedMember(member: $0, matchedWindow: nil, status: .missing) }
+        }
+        return resolveWorkSetMembers(workSet.members, in: context.windows)
+    }
+
+    func cycleWorkSetsDisabledReason() -> String? {
+        if let runtimeReason = yabaiRuntimeControlDisabledReason, !canRunYabaiRuntimeCommands {
+            return runtimeReason
+        }
+        guard currentDesktopWorkSetContext != nil else {
+            return "Current desktop data is unavailable right now."
+        }
+        guard !currentDesktopWorkSets.isEmpty else {
+            return "No Work Sets exist on this desktop yet."
+        }
+        return nil
+    }
+
+    func nextWorkSetForCurrentDesktopCycle() -> WorkSet? {
+        guard let scopeKey = currentDesktopWorkSetScopeKey else { return nil }
+        return nextWorkSetToCycle(
+            in: currentDesktopWorkSets,
+            activeWorkSetID: activeWorkSetID(for: scopeKey)
+        )
+    }
+
+    func workSets(for scopeKey: WorkSetScopeKey) -> [WorkSet] {
+        workSets
+            .filter { $0.scopeKey == scopeKey }
+    }
+
+    func paletteWindows(for scopeKey: WorkSetScopeKey) -> [WindowState] {
+        orderedWorkSetCandidateWindows(from: workSetContext(for: scopeKey)?.windows ?? [])
+    }
+
+    @discardableResult
+    func createEmptyWorkSetForCurrentDesktop(announce: Bool = true) -> UUID? {
+        guard let scopeKey = currentDesktopWorkSetScopeKey else {
+            lastErrorMessage = "Current desktop data is unavailable right now."
+            lastActionMessage = nil
+            return nil
+        }
+        return createEmptyWorkSet(for: scopeKey, announce: announce)
+    }
+
+    @discardableResult
+    func createEmptyWorkSet(for scopeKey: WorkSetScopeKey, announce: Bool = true) -> UUID? {
+        guard let context = workSetContext(for: scopeKey) else {
+            lastErrorMessage = "Desktop data is unavailable right now."
+            lastActionMessage = nil
+            return nil
+        }
+
+        return createWorkSet(
+            name: nextAvailableWorkSetName(base: "Work Set"),
+            sourceDisplayName: context.display.name,
+            scopeKey: context.scopeKey,
+            members: [],
+            announce: announce,
+            actionMessage: "Created"
+        )
+    }
+
+    @discardableResult
+    func importCurrentDesktopWorkSet() async -> UUID? {
+        await refreshLiveState()
+        guard let scopeKey = currentDesktopWorkSetScopeKey else {
+            lastErrorMessage = "Current desktop data is unavailable right now."
+            lastActionMessage = nil
+            return nil
+        }
+        return importWorkSet(for: scopeKey)
+    }
+
+    @discardableResult
+    func importWorkSet(for scopeKey: WorkSetScopeKey) -> UUID? {
+        guard let context = workSetContext(for: scopeKey) else {
+            lastErrorMessage = "Desktop data is unavailable right now."
+            lastActionMessage = nil
+            return nil
+        }
+
+        let orderedWindows = orderedWorkSetCandidateWindows(from: context.windows)
+        guard !orderedWindows.isEmpty else {
+            lastErrorMessage = "No eligible windows are available on this desktop right now."
+            lastActionMessage = nil
+            return nil
+        }
+
+        return createWorkSet(
+            name: nextAvailableWorkSetName(base: "Desktop \(context.scopeKey.spaceIndex) Set"),
+            sourceDisplayName: context.display.name,
+            scopeKey: context.scopeKey,
+            members: orderedWindows.map(WorkSetMember.init(window:)),
+            announce: true,
+            actionMessage: "Imported"
+        )
+    }
+
+    @discardableResult
+    func duplicateWorkSet(_ id: UUID) -> UUID? {
+        guard let workSet = workSet(withID: id) else { return nil }
+        let duplicate = WorkSet(
+            name: nextAvailableWorkSetName(base: workSet.name + " Copy"),
+            sourceDisplayName: workSet.sourceDisplayName,
+            scopeKey: workSet.scopeKey,
+            members: workSet.members,
+            backdropEnabled: workSet.backdropEnabled,
+            backdropColor: workSet.backdropColor
+        )
+        if let index = workSets.firstIndex(where: { $0.id == id }) {
+            workSets.insert(duplicate, at: index + 1)
+        } else {
+            workSets.append(duplicate)
+        }
+        persistWorkSets()
+        lastActionMessage = "Duplicated \(workSet.name)."
+        lastErrorMessage = nil
+        return duplicate.id
+    }
+
+    func renameWorkSet(_ id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = workSets.firstIndex(where: { $0.id == id }) else { return }
+        guard workSets[index].name != trimmed else { return }
+        workSets[index] = workSets[index].with(name: trimmed)
+        persistWorkSets()
+    }
+
+    func deleteWorkSet(_ id: UUID) {
+        guard let workSet = workSet(withID: id) else { return }
+        workSets.removeAll { $0.id == id }
+        activeWorkSetIDsByScope = activeWorkSetIDsByScope.filter { _, rawID in rawID.lowercased() != id.uuidString.lowercased() }
+        if workSetBackdropPresentations[workSet.scopeKey]?.workSetID == id {
+            hideWorkSetBackdrop(for: workSet.scopeKey)
+        }
+        if dismissedWorkSetBackdropIDsByScope[workSet.scopeKey] == id {
+            dismissedWorkSetBackdropIDsByScope.removeValue(forKey: workSet.scopeKey)
+        }
+        persistActiveWorkSetIDsByScope()
+        persistWorkSets()
+        lastActionMessage = "Deleted \(workSet.name)."
+        lastErrorMessage = nil
+    }
+
+    func setWorkSetBackdropEnabled(_ enabled: Bool, workSetID: UUID) {
+        guard let index = workSets.firstIndex(where: { $0.id == workSetID }) else { return }
+        guard workSets[index].backdropEnabled != enabled else { return }
+        workSets[index] = workSets[index].with(backdropEnabled: enabled)
+        persistWorkSets()
+        syncBackdropRuntimeStateForActiveWorkSet(workSets[index])
+    }
+
+    func setWorkSetBackdropColor(_ color: OverlayAccentColor, workSetID: UUID) {
+        guard let index = workSets.firstIndex(where: { $0.id == workSetID }) else { return }
+        guard workSets[index].backdropColor != color else { return }
+        workSets[index] = workSets[index].with(backdropColor: color)
+        persistWorkSets()
+        syncBackdropRuntimeStateForActiveWorkSet(workSets[index])
+    }
+
+    func addWindowToWorkSet(workSetID: UUID, window: WindowState, at insertionIndex: Int? = nil) {
+        addMemberToWorkSet(workSetID: workSetID, member: WorkSetMember(window: window), at: insertionIndex)
+    }
+
+    func addMemberToWorkSet(workSetID: UUID, member: WorkSetMember, at insertionIndex: Int? = nil) {
+        guard let workSetIndex = workSets.firstIndex(where: { $0.id == workSetID }) else { return }
+        var members = workSets[workSetIndex].members
+
+        let duplicateExists = members.contains { existing in
+            workSetMembersRepresentSameWindow(existing, member)
+        }
+        guard !duplicateExists else { return }
+
+        let index = min(max(0, insertionIndex ?? members.count), members.count)
+        members.insert(member, at: index)
+        workSets[workSetIndex] = workSets[workSetIndex].with(members: members)
+        persistWorkSets()
+    }
+
+    func removeWorkSetMember(workSetID: UUID, memberID: UUID) {
+        guard let workSetIndex = workSets.firstIndex(where: { $0.id == workSetID }) else { return }
+        var members = workSets[workSetIndex].members
+        let originalCount = members.count
+        members.removeAll { $0.id == memberID }
+        guard members.count != originalCount else { return }
+        workSets[workSetIndex] = workSets[workSetIndex].with(members: members)
+        persistWorkSets()
+    }
+
+    func moveWorkSetMember(workSetID: UUID, memberID: UUID, before targetMemberID: UUID?) {
+        guard let workSetIndex = workSets.firstIndex(where: { $0.id == workSetID }) else { return }
+        if targetMemberID == memberID {
+            return
+        }
+        var members = workSets[workSetIndex].members
+        guard let sourceIndex = members.firstIndex(where: { $0.id == memberID }) else { return }
+
+        let movingMember = members.remove(at: sourceIndex)
+        let destinationIndex: Int
+        if let targetMemberID,
+           let targetIndex = members.firstIndex(where: { $0.id == targetMemberID }) {
+            destinationIndex = targetIndex
+        } else {
+            destinationIndex = members.count
+        }
+        members.insert(movingMember, at: min(max(0, destinationIndex), members.count))
+
+        guard members != workSets[workSetIndex].members else { return }
+        workSets[workSetIndex] = workSets[workSetIndex].with(members: members)
+        persistWorkSets()
+    }
+
+    func moveWorkSetMember(
+        from sourceWorkSetID: UUID,
+        memberID: UUID,
+        to destinationWorkSetID: UUID,
+        before targetMemberID: UUID?
+    ) {
+        if sourceWorkSetID == destinationWorkSetID {
+            moveWorkSetMember(workSetID: destinationWorkSetID, memberID: memberID, before: targetMemberID)
+            return
+        }
+
+        guard let sourceIndex = workSets.firstIndex(where: { $0.id == sourceWorkSetID }),
+              let destinationIndex = workSets.firstIndex(where: { $0.id == destinationWorkSetID }),
+              let movingMember = workSets[sourceIndex].members.first(where: { $0.id == memberID }) else {
+            return
+        }
+
+        var sourceMembers = workSets[sourceIndex].members
+        var destinationMembers = workSets[destinationIndex].members
+
+        sourceMembers.removeAll { $0.id == memberID }
+        destinationMembers.removeAll { existing in
+            workSetMembersRepresentSameWindow(existing, movingMember)
+        }
+
+        let insertionIndex: Int
+        if let targetMemberID,
+           let targetIndex = destinationMembers.firstIndex(where: { $0.id == targetMemberID }) {
+            insertionIndex = targetIndex
+        } else {
+            insertionIndex = destinationMembers.count
+        }
+        destinationMembers.insert(movingMember, at: min(max(0, insertionIndex), destinationMembers.count))
+
+        workSets[sourceIndex] = workSets[sourceIndex].with(members: sourceMembers)
+        workSets[destinationIndex] = workSets[destinationIndex].with(members: destinationMembers)
+        persistWorkSets()
+    }
+
+    @discardableResult
+    func copyWorkSetMember(
+        from sourceWorkSetID: UUID,
+        memberID: UUID,
+        to destinationWorkSetID: UUID,
+        before targetMemberID: UUID? = nil
+    ) -> Bool {
+        guard sourceWorkSetID != destinationWorkSetID,
+              let sourceIndex = workSets.firstIndex(where: { $0.id == sourceWorkSetID }),
+              let destinationIndex = workSets.firstIndex(where: { $0.id == destinationWorkSetID }),
+              let sourceMember = workSets[sourceIndex].members.first(where: { $0.id == memberID }) else {
+            return false
+        }
+
+        var destinationMembers = workSets[destinationIndex].members
+        let destinationWorkSet = workSets[destinationIndex]
+
+        guard !destinationMembers.contains(where: { workSetMembersRepresentSameWindow($0, sourceMember) }) else {
+            lastActionMessage = "\(sourceMember.appName) is already in \(destinationWorkSet.name)."
+            lastErrorMessage = nil
+            return false
+        }
+
+        let copiedMember = duplicatedMembershipCopy(of: sourceMember)
+        let insertionIndex: Int
+        if let targetMemberID,
+           let targetIndex = destinationMembers.firstIndex(where: { $0.id == targetMemberID }) {
+            insertionIndex = targetIndex
+        } else {
+            insertionIndex = destinationMembers.count
+        }
+        destinationMembers.insert(copiedMember, at: min(max(0, insertionIndex), destinationMembers.count))
+
+        workSets[destinationIndex] = destinationWorkSet.with(members: destinationMembers)
+        persistWorkSets()
+        lastActionMessage = "Added \(sourceMember.appName) to \(destinationWorkSet.name)."
+        lastErrorMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func createWorkSetWithCopiedMember(_ member: WorkSetMember) -> UUID? {
+        guard let context = currentDesktopWorkSetContext else {
+            lastErrorMessage = "Current desktop data is unavailable right now."
+            lastActionMessage = nil
+            return nil
+        }
+
+        let workSetID = createWorkSet(
+            name: nextAvailableWorkSetName(base: "Work Set"),
+            sourceDisplayName: context.display.name,
+            scopeKey: context.scopeKey,
+            members: [duplicatedMembershipCopy(of: member)],
+            announce: false,
+            actionMessage: "Created"
+        )
+        if let workSet = workSet(withID: workSetID) {
+            lastActionMessage = "Created \(workSet.name) with \(member.appName)."
+            lastErrorMessage = nil
+        }
+        return workSetID
+    }
+
+    @discardableResult
+    func createWorkSetFromDrop(
+        payload: WorkSetDropPayload,
+        before targetMemberID: UUID? = nil
+    ) -> UUID? {
+        guard let newWorkSetID = createEmptyWorkSetForCurrentDesktop(announce: false) else {
+            return nil
+        }
+
+        switch payload {
+        case .member(let sourceWorkSetID, let memberID):
+            moveWorkSetMember(
+                from: sourceWorkSetID,
+                memberID: memberID,
+                to: newWorkSetID,
+                before: targetMemberID
+            )
+        case .window(let member):
+            addMemberToWorkSet(workSetID: newWorkSetID, member: member, at: targetMemberID == nil ? nil : 0)
+        }
+
+        if let workSet = workSet(withID: newWorkSetID) {
+            lastActionMessage = "Created \(workSet.name)."
+            lastErrorMessage = nil
+        }
+        return newWorkSetID
+    }
+
+    func persistWorkSets() {
+        let defaults = UserDefaults.standard
+        if workSets.isEmpty {
+            defaults.removeObject(forKey: AppModel.workSetsDefaultsKey)
+        } else if let data = try? JSONEncoder().encode(workSets) {
+            defaults.set(data, forKey: AppModel.workSetsDefaultsKey)
+        }
+        let validWorkSetIDs = Set(workSets.map { $0.id.uuidString.lowercased() })
+        activeWorkSetIDsByScope = activeWorkSetIDsByScope.filter { _, rawID in
+            validWorkSetIDs.contains(rawID.lowercased())
+        }
+        persistActiveWorkSetIDsByScope()
+        reconcileDynamicFeaturePresentationState()
+    }
+
+    func persistActiveWorkSetIDsByScope() {
+        let defaults = UserDefaults.standard
+        if activeWorkSetIDsByScope.isEmpty {
+            defaults.removeObject(forKey: AppModel.activeWorkSetIDsByScopeDefaultsKey)
+        } else {
+            defaults.set(activeWorkSetIDsByScope, forKey: AppModel.activeWorkSetIDsByScopeDefaultsKey)
+        }
+    }
+
+    func reconcileDynamicFeaturePresentationState() {
+        let validFeatureIDs = Set(featureDefinitions.map { $0.id.rawValue })
+        let filteredPins = pinnedFeatureControlIDs.filter { validFeatureIDs.contains($0) }
+        if filteredPins != pinnedFeatureControlIDs {
+            pinnedFeatureControlIDs = filteredPins
+            persistPinnedFeatureControlIDs()
+        }
+        rebuildShortcutPresentationCaches()
+        reconcileShortcutsCustomOrderIDsToCurrentItems()
+        rebuildShortcutPresentationCaches()
+    }
+
+    func currentDesktopWorkSetContext(in snapshot: LiveStateSnapshot?) -> WorkSetDesktopContext? {
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded,
+              let spaceIndex = activeSpaceIndex(in: snapshot),
+              let space = snapshot.spaces.first(where: { $0.index == spaceIndex }) else {
+            return nil
+        }
+
+        return workSetContext(
+            for: WorkSetScopeKey(displayID: space.displayId, spaceIndex: spaceIndex),
+            in: snapshot
+        )
+    }
+
+    func workSetContext(for scopeKey: WorkSetScopeKey) -> WorkSetDesktopContext? {
+        workSetContext(for: scopeKey, in: latestLiveStateSnapshot ?? liveStateSnapshot)
+    }
+
+    func workSetContext(for scopeKey: WorkSetScopeKey, in snapshot: LiveStateSnapshot?) -> WorkSetDesktopContext? {
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded,
+              let space = snapshot.spaces.first(where: { $0.index == scopeKey.spaceIndex && $0.displayId == scopeKey.displayID }),
+              let display = snapshot.displays.first(where: { $0.id == space.displayId }) else {
+            return nil
+        }
+
+        return WorkSetDesktopContext(
+            scopeKey: scopeKey,
+            display: display,
+            windows: eligibleWindowsForWorkSets(in: snapshot, spaceIndex: scopeKey.spaceIndex)
+        )
+    }
+
+    func visibleWorkSetContexts(in snapshot: LiveStateSnapshot?) -> [WorkSetDesktopContext] {
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            return []
+        }
+
+        return snapshot.spaces
+            .filter(\.visible)
+            .compactMap { space in
+                workSetContext(
+                    for: WorkSetScopeKey(displayID: space.displayId, spaceIndex: space.index),
+                    in: snapshot
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.scopeKey == currentDesktopWorkSetScopeKey { return true }
+                if rhs.scopeKey == currentDesktopWorkSetScopeKey { return false }
+                if lhs.display.focused != rhs.display.focused { return lhs.display.focused && !rhs.display.focused }
+                if lhs.scopeKey.spaceIndex != rhs.scopeKey.spaceIndex { return lhs.scopeKey.spaceIndex < rhs.scopeKey.spaceIndex }
+                return lhs.display.name.localizedCaseInsensitiveCompare(rhs.display.name) == .orderedAscending
+            }
+    }
+
+    func eligibleWindowsForWorkSets(in snapshot: LiveStateSnapshot, spaceIndex: Int) -> [WindowState] {
+        snapshot.windows.filter {
+            $0.space == spaceIndex &&
+                $0.isVisible &&
+                !$0.isMinimized &&
+                !$0.isHidden &&
+                $0.isRuntimeManageable &&
+                !isBackdropSurfaceWindow(
+                    $0,
+                    normalizedTitle: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    normalizedRole: $0.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                    normalizedSubrole: $0.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                    in: snapshot
+                )
+        }
+        .sorted(by: workSetWindowSort)
+    }
+
+    func orderedWorkSetCandidateWindows(from windows: [WindowState]) -> [WindowState] {
+        windows.sorted(by: workSetWindowSort)
+    }
+
+    func workSetWindowSort(_ lhs: WindowState, _ rhs: WindowState) -> Bool {
+        switch (lhs.windowServerOrderIndex, rhs.windowServerOrderIndex) {
+        case let (lhsOrder?, rhsOrder?):
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+        case (.some, .none):
+            return true
+        case (.none, .some):
+            return false
+        case (.none, .none):
+            break
+        }
+
+        if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
+        if abs(lhs.frameY - rhs.frameY) > 8 { return lhs.frameY < rhs.frameY }
+        if abs(lhs.frameX - rhs.frameX) > 8 { return lhs.frameX < rhs.frameX }
+        return lhs.id < rhs.id
+    }
+
+    @discardableResult
+    private func createWorkSet(
+        name: String,
+        sourceDisplayName: String,
+        scopeKey: WorkSetScopeKey,
+        members: [WorkSetMember],
+        announce: Bool,
+        actionMessage: String
+    ) -> UUID {
+        let workSet = WorkSet(
+            name: name,
+            sourceDisplayName: sourceDisplayName,
+            scopeKey: scopeKey,
+            members: members
+        )
+        workSets.append(workSet)
+        persistWorkSets()
+        if announce {
+            lastActionMessage = "\(actionMessage) \(workSet.name)."
+            lastErrorMessage = nil
+        }
+        return workSet.id
+    }
+
+    private func nextAvailableWorkSetName(base: String) -> String {
+        let existing = Set(workSets.map { $0.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current) })
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nextAvailableWorkSetName(base: "Work Set")
+        }
+        if !existing.contains(trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)) {
+            return trimmed
+        }
+        for suffix in 2...999 {
+            let candidate = "\(trimmed) \(suffix)"
+            let normalized = candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            if !existing.contains(normalized) {
+                return candidate
+            }
+        }
+        return trimmed + " Copy"
+    }
+
+    private func workSetMembersRepresentSameWindow(_ lhs: WorkSetMember, _ rhs: WorkSetMember) -> Bool {
+        if let lhsWindowID = lhs.lastSeenWindowID,
+           let lhsPID = lhs.lastSeenPID,
+           let rhsWindowID = rhs.lastSeenWindowID,
+           let rhsPID = rhs.lastSeenPID,
+           lhsWindowID == rhsWindowID,
+           lhsPID == rhsPID {
+            return true
+        }
+
+        return normalizedAppRuleKey(lhs.appName) == normalizedAppRuleKey(rhs.appName)
+            && lhs.windowTitle.localizedCaseInsensitiveCompare(rhs.windowTitle) == .orderedSame
+            && lhs.role.localizedCaseInsensitiveCompare(rhs.role) == .orderedSame
+            && lhs.subrole.localizedCaseInsensitiveCompare(rhs.subrole) == .orderedSame
+    }
+
+    private func duplicatedMembershipCopy(of member: WorkSetMember) -> WorkSetMember {
+        WorkSetMember(
+            appName: member.appName,
+            windowTitle: member.windowTitle,
+            role: member.role,
+            subrole: member.subrole,
+            lastSeenWindowID: member.lastSeenWindowID,
+            lastSeenPID: member.lastSeenPID
+        )
+    }
+
+    func clearDismissedWorkSetBackdrop(for scopeKey: WorkSetScopeKey) {
+        dismissedWorkSetBackdropIDsByScope.removeValue(forKey: scopeKey)
+    }
+
+    func dismissActiveWorkSetBackdrop(for scopeKey: WorkSetScopeKey) {
+        if let presentation = workSetBackdropPresentations[scopeKey] {
+            dismissedWorkSetBackdropIDsByScope[scopeKey] = presentation.workSetID
+        }
+        hideWorkSetBackdrop(for: scopeKey)
+    }
+
+    func hideWorkSetBackdrop(for scopeKey: WorkSetScopeKey) {
+        guard workSetBackdropPresentations[scopeKey] != nil else { return }
+        workSetBackdropPresentations.removeValue(forKey: scopeKey)
+    }
+
+    func showWorkSetBackdrop(for workSet: WorkSet, display: DisplayState, anchorWindow: WindowState?) {
+        guard workSet.backdropEnabled else {
+            hideWorkSetBackdrop(for: workSet.scopeKey)
+            return
+        }
+        guard dismissedWorkSetBackdropIDsByScope[workSet.scopeKey] != workSet.id else {
+            hideWorkSetBackdrop(for: workSet.scopeKey)
+            return
+        }
+        workSetBackdropPresentations[workSet.scopeKey] = WorkSetBackdropPresentation(
+            workSetID: workSet.id,
+            scopeKey: workSet.scopeKey,
+            display: display,
+            color: workSet.backdropColor,
+            anchorWindow: anchorWindow
+        )
+    }
+
+    private func syncBackdropRuntimeStateForActiveWorkSet(_ workSet: WorkSet) {
+        guard activeWorkSetID(for: workSet.scopeKey) == workSet.id else { return }
+        guard let context = currentDesktopWorkSetContext,
+              context.scopeKey == workSet.scopeKey else {
+            return
+        }
+
+        if !workSet.backdropEnabled {
+            hideWorkSetBackdrop(for: workSet.scopeKey)
+            return
+        }
+
+        let activeWindowIDs = Set(resolveWorkSetMembers(workSet.members, in: context.windows).compactMap { $0.matchedWindow?.id })
+        let anchorWindow = workSetBackdropAnchorWindow(
+            scopeKey: workSet.scopeKey,
+            excluding: activeWindowIDs
+        )
+        showWorkSetBackdrop(for: workSet, display: context.display, anchorWindow: anchorWindow)
+    }
+
+    func workSetBackdropAnchorWindow(scopeKey: WorkSetScopeKey, excluding activeWindowIDs: Set<Int>) -> WindowState? {
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            return nil
+        }
+
+        return snapshot.windows
+            .filter {
+                $0.space == scopeKey.spaceIndex &&
+                $0.display == scopeKey.displayID &&
+                $0.isVisible &&
+                !$0.isMinimized &&
+                !$0.isHidden &&
+                !activeWindowIDs.contains($0.id) &&
+                !isBackdropSurfaceWindow(
+                    $0,
+                    normalizedTitle: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    normalizedRole: $0.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                    normalizedSubrole: $0.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                    in: snapshot
+                )
+            }
+            .sorted(by: workSetWindowSort)
+            .first
+    }
+}

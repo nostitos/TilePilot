@@ -68,6 +68,21 @@ extension AppModel {
         }
     }
 
+    func activateWorkSet(workSetID: UUID) {
+        Task { [weak self] in
+            await self?.activateWorkSetInternal(workSetID: workSetID)
+        }
+    }
+
+    func cycleWorkSetsCurrentDesktop() {
+        guard let nextWorkSet = nextWorkSetForCurrentDesktopCycle() else {
+            lastErrorMessage = cycleWorkSetsDisabledReason() ?? "No Work Sets are available on this desktop."
+            lastActionMessage = nil
+            return
+        }
+        activateWorkSet(workSetID: nextWorkSet.id)
+    }
+
     func bringFloatingWindowsToFrontCurrentDesktop() {
         Task { [weak self] in
             guard let self else { return }
@@ -557,7 +572,7 @@ extension AppModel {
             return
         }
 
-        guard let state = await currentDesktopVisibleWindowsForBulkLayout(),
+        guard let state = await currentDesktopVisibleWindowsForBulkLayout(template: template),
               let display = state.display else {
             return
         }
@@ -588,6 +603,7 @@ extension AppModel {
 
         let frameResult = await applyTemplateFrames(
             assignments: assignment.assignments,
+            template: template,
             display: display
         )
         let stackingResult = await applyTemplateStacking(
@@ -618,17 +634,102 @@ extension AppModel {
         await refreshLiveState()
     }
 
-    private func currentDesktopVisibleWindowsForBulkLayout() async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
+    private func activateWorkSetInternal(workSetID: UUID) async {
+        guard let workSet = workSet(withID: workSetID) else {
+            await MainActor.run {
+                self.lastErrorMessage = "Work Set no longer exists."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        await refreshLiveState()
+
+        if let disabledReason = workSetActivationDisabledReason(workSet) {
+            await MainActor.run {
+                self.lastErrorMessage = disabledReason
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        guard let context = currentDesktopWorkSetContext else {
+            await MainActor.run {
+                self.lastErrorMessage = "Current desktop data is unavailable right now."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        let resolvedMembers = resolveWorkSetMembers(workSet.members, in: context.windows)
+        let activeResolvedMembers = resolvedMembers.filter { $0.matchedWindow != nil }
+        guard !activeResolvedMembers.isEmpty else {
+            await MainActor.run {
+                self.lastErrorMessage = "No saved windows from this Work Set are available on the current desktop."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        let activeWindowIDs = Set(activeResolvedMembers.compactMap { $0.matchedWindow?.id })
+        let anchorWindow = workSetBackdropAnchorWindow(
+            scopeKey: workSet.scopeKey,
+            excluding: activeWindowIDs
+        )
+        clearDismissedWorkSetBackdrop(for: workSet.scopeKey)
+        if workSet.backdropEnabled {
+            showWorkSetBackdrop(for: workSet, display: context.display, anchorWindow: anchorWindow)
+        } else {
+            hideWorkSetBackdrop(for: workSet.scopeKey)
+        }
+
+        let activeStackResult = await stackWorkSetWindows(
+            activeResolvedMembers.compactMap(\.matchedWindow).reversed(),
+            primaryWindowID: activeResolvedMembers.first?.matchedWindow?.id
+        )
+
+        await MainActor.run {
+            self.setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
+
+            let sameAppCount = resolvedMembers.filter { $0.status == .sameApp }.count
+            let missingCount = resolvedMembers.filter { $0.status == .missing }.count
+            var issues: [String] = []
+            if sameAppCount > 0 {
+                issues.append("Used \(sameAppCount) same-app fallback window(s).")
+            }
+            if missingCount > 0 {
+                issues.append("\(missingCount) member(s) were missing.")
+            }
+            let failedCount = activeStackResult.failed + (activeStackResult.primaryFocused ? 0 : 1)
+            if failedCount > 0 {
+                issues.append("\(failedCount) window operation(s) failed.")
+            }
+
+            self.lastActionMessage = "Activated Work Set \(workSet.name)."
+            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+        }
+
+        await refreshLiveState()
+    }
+
+    private func currentDesktopVisibleWindowsForBulkLayout(template: WindowLayoutTemplate? = nil) async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
         var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
         if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
             await refreshLiveState()
             snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
         }
 
+        let resolvedTarget: (space: SpaceState, display: DisplayState)?
+        if let snapshot, let template {
+            resolvedTarget = preferredTemplateTarget(for: template, in: snapshot)
+        } else {
+            resolvedTarget = nil
+        }
+
         guard let snapshot,
               snapshot.source == .yabai,
               !snapshot.degraded,
-              let spaceIndex = activeSpaceIndex(in: snapshot) else {
+              let spaceIndex = resolvedTarget?.space.index ?? activeSpaceIndex(in: snapshot) else {
             await MainActor.run {
                 self.lastErrorMessage = "Current desktop data is unavailable right now."
                 self.lastActionMessage = nil
@@ -636,7 +737,7 @@ extension AppModel {
             return nil
         }
 
-        let spaceDisplay = snapshot.spaces.first(where: { $0.index == spaceIndex }).flatMap { space in
+        let spaceDisplay = resolvedTarget?.display ?? snapshot.spaces.first(where: { $0.index == spaceIndex }).flatMap { space in
             snapshot.displays.first(where: { $0.id == space.displayId })
         }
 
@@ -763,6 +864,7 @@ extension AppModel {
 
     private func applyTemplateFrames(
         assignments: [(slot: WindowLayoutSlot, window: WindowState)],
+        template: WindowLayoutTemplate,
         display: DisplayState
     ) async -> (updated: Int, failed: Int) {
         guard !assignments.isEmpty else { return (0, 0) }
@@ -773,11 +875,12 @@ extension AppModel {
         for assignment in assignments {
             let window = assignment.window
             let slot = assignment.slot
+            let normalizedFrame = fittedTemplateRect(for: slot, template: template, display: display)
             let absoluteFrame = CGRect(
-                x: display.frameX + (slot.normalizedX * display.frameW),
-                y: display.frameY + (slot.normalizedY * display.frameH),
-                width: max(80, slot.normalizedWidth * display.frameW),
-                height: max(60, slot.normalizedHeight * display.frameH)
+                x: display.frameX + (normalizedFrame.minX * display.frameW),
+                y: display.frameY + (normalizedFrame.minY * display.frameH),
+                width: max(80, normalizedFrame.width * display.frameW),
+                height: max(60, normalizedFrame.height * display.frameH)
             ).integral
 
             let resizeResult = await doctorService.runSupportCommand(
@@ -808,6 +911,48 @@ extension AppModel {
         }
 
         return (updated, failed)
+    }
+
+    private func fittedTemplateRect(
+        for slot: WindowLayoutSlot,
+        template: WindowLayoutTemplate,
+        display: DisplayState
+    ) -> CGRect {
+        let sourceAspectRatio = max(template.displayShapeKey.aspectRatio, 0.1)
+        let targetAspectRatio = max(display.frameW, 1) / max(display.frameH, 1)
+
+        var scaleX = 1.0
+        var scaleY = 1.0
+        var offsetX = 0.0
+        var offsetY = 0.0
+
+        if targetAspectRatio > sourceAspectRatio {
+            scaleX = sourceAspectRatio / targetAspectRatio
+            offsetX = (1 - scaleX) / 2
+        } else if targetAspectRatio < sourceAspectRatio {
+            scaleY = targetAspectRatio / sourceAspectRatio
+            offsetY = (1 - scaleY) / 2
+        }
+
+        let rect = slot.normalizedRect
+        let fittedRect = CGRect(
+            x: offsetX + (rect.minX * scaleX),
+            y: offsetY + (rect.minY * scaleY),
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+
+        let clampedX = min(max(0, fittedRect.minX), 1)
+        let clampedY = min(max(0, fittedRect.minY), 1)
+        let maxWidth = max(0, 1 - clampedX)
+        let maxHeight = max(0, 1 - clampedY)
+
+        return CGRect(
+            x: clampedX,
+            y: clampedY,
+            width: min(max(0, fittedRect.width), maxWidth),
+            height: min(max(0, fittedRect.height), maxHeight)
+        )
     }
 
     private func applyTemplateStacking(
@@ -843,6 +988,30 @@ extension AppModel {
         }
 
         return (updated, failed)
+    }
+
+    private func stackWorkSetWindows<S: Sequence>(
+        _ windows: S,
+        primaryWindowID: Int?
+    ) async -> (updated: Int, failed: Int, primaryFocused: Bool) where S.Element == WindowState {
+        var updated = 0
+        var failed = 0
+        var primaryFocused = false
+
+        for window in windows {
+            let focused = await focusWindowWithRestore(windowID: window.id, knownWindow: window)
+            if focused {
+                updated += 1
+            } else {
+                failed += 1
+            }
+            if primaryWindowID == window.id {
+                primaryFocused = focused
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        return (updated, failed, primaryFocused)
     }
 
     private func applyGridFrames(

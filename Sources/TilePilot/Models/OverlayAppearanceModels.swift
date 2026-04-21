@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-struct OverlayAccentColor: Codable, Sendable, Equatable {
+struct OverlayAccentColor: Codable, Sendable, Equatable, Hashable {
     let red: Double
     let green: Double
     let blue: Double
@@ -9,6 +9,7 @@ struct OverlayAccentColor: Codable, Sendable, Equatable {
 
     static let tiledDefault = OverlayAccentColor(red: 0.20, green: 0.50, blue: 0.95, alpha: 1.0)
     static let floatingDefault = OverlayAccentColor(red: 1.0, green: 0.55, blue: 0.0, alpha: 1.0)
+    static let workSetBackdropDefault = OverlayAccentColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1.0)
 
     var swiftUIColor: Color {
         Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)

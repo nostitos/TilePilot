@@ -204,7 +204,12 @@ final class StatusBarController: NSObject {
         }
     }
 
+    func presentQuickMenuForAutomation() {
+        presentQuickMenu()
+    }
+
     private func presentQuickMenu() {
+        model.rebuildShortcutPresentationCaches()
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(openTilePilotMenuItem())
@@ -678,6 +683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var megamapWindowController: MegamapWindowController?
     private var statusBarController: StatusBarController?
     private var windowBadgeOverlayController: WindowBadgeOverlayController?
+    private var workSetBackdropController: WorkSetBackdropController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if shouldTerminateAsDuplicateInstance() {
@@ -686,6 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSApp.setActivationPolicy(.accessory)
+        ColorPanelPresets.installIfNeeded()
 
         tilePilotWindowController = TilePilotWindowController(model: model)
         megamapWindowController = MegamapWindowController(model: model)
@@ -701,6 +708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
+        workSetBackdropController = WorkSetBackdropController(model: model)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(showMegamapWindow),
@@ -795,6 +803,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let actionRaw = routeRaw
             model.acknowledgeInitialStatusIfNeeded()
             switch actionRaw {
+            case let raw where raw.hasPrefix("open-tab/"):
+                guard let tab = internalTabRoute(from: String(raw.dropFirst("open-tab/".count))) else { return }
+                tilePilotWindowController?.showAndFocus()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.model.requestOpenTilePilotTab(tab)
+                }
+            case "show-quick-menu":
+                statusBarController?.presentQuickMenuForAutomation()
             case "native-spaces-scrub-spike":
                 guard model.experimentalNativeSpacesScrubSpikeEnabled else { return }
                 Task { [weak self] in
@@ -811,6 +827,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         default:
             return
+        }
+    }
+
+    private func internalTabRoute(from raw: String) -> TilePilotTab? {
+        switch raw.lowercased() {
+        case "overview", "now":
+            return .now
+        case "behaviors", "window-behavior", "windowbehavior":
+            return .windowBehavior
+        case "actions", "shortcuts", "actions-shortcuts":
+            return .actions
+        case "templates":
+            return .templates
+        case "work-sets", "worksets":
+            return .workSets
+        case "appearance":
+            return .appearance
+        case "config-files", "files":
+            return .files
+        case "how-it-works", "howitworks":
+            return .howItWorks
+        case "system":
+            return .system
+        default:
+            return nil
         }
     }
 

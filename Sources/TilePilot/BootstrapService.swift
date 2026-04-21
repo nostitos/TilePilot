@@ -85,9 +85,11 @@ final class BootstrapService: @unchecked Sendable {
         let trusted = AXIsProcessTrusted()
         return SetupCheckItem(
             id: "accessibility-permission",
-            title: "Optional: TilePilot Accessibility permission",
+            title: "TilePilot Accessibility review",
             state: trusted ? .installed : .unknown,
-            detail: trusted ? "Granted" : "TilePilot could not confirm this permission right now. The app still works without it."
+            detail: trusted
+                ? "Granted"
+                : "Review TilePilot in Accessibility, and on a new or migrated Mac also check whether yabai and skhd appear there before the first helper start."
         )
     }
 

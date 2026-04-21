@@ -28,8 +28,9 @@ TilePilot is not trying to be a literal i3 clone on macOS. It is a practical tra
 - switch windows between floating and tiled states without losing track of what happened
 - rebuild a messy desktop into a usable tiled layout quickly
 - set app-level exceptions such as `Never Auto-Tile App` or `Keep App on Top`
-- create reusable floating layout templates for a display and apply them to the current desktop
+- create reusable floating layout templates for a display and apply them to the current desktop, even when the display shape changed slightly
 - import the current desktop layout into a template and constrain slots to specific apps
+- save desktop-scoped Work Sets so you can bring a known group of windows back to the front
 - manage `yabairc` and `skhdrc` safely without overwriting the rest of your config
 - recover from drifted permissions, helpers, or services through Guided Setup and `System`
 
@@ -41,8 +42,9 @@ If you want to use TilePilot the way it is intended, the path looks like this:
 2. Learn the core actions in `Actions & Shortcuts`.
 3. Let `Behaviors` define the defaults: which desktops tile, which apps never auto-tile, how focus behaves.
 4. Use `Templates` when you want an exact floating layout for a display instead of a general tiled layout.
-5. Use `Appearance`, `MegaMap`, badges, and the right-click menu as visibility and recovery tools, not as the primary workflow.
-6. Gradually rely more on the keyboard and less on the GUI.
+5. Use `Work Sets` when you want to save and reactivate a front-to-back pile of windows for one desktop.
+6. Use `Appearance`, `MegaMap`, badges, and the right-click menu as visibility and recovery tools, not as the primary workflow.
+7. Gradually rely more on the keyboard and less on the GUI.
 
 ## Main UI Areas
 
@@ -60,7 +62,10 @@ If you want to use TilePilot the way it is intended, the path looks like this:
   - badges, outline overlay, outline width, screen edge padding, and gap between tiled windows
 - `Templates`
   - manages exact floating layouts for the current display shape
-  - draw slots, split and duplicate them, import the current desktop layout, and constrain slots to specific apps
+  - draw slots, split and duplicate them, import the current desktop layout, constrain slots to specific apps, and auto-fit the template when the display shape changes slightly
+- `Work Sets`
+  - saves and re-activates a known set of windows for one desktop
+  - import visible windows, cycle between saved sets, and optionally show a backdrop for the active set
 - `Config Files`
   - raw editing for managed config files and scripts
   - includes backups and restore flows
@@ -68,6 +73,32 @@ If you want to use TilePilot the way it is intended, the path looks like this:
   - visual explanations of the main concepts so settings tabs can stay focused on changing behavior
 - `System`
   - setup, health, update checks, diagnostics, and Guided Setup reopen paths
+  - includes a Mission Control checklist for the two desktop settings TilePilot depends on most
+
+## Screenshots
+
+### Overview
+
+![Overview](assets/screenshots/overview.png)
+
+### Templates
+
+![Templates](assets/screenshots/templates.png)
+
+### Work Sets
+
+![Work Sets](assets/screenshots/work-sets.png)
+
+### Actions & Shortcuts
+
+![Actions & Shortcuts](assets/screenshots/actions-shortcuts.png)
+
+### Behaviors and How It Works
+
+<p align="center">
+  <img src="assets/screenshots/behaviors.png" alt="Behaviors" width="49%">
+  <img src="assets/screenshots/how-it-works.png" alt="How It Works" width="49%">
+</p>
 
 ## Main Layout Actions
 
@@ -135,9 +166,11 @@ TilePilot currently focuses on the everyday supported path:
 - bundled helper install and recovery
 - keyboard actions, shortcut learning, and right-click menu pinning
 - tiled and floating window control
-- exact floating layout templates with app-aware slot rules
+- exact floating layout templates with app-aware slot rules and display auto-fit
+- desktop-scoped Work Sets with optional backdrops
 - a built-in sample template so new installs can try Templates immediately
 - live desktop visibility through `Overview`, overlays, and `MegaMap`
+- Mission Control checklist guidance inside `System`
 - safe config management for TilePilot-managed sections
 
 Advanced scripting-addition / SIP-dependent desktop-control workflows are intentionally out of scope for now.

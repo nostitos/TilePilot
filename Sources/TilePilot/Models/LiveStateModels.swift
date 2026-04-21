@@ -56,6 +56,7 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
     let isMinimized: Bool
     let isHidden: Bool
     let hasWindowServerMatch: Bool
+    let windowServerOrderIndex: Int?
     let source: StateSourceQuality
     let lastUpdatedAt: Date
 
@@ -94,6 +95,7 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
         case isMinimized
         case isHidden
         case hasWindowServerMatch
+        case windowServerOrderIndex
         case source
         case lastUpdatedAt
     }
@@ -113,13 +115,14 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
         canMove: Bool,
         canResize: Bool,
         title: String,
-        role: String,
-        subrole: String,
+        role: String = "",
+        subrole: String = "",
         focused: Bool,
         isVisible: Bool,
         isMinimized: Bool,
         isHidden: Bool,
-        hasWindowServerMatch: Bool,
+        hasWindowServerMatch: Bool = false,
+        windowServerOrderIndex: Int? = nil,
         source: StateSourceQuality,
         lastUpdatedAt: Date
     ) {
@@ -144,6 +147,7 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
         self.isMinimized = isMinimized
         self.isHidden = isHidden
         self.hasWindowServerMatch = hasWindowServerMatch
+        self.windowServerOrderIndex = windowServerOrderIndex
         self.source = source
         self.lastUpdatedAt = lastUpdatedAt
     }
@@ -171,6 +175,7 @@ struct WindowState: Identifiable, Codable, Sendable, Equatable {
         isMinimized = try container.decode(Bool.self, forKey: .isMinimized)
         isHidden = try container.decode(Bool.self, forKey: .isHidden)
         hasWindowServerMatch = try container.decodeIfPresent(Bool.self, forKey: .hasWindowServerMatch) ?? false
+        windowServerOrderIndex = try container.decodeIfPresent(Int.self, forKey: .windowServerOrderIndex)
         source = try container.decode(StateSourceQuality.self, forKey: .source)
         lastUpdatedAt = try container.decode(Date.self, forKey: .lastUpdatedAt)
     }

@@ -51,6 +51,14 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         applyWindowLayoutTemplate(templateID: templateID)
         return
     }
+    if let workSetID = workSetID(from: featureID) {
+        activateWorkSet(workSetID: workSetID)
+        return
+    }
+    if featureID == Self.cycleWorkSetsFeatureID {
+        cycleWorkSetsCurrentDesktop()
+        return
+    }
     if featureID.rawValue == "screen.bring-floating-front" {
         bringFloatingWindowsToFrontCurrentDesktop()
         return
@@ -235,6 +243,15 @@ func featureDisabledReason(for definition: FeatureDefinition) -> String? {
             return "Template no longer exists."
         }
         return templateApplyDisabledReason(template)
+    }
+    if let workSetID = workSetID(from: definition.id) {
+        guard let workSet = workSet(withID: workSetID) else {
+            return "Work Set no longer exists."
+        }
+        return workSetActivationDisabledReason(workSet)
+    }
+    if definition.id == Self.cycleWorkSetsFeatureID {
+        return cycleWorkSetsDisabledReason()
     }
     return featureDisabledReason(for: definition.capabilityGate)
 }

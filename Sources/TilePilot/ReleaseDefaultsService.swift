@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 final class ReleaseDefaultsService: @unchecked Sendable {
-    static let currentProfileVersion = "v0.3.2-defaults.1"
+    static let currentProfileVersion = "v0.4.0-defaults.1"
 
     private let fileManager = FileManager.default
 
@@ -27,6 +27,8 @@ final class ReleaseDefaultsService: @unchecked Sendable {
                     "directional.focusWindow",
                 ],
                 windowLayoutTemplates: [starterTemplate()],
+                workSets: [],
+                activeWorkSetIDsByScope: [:],
                 showWindowBadgeOverlay: true,
                 showWindowOutlineOverlay: true,
                 windowOutlineOverlayBaseWidth: 1.0,
@@ -84,6 +86,8 @@ final class ReleaseDefaultsService: @unchecked Sendable {
     func hasLegacyUserDefaultsFootprint(_ defaults: UserDefaults = .standard) -> Bool {
         let keys = [
             "TilePilot.windowLayoutTemplates",
+            "TilePilot.workSets",
+            "TilePilot.activeWorkSetIDsByScope",
             "TilePilot.pinnedShortcutKeys",
             "TilePilot.pinnedDirectionalGroupIDs",
             "TilePilot.pinnedFeatureControlIDs",

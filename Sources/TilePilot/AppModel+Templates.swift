@@ -15,6 +15,40 @@ struct TemplateImportDisplayOption: Identifiable, Hashable, Sendable {
 
 @MainActor
 extension AppModel {
+    func visibleTemplateTargetCandidates(in snapshot: LiveStateSnapshot) -> [(space: SpaceState, display: DisplayState)] {
+        snapshot.spaces
+            .filter(\.visible)
+            .compactMap { space in
+                guard let display = snapshot.displays.first(where: { $0.id == space.displayId }) else { return nil }
+                return (space, display)
+            }
+    }
+
+    func preferredTemplateTarget(
+        for template: WindowLayoutTemplate,
+        in snapshot: LiveStateSnapshot
+    ) -> (space: SpaceState, display: DisplayState)? {
+        let visibleCandidates = visibleTemplateTargetCandidates(in: snapshot)
+        guard !visibleCandidates.isEmpty else { return nil }
+
+        if let exactSourceMatch = visibleCandidates.first(where: {
+            $0.display.name.localizedCaseInsensitiveCompare(template.sourceDisplayName) == .orderedSame
+        }) {
+            return exactSourceMatch
+        }
+
+        if let activeSpace = activeSpaceIndex(in: snapshot),
+           let activeMatch = visibleCandidates.first(where: { $0.space.index == activeSpace }) {
+            return activeMatch
+        }
+
+        if let focusedDisplayMatch = visibleCandidates.first(where: { $0.display.focused || $0.space.focused }) {
+            return focusedDisplayMatch
+        }
+
+        return visibleCandidates.first
+    }
+
     private static let windowLayoutTemplateFeaturePrefix = "template.apply."
 
     func templateFeatureID(for template: WindowLayoutTemplate) -> FeatureControlID {
@@ -92,8 +126,24 @@ extension AppModel {
         )
     }
 
+    func templateTargetDisplayOption(for template: WindowLayoutTemplate) -> TemplateDisplayOption? {
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        if let snapshot,
+           let target = preferredTemplateTarget(for: template, in: snapshot),
+           let shapeKey = DisplayShapeKey.from(width: target.display.frameW, height: target.display.frameH) {
+            return TemplateDisplayOption(
+                displayID: target.display.id,
+                name: target.display.name,
+                frameWidth: target.display.frameW,
+                frameHeight: target.display.frameH,
+                shapeKey: shapeKey
+            )
+        }
+        return currentTemplateTargetDisplayOption()
+    }
+
     func templateMatchesCurrentDisplay(_ template: WindowLayoutTemplate) -> Bool {
-        guard let option = currentTemplateTargetDisplayOption() else { return false }
+        guard let option = templateTargetDisplayOption(for: template) else { return false }
         return template.displayShapeKey.matches(width: option.frameWidth, height: option.frameHeight)
     }
 
@@ -101,13 +151,15 @@ extension AppModel {
         if let runtimeReason = yabaiRuntimeControlDisabledReason, !canRunYabaiRuntimeCommands {
             return runtimeReason
         }
-        guard currentTemplateTargetDisplayOption() != nil else {
+        guard templateTargetDisplayOption(for: template) != nil else {
             return "Current desktop display is unavailable."
         }
-        guard templateMatchesCurrentDisplay(template) else {
-            return "Current display shape does not match this template."
-        }
         return nil
+    }
+
+    func templateNeedsDisplayAutoFit(_ template: WindowLayoutTemplate) -> Bool {
+        guard let option = templateTargetDisplayOption(for: template) else { return false }
+        return !template.displayShapeKey.matches(width: option.frameWidth, height: option.frameHeight)
     }
 
     var overviewTemplateImportDisplayOptions: [TemplateImportDisplayOption] {
@@ -473,19 +525,7 @@ extension AppModel {
         } else if let data = try? JSONEncoder().encode(windowLayoutTemplates) {
             defaults.set(data, forKey: AppModel.windowLayoutTemplatesDefaultsKey)
         }
-        reconcileTemplatePresentationState()
-    }
-
-    private func reconcileTemplatePresentationState() {
-        let validFeatureIDs = Set(featureDefinitions.map { $0.id.rawValue })
-        let filteredPins = pinnedFeatureControlIDs.filter { validFeatureIDs.contains($0) }
-        if filteredPins != pinnedFeatureControlIDs {
-            pinnedFeatureControlIDs = filteredPins
-            persistPinnedFeatureControlIDs()
-        }
-        rebuildShortcutPresentationCaches()
-        reconcileShortcutsCustomOrderIDsToCurrentItems()
-        rebuildShortcutPresentationCaches()
+        reconcileDynamicFeaturePresentationState()
     }
 
     private func currentOverviewTemplateImportSource(displayID: Int) -> CurrentDesktopTemplateImportSource? {

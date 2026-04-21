@@ -14,12 +14,22 @@ extension AppModel {
         setupItemInstalled("helper-service-yabai") && setupItemInstalled("helper-service-skhd")
     }
 
+    var managedHelpersInstalledButNotStartedForSetup: Bool {
+        guard ManagedHelperService.shared.hasManagedHelperInstall() else { return false }
+        guard !helperServicesRunningForSetup else { return false }
+        let installState = managedHelperInstallState ?? ManagedHelperService.shared.loadInstallState()
+        return installState?.launchAgentsInstalled != true
+    }
+
     var primarySetupAction: SetupNextAction {
         if doctorSnapshot == nil || bootstrapSnapshot == nil {
             return .recheck
         }
         if !helpersInstalledForSetup {
             return .installHelpers
+        }
+        if managedHelpersInstalledButNotStartedForSetup {
+            return .reviewAccessibility
         }
         if !helperServicesRunningForSetup {
             return .startHelperServices
@@ -38,8 +48,10 @@ extension AppModel {
                 return "This TilePilot build does not include bundled helpers. Use the packaged app from /Applications to install them."
             }
             return "TilePilot needs two helper tools to manage windows and keyboard shortcuts. TilePilot can install them for you."
+        case .reviewAccessibility:
+            return "Before the first helper start, review Accessibility for TilePilot and check whether yabai and skhd also appear there on this Mac."
         case .startHelperServices:
-            return "TilePilot helpers are installed, but the background services still need to be started."
+            return "TilePilot helpers are installed. After reviewing Accessibility, start the background services."
         case .recheck:
             return "TilePilot is still checking this Mac. Recheck setup if the status looks stale."
         case .ready:
@@ -95,6 +107,8 @@ extension AppModel {
         switch primarySetupAction {
         case .installHelpers:
             return isLaunchingSetupInstaller
+        case .reviewAccessibility:
+            return false
         case .startHelperServices:
             return isLaunchingSetupInstaller
         case .recheck:
@@ -112,6 +126,8 @@ extension AppModel {
         switch action {
         case .installHelpers:
             installManagedHelpers()
+        case .reviewAccessibility:
+            presentSetupGuide(source: .manual, startingAt: .accessibility)
         case .startHelperServices:
             startHelperServicesBestEffort()
         case .recheck:

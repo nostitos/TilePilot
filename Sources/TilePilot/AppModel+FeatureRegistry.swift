@@ -363,7 +363,24 @@ extension AppModel {
                 isExperimental: false
             ),
         ]
+        definitions.append(
+            FeatureDefinition(
+                id: Self.cycleWorkSetsFeatureID,
+                group: .workSets,
+                title: "Cycle Work Sets on This Desktop",
+                description: "Activates the next Work Set on the current desktop and wraps back to the first one.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: [tilePilotFeatureURL(Self.cycleWorkSetsFeatureID)],
+                matchAllCommandMatchers: false,
+                preferredCommand: tilePilotFeatureCommand(Self.cycleWorkSetsFeatureID),
+                actionID: nil,
+                isExperimental: false
+            )
+        )
         definitions.append(contentsOf: windowLayoutTemplates.map(templateFeatureDefinition))
+        definitions.append(contentsOf: workSets.map(workSetFeatureDefinition))
         return definitions
     }
 
@@ -373,7 +390,25 @@ extension AppModel {
             id: featureID,
             group: .templates,
             title: "Apply Template: \(template.name)",
-            description: "Applies this floating window template to the current desktop on matching display shapes.",
+            description: "Applies this floating window template to the current desktop and auto-fits it when the display shape is slightly different.",
+            backend: .tilePilotAction,
+            capabilityGate: .yabaiRuntime,
+            defaultCombo: nil,
+            commandMatchers: [tilePilotFeatureURL(featureID)],
+            matchAllCommandMatchers: false,
+            preferredCommand: tilePilotFeatureCommand(featureID),
+            actionID: nil,
+            isExperimental: false
+        )
+    }
+
+    func workSetFeatureDefinition(_ workSet: WorkSet) -> FeatureDefinition {
+        let featureID = workSetFeatureID(for: workSet)
+        return FeatureDefinition(
+            id: featureID,
+            group: .workSets,
+            title: "Activate Work Set: \(workSet.name)",
+            description: "Brings this saved set of windows to the front on its desktop and pushes other managed windows behind.",
             backend: .tilePilotAction,
             capabilityGate: .yabaiRuntime,
             defaultCombo: nil,

@@ -121,6 +121,22 @@ final class WindowBadgeOverlayController {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleOverlayUpdate(with: self.pendingBadges.isEmpty ? self.model.windowBadges : self.pendingBadges)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleOverlayUpdate(with: self.pendingBadges.isEmpty ? self.model.windowBadges : self.pendingBadges)
+            }
+            .store(in: &cancellables)
+
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -182,7 +198,7 @@ final class WindowBadgeOverlayController {
                 updateBadgePanel(panel: panel, with: badge)
             }
         } else {
-            removeAllPanels(from: &badgePanels)
+            closeAllPanels(from: &badgePanels)
         }
 
         if signature.showOutlines {
@@ -193,7 +209,7 @@ final class WindowBadgeOverlayController {
                 updateOutlinePanel(panel: panel, with: badge)
             }
         } else {
-            removeAllPanels(from: &outlinePanels)
+            closeAllPanels(from: &outlinePanels)
         }
     }
 
@@ -237,6 +253,7 @@ final class WindowBadgeOverlayController {
     }
 
     private func badgeTargets(from badges: [WindowBadgeState]) -> [WindowBadgeState] {
+        guard !NSApp.isActive else { return [] }
         guard let focused = badges.first(where: \.isFocused) else { return [] }
 
         // Some apps (including Zoom) can transiently focus tiny helper/tool windows.
@@ -259,16 +276,22 @@ final class WindowBadgeOverlayController {
 
     private func removeStalePanels(from panels: inout [Int: BadgePanel], keepIDs: Set<Int>) {
         for (windowID, panel) in panels where !keepIDs.contains(windowID) {
-            panel.orderOut(nil)
+            dispose(panel)
             panels.removeValue(forKey: windowID)
         }
     }
 
-    private func removeAllPanels(from panels: inout [Int: BadgePanel]) {
+    private func closeAllPanels(from panels: inout [Int: BadgePanel]) {
         for (_, panel) in panels {
-            panel.orderOut(nil)
+            dispose(panel)
         }
         panels.removeAll()
+    }
+
+    private func dispose(_ panel: BadgePanel) {
+        panel.contentView = nil
+        panel.orderOut(nil)
+        panel.close()
     }
 
     private func createPanel(ignoresMouseEvents: Bool, level: NSWindow.Level) -> BadgePanel {

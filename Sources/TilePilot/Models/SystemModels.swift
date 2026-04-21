@@ -44,6 +44,69 @@ struct MissionControlCheck: Identifiable, Codable, Sendable {
     var id: String { key }
 }
 
+struct MissionControlChecklistItem: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let expectedValue: String
+    let actualValue: String?
+    let status: MissionControlCheckStatus
+    let message: String
+}
+
+func buildMissionControlChecklistItems(from checks: [MissionControlCheck]) -> [MissionControlChecklistItem] {
+    let knownChecks = [
+        MissionControlChecklistDefinition(
+            key: "mru-spaces",
+            title: "Automatically rearrange Spaces based on most recent use",
+            expectedRawValue: "0"
+        ),
+        MissionControlChecklistDefinition(
+            key: "spans-displays",
+            title: "Displays have separate Spaces",
+            expectedRawValue: "0"
+        ),
+    ]
+
+    return knownChecks.map { definition in
+        if let check = checks.first(where: { $0.key == definition.key }) {
+            return MissionControlChecklistItem(
+                id: check.id,
+                title: definition.title,
+                expectedValue: definition.displayValue(for: check.expected),
+                actualValue: check.actual.map(definition.displayValue(for:)),
+                status: check.status,
+                message: check.message
+            )
+        }
+
+        return MissionControlChecklistItem(
+            id: definition.key,
+            title: definition.title,
+            expectedValue: definition.displayValue(for: definition.expectedRawValue),
+            actualValue: nil,
+            status: .unknown,
+            message: "TilePilot could not verify this setting automatically. Review it manually in Mission Control settings."
+        )
+    }
+}
+
+private struct MissionControlChecklistDefinition {
+    let key: String
+    let title: String
+    let expectedRawValue: String
+
+    func displayValue(for rawValue: String) -> String {
+        switch key {
+        case "mru-spaces":
+            return rawValue == "0" ? "Off" : "On"
+        case "spans-displays":
+            return rawValue == "0" ? "On" : "Off"
+        default:
+            return rawValue
+        }
+    }
+}
+
 struct SystemProfile: Codable, Sendable {
     let macOSVersion: String
     let macOSBuild: String?
@@ -272,6 +335,7 @@ struct HelperMigrationPromptState: Identifiable, Sendable {
 
 enum SetupNextAction: String, Codable, Sendable {
     case installHelpers
+    case reviewAccessibility
     case startHelperServices
     case recheck
     case ready
@@ -279,6 +343,7 @@ enum SetupNextAction: String, Codable, Sendable {
     var buttonTitle: String {
         switch self {
         case .installHelpers: return "Install TilePilot Helpers"
+        case .reviewAccessibility: return "Review Accessibility"
         case .startHelperServices: return "Start Helper Services"
         case .recheck: return "Recheck Setup"
         case .ready: return "Ready"
@@ -288,6 +353,7 @@ enum SetupNextAction: String, Codable, Sendable {
     var summaryTitle: String {
         switch self {
         case .installHelpers: return "TilePilot Helpers Needed"
+        case .reviewAccessibility: return "Accessibility Review Needed"
         case .startHelperServices: return "Helper Services Needed"
         case .recheck: return "Setup Needs Recheck"
         case .ready: return "Ready"

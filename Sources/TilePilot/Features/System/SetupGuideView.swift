@@ -132,6 +132,31 @@ struct SetupGuideView: View {
                 .font(.body)
                 .foregroundStyle(.primary)
 
+            if step.kind == .missionControl {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Checklist")
+                            .font(.headline)
+                        Text(step.whatToDo)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        MissionControlChecklistView(items: model.missionControlChecklistItems)
+                        if let detail = step.detail, !detail.isEmpty {
+                            Divider()
+                            Text(detail)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let verificationText = step.verificationText, !verificationText.isEmpty {
+                            Divider()
+                            Text(verificationText)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else
             if step.isSatisfied {
                 if let detail = step.detail, !detail.isEmpty {
                     detailSection(title: "Current status", detail)

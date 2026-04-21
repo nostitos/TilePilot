@@ -32,6 +32,7 @@ final class YabaiStateService: @unchecked Sendable {
     private struct OnScreenWindowDescriptor: Sendable {
         let bounds: CGRect
         let title: String
+        let orderIndex: Int
     }
 
     func pollLiveState() async -> LiveStatePollResult {
@@ -215,6 +216,7 @@ final class YabaiStateService: @unchecked Sendable {
                 isMinimized: bool(from: row["is-minimized"]) ?? false,
                 isHidden: bool(from: row["is-hidden"]) ?? false,
                 hasWindowServerMatch: onScreenDescriptor != nil,
+                windowServerOrderIndex: onScreenDescriptor?.orderIndex,
                 source: .yabai,
                 lastUpdatedAt: timestamp
             )
@@ -549,7 +551,7 @@ final class YabaiStateService: @unchecked Sendable {
         guard !infoList.isEmpty else { return [:] }
 
         var descriptors: [Int: OnScreenWindowDescriptor] = [:]
-        for info in infoList {
+        for (orderIndex, info) in infoList.enumerated() {
             let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
             if layer != 0 { continue }
 
@@ -572,7 +574,8 @@ final class YabaiStateService: @unchecked Sendable {
 
             descriptors[number] = OnScreenWindowDescriptor(
                 bounds: bounds,
-                title: title
+                title: title,
+                orderIndex: orderIndex
             )
         }
         return descriptors

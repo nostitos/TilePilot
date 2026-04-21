@@ -3,8 +3,9 @@ import SwiftUI
 
 enum TilePilotTab: Hashable {
     case now
-    case appearance
     case templates
+    case workSets
+    case appearance
     case windowBehavior
     case actions
     case shortcuts
@@ -25,6 +26,8 @@ enum TilePilotTab: Hashable {
             return "Appearance"
         case .templates:
             return "Templates"
+        case .workSets:
+            return "Work Sets"
         case .windowBehavior:
             return "Behaviors"
         case .actions, .shortcuts:
@@ -46,6 +49,8 @@ enum TilePilotTab: Hashable {
             return "paintbrush.pointed"
         case .templates:
             return "rectangle.3.offgrid"
+        case .workSets:
+            return "square.stack.3d.up"
         case .windowBehavior:
             return "hand.raised.square"
         case .actions, .shortcuts:
@@ -114,13 +119,17 @@ struct TilePilotRootView: View {
                 .tabItem { Label(TilePilotTab.actions.title, systemImage: TilePilotTab.actions.systemImage) }
                 .tag(TilePilotTab.actions)
 
-            AppearanceDashboardView()
-                .tabItem { Label(TilePilotTab.appearance.title, systemImage: TilePilotTab.appearance.systemImage) }
-                .tag(TilePilotTab.appearance)
-
             TemplatesDashboardView()
                 .tabItem { Label(TilePilotTab.templates.title, systemImage: TilePilotTab.templates.systemImage) }
                 .tag(TilePilotTab.templates)
+
+            WorkSetsDashboardView()
+                .tabItem { Label(TilePilotTab.workSets.title, systemImage: TilePilotTab.workSets.systemImage) }
+                .tag(TilePilotTab.workSets)
+
+            AppearanceDashboardView()
+                .tabItem { Label(TilePilotTab.appearance.title, systemImage: TilePilotTab.appearance.systemImage) }
+                .tag(TilePilotTab.appearance)
 
             FilesDashboardView()
                 .tabItem { Label(TilePilotTab.files.title, systemImage: TilePilotTab.files.systemImage) }

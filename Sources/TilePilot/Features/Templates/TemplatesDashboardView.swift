@@ -256,8 +256,10 @@ struct TemplatesDashboardView: View {
 
                 if let disabledReason = model.templateApplyDisabledReason(template) {
                     templateStatusChip(shortTemplateStatusLabel(for: disabledReason), systemImage: "exclamationmark.triangle.fill", tint: .orange)
+                } else if model.templateNeedsDisplayAutoFit(template) {
+                    templateStatusChip("Auto-Fit Display", systemImage: "arrow.down.right.and.arrow.up.left", tint: .blue)
                 } else {
-                    templateStatusChip("Current Display", systemImage: "checkmark.circle.fill", tint: .green)
+                    templateStatusChip("Matching Display", systemImage: "checkmark.circle.fill", tint: .green)
                 }
 
                 Button("Apply Template") {
@@ -859,6 +861,10 @@ private struct TemplateCanvasEditor: View {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.secondary.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
 
                 templateCanvasGrid
 

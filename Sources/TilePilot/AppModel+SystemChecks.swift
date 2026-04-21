@@ -152,11 +152,11 @@ extension AppModel {
         }
         rows.append(SystemCheckRow(
             id: "accessibility",
-            title: "Accessibility Permission (Optional)",
+            title: "Accessibility Review",
             detail: firstDetail(
                 accessibilitySetup?.detail,
                 accessibilityCap?.message,
-                fallback: "Needed only for some TilePilot UI automations. Core app flows still work without it."
+                fallback: "Review TilePilot in Accessibility, and on a new or migrated Mac also check whether yabai and skhd appear there before starting helper services."
             ),
             status: accessibilityStatus,
             actions: accessibilityStatus == .good ? [.recheck] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
@@ -186,13 +186,13 @@ extension AppModel {
         }
         let missionDetail: String
         if missionWarningCount > 0 {
-            missionDetail = "Recommended values: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
+            missionDetail = "Review the checklist below and match both Mission Control values."
         } else if missionUnknownCount > 0 {
-            missionDetail = "TilePilot could not verify one or both settings. Recommended values are: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
+            missionDetail = "TilePilot could not verify one or both values automatically. Review the checklist below manually."
         } else if missionControlChecks.isEmpty {
-            missionDetail = "Recommended values are: Automatically rearrange Spaces based on most recent use = Off, Displays have separate Spaces = On."
+            missionDetail = "Review the checklist below manually."
         } else {
-            missionDetail = "Mission Control settings look compatible."
+            missionDetail = "The checklist below matches the expected Mission Control values."
         }
         rows.append(SystemCheckRow(
             id: "mission-control",

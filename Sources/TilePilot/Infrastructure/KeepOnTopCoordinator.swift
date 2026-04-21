@@ -121,7 +121,7 @@ final class KeepOnTopCoordinator {
             }
 
             if useAccessibilityRaise {
-                let axRaised = raiseWindowUsingAccessibilityOnly(on: model, windowID: window.id, bypassCooldown: bypassCooldown)
+                let axRaised = raiseWindowUsingAccessibilityDirectly(on: model, windowID: window.id, bypassCooldown: bypassCooldown)
                 let stillOccluded = isWindowLikelyOccluded(on: model, window)
                 if axRaised && !stillOccluded {
                     raisedCount += 1
@@ -205,6 +205,14 @@ final class KeepOnTopCoordinator {
         return true
     }
 
+    func raiseWindowUsingAccessibilityOnly(
+        on model: AppModel,
+        windowID: Int,
+        bypassCooldown: Bool = false
+    ) -> Bool {
+        raiseWindowUsingAccessibilityDirectly(on: model, windowID: windowID, bypassCooldown: bypassCooldown)
+    }
+
     func bringWindowToFront(on model: AppModel, windowID: Int) async {
         _ = await raiseWindowOnly(on: model, windowID: windowID, targetSpace: nil, bypassCooldown: true, allowFocusFallback: true)
 
@@ -258,7 +266,7 @@ final class KeepOnTopCoordinator {
         }
     }
 
-    private func raiseWindowUsingAccessibilityOnly(
+    private func raiseWindowUsingAccessibilityDirectly(
         on model: AppModel,
         windowID: Int,
         bypassCooldown: Bool
@@ -394,22 +402,41 @@ final class KeepOnTopCoordinator {
             return false
         }
 
-        let selectedWindow: AXUIElement
-        if windows.count == 1 {
-            selectedWindow = windows[0]
-        } else {
-            let wantedTitle = targetWindow.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !wantedTitle.isEmpty,
-               let byTitle = windows.first(where: { axStringValue($0, kAXTitleAttribute as CFString) == wantedTitle }) {
-                selectedWindow = byTitle
-            } else if let focusedWindow = windows.first(where: { axBoolValue($0, kAXFocusedAttribute as CFString) == true }) {
-                selectedWindow = focusedWindow
-            } else {
-                selectedWindow = windows[0]
-            }
+        guard let selectedWindow = matchingAXWindow(for: targetWindow, in: windows) else {
+            return false
         }
 
         return AXUIElementPerformAction(selectedWindow, kAXRaiseAction as CFString) == .success
+    }
+
+    private func matchingAXWindow(for window: WindowState, in windows: [AXUIElement]) -> AXUIElement? {
+        let wantedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !wantedTitle.isEmpty,
+           let byTitle = windows.first(where: { axStringValue($0, kAXTitleAttribute as CFString) == wantedTitle }) {
+            return byTitle
+        }
+
+        let wantedFrame = CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH)
+        if let byFrame = windows
+            .compactMap({ element -> (AXUIElement, CGFloat)? in
+                guard let frame = axFrameValue(element) else { return nil }
+                let delta =
+                    abs(frame.origin.x - wantedFrame.origin.x) +
+                    abs(frame.origin.y - wantedFrame.origin.y) +
+                    abs(frame.size.width - wantedFrame.size.width) +
+                    abs(frame.size.height - wantedFrame.size.height)
+                return (element, delta)
+            })
+            .min(by: { $0.1 < $1.1 })?
+            .0 {
+            return byFrame
+        }
+
+        if let focusedWindow = windows.first(where: { axBoolValue($0, kAXFocusedAttribute as CFString) == true }) {
+            return focusedWindow
+        }
+
+        return windows.first
     }
 
     private func axStringValue(_ element: AXUIElement, _ attribute: CFString) -> String? {
@@ -427,5 +454,27 @@ final class KeepOnTopCoordinator {
             return number.boolValue
         }
         return nil
+    }
+
+    private func axFrameValue(_ element: AXUIElement) -> CGRect? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value)
+        guard result == .success, let positionRef = value else { return nil }
+        let positionValue = positionRef as! AXValue
+
+        var position = CGPoint.zero
+        guard AXValueGetType(positionValue) == .cgPoint,
+              AXValueGetValue(positionValue, .cgPoint, &position) else { return nil }
+
+        var sizeRef: CFTypeRef?
+        let sizeResult = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
+        guard sizeResult == .success, let sizeRawRef = sizeRef else { return nil }
+        let sizeValue = sizeRawRef as! AXValue
+
+        var size = CGSize.zero
+        guard AXValueGetType(sizeValue) == .cgSize,
+              AXValueGetValue(sizeValue, .cgSize, &size) else { return nil }
+
+        return CGRect(origin: position, size: size)
     }
 }

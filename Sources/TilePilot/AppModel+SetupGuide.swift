@@ -10,6 +10,10 @@ extension AppModel {
         megamapCaptureService.screenRecordingAuthorized()
     }
 
+    var missionControlChecklistItems: [MissionControlChecklistItem] {
+        buildMissionControlChecklistItems(from: doctorSnapshot?.missionControlChecks ?? [])
+    }
+
     var setupGuideSteps: [SetupGuideStep] {
         let capabilityByKey = Dictionary(uniqueKeysWithValues: (doctorSnapshot?.capabilities ?? []).map { ($0.key, $0) })
         let missionControlChecks = doctorSnapshot?.missionControlChecks ?? []
@@ -80,36 +84,14 @@ extension AppModel {
                 secondaryActions: [.recheck]
             ),
             SetupGuideStep(
-                kind: .startHelperServices,
-                category: .essential,
-                title: "Start Helper Services",
-                summary: helperServicesStatus == .good ? "Helper services are running." : "TilePilot helpers are installed, but the background services are not fully running yet.",
-                whyItMatters: "TilePilot can only query desktops and react to shortcuts when yabai and skhd are active.",
-                whatToDo: "Start the helper services. If you just migrated to a new Mac, also open Accessibility settings and re-enable TilePilot, yabai, and skhd if they are listed there.",
-                detail: firstNonEmptyGuideDetail([
-                    capabilityByKey["yabai-query"]?.message,
-                    capabilityByKey["yabai-daemon"]?.message,
-                    capabilityByKey["skhd-daemon"]?.message,
-                    helperServicesStatus == .good ? nil : "A migrated or newly installed Mac can leave yabai or skhd unable to stay running until macOS permissions are re-approved.",
-                    yabaiServiceSetup?.detail,
-                    skhdServiceSetup?.detail,
-                ]),
-                verificationText: "TilePilot will recheck helper services automatically.",
-                status: helperServicesStatus,
-                isBlocking: true,
-                isSkippable: true,
-                primaryAction: .startYabai,
-                secondaryActions: [.openAccessibilitySettings, .restartYabai, .restartSkhd, .recheck]
-            ),
-            SetupGuideStep(
                 kind: .accessibility,
                 category: .recommended,
                 title: "Review Accessibility Permissions",
-                summary: accessibilityStatus == .good ? "Accessibility access is already granted for TilePilot." : "Accessibility improves window focus, raise, helper startup recovery, and some UI automation flows.",
+                summary: accessibilityStatus == .good ? "TilePilot Accessibility access is already granted." : "Before the first helper start, review Accessibility for TilePilot and any helper entries macOS shows for yabai and skhd.",
                 whyItMatters: "TilePilot uses Accessibility for some window focus and bring-to-front fallbacks. On a new or migrated Mac, macOS may also require yabai and skhd to be re-enabled in Accessibility before they work reliably again.",
-                whatToDo: "Request TilePilot's permission first. Then open Accessibility settings and make sure TilePilot is enabled. If you migrated to a new Mac, also look for yabai and skhd there and re-enable them if they appear.",
+                whatToDo: "Request TilePilot's permission first. Then open Accessibility settings and make sure TilePilot is enabled. On a new or migrated Mac, also look for yabai and skhd there and re-enable them if they appear before you start helper services.",
                 detail: firstNonEmptyGuideDetail([
-                    accessibilityStatus == .good ? nil : "If yabai still reports socket or startup failures after migration, the missing permission is often in the Accessibility list rather than inside TilePilot itself.",
+                    accessibilityStatus == .good ? nil : "If yabai or skhd still report socket, startup, or permission failures after migration, the missing approval is often in the Accessibility list rather than inside TilePilot itself.",
                     accessibilitySetup?.detail,
                     capabilityByKey["accessibility"]?.message,
                 ]),
@@ -119,6 +101,28 @@ extension AppModel {
                 isSkippable: true,
                 primaryAction: accessibilityStatus == .good ? nil : .requestAccessibilityAccess,
                 secondaryActions: accessibilityStatus == .good ? [] : [.openAccessibilitySettings, .recheck]
+            ),
+            SetupGuideStep(
+                kind: .startHelperServices,
+                category: .essential,
+                title: "Start Helper Services",
+                summary: helperServicesStatus == .good ? "Helper services are running." : "TilePilot helpers are installed, but the background services are not fully running yet.",
+                whyItMatters: "TilePilot can only query desktops and react to shortcuts when yabai and skhd are active.",
+                whatToDo: "After reviewing Accessibility, start the helper services. If startup still fails, revisit Accessibility and re-enable TilePilot, yabai, and skhd if they are listed there.",
+                detail: firstNonEmptyGuideDetail([
+                    capabilityByKey["yabai-query"]?.message,
+                    capabilityByKey["yabai-daemon"]?.message,
+                    capabilityByKey["skhd-daemon"]?.message,
+                    helperServicesStatus == .good ? nil : "TilePilot installs helpers first and waits for you to review Accessibility before the first daemon start to avoid repeated permission prompts.",
+                    yabaiServiceSetup?.detail,
+                    skhdServiceSetup?.detail,
+                ]),
+                verificationText: "TilePilot will recheck helper services automatically.",
+                status: helperServicesStatus,
+                isBlocking: true,
+                isSkippable: true,
+                primaryAction: .startYabai,
+                secondaryActions: [.openAccessibilitySettings, .restartYabai, .restartSkhd, .recheck]
             ),
             SetupGuideStep(
                 kind: .startAtLogon,
@@ -260,6 +264,10 @@ extension AppModel {
     }
 
     private func preferredStartingSetupGuideStep(for source: SetupGuidePresentationSource) -> SetupGuideStep? {
+        if managedHelpersInstalledButNotStartedForSetup,
+           let accessibilityStep = setupGuideSteps.first(where: { $0.kind == .accessibility && !$0.isSatisfied }) {
+            return accessibilityStep
+        }
         switch source {
         case .automatic:
             return incompleteEssentialSetupGuideSteps.first ?? incompleteSetupGuideSteps.first
@@ -327,7 +335,7 @@ extension AppModel {
 
     private func missionControlGuideDetail(_ checks: [MissionControlCheck]) -> String {
         if checks.isEmpty {
-            return "TilePilot has not verified these settings yet. Review them manually if desktop order or multi-display spaces feel wrong."
+            return "TilePilot has not verified these settings yet. Use the checklist and confirm both values manually."
         }
 
         var notes: [String] = []
@@ -355,23 +363,17 @@ extension AppModel {
         }
 
         if notes.isEmpty {
-            return "Recommended values are already in place: Automatically rearrange Spaces based on most recent use is off, and Displays have separate Spaces is on."
+            return "The checklist matches the expected Mission Control values."
         }
 
         return notes.joined(separator: " ")
     }
 
     private func missionControlWhatToDo(_ checks: [MissionControlCheck]) -> String {
-        let lines = [
-            "Open Mission Control settings and check these values:",
-            "• Automatically rearrange Spaces based on most recent use: Off",
-            "• Displays have separate Spaces: On",
-        ]
-
         if checks.contains(where: { $0.status == .unknown }) {
-            return lines.joined(separator: "\n") + "\n\nTilePilot could not verify one or both settings automatically, so review them manually."
+            return "Open Mission Control settings and match the checklist below. TilePilot could not verify one or both values automatically, so manual review is required."
         }
 
-        return lines.joined(separator: "\n")
+        return "Open Mission Control settings and match the checklist below."
     }
 }

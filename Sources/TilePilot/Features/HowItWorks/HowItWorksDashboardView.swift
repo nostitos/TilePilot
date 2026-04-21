@@ -8,6 +8,7 @@ struct HowItWorksDashboardView: View {
                     introCard
                     windowBehaviorSection
                     shortcutsSection
+                    workSetsSection
                 }
                 .padding()
             }
@@ -70,6 +71,61 @@ struct HowItWorksDashboardView: View {
                 summary: "Some layout actions leave windows floating. Others finish with windows tiled."
             ) {
                 LayoutOutcomeExplainerDiagram()
+            }
+            conceptCard(
+                title: "Templates vs Work Sets",
+                summary: "Templates save layout slots. Work Sets save which windows belong together, their front-to-back order, and an optional backdrop on one desktop."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Templates: saved floating layout geometry", systemImage: "rectangle.3.offgrid")
+                    Label("Work Sets: saved same-desktop membership, order, live preview, and optional backdrop", systemImage: "square.stack.3d.up")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var workSetsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Work Sets")
+            conceptCard(
+                title: "What a Work Set Saves",
+                summary: "A Work Set is a same-desktop task group. It saves which windows belong together and which one should come to the front first. It does not save window positions."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Scope picker: choose the visible desktop on the screen you want to manage", systemImage: "display")
+                    Label("Board lanes: each lane is one Work Set for that desktop", systemImage: "square.stack.3d.up")
+                    Label("Live Layout: shows the current wireframe of the matched windows", systemImage: "rectangle.3.group")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            conceptCard(
+                title: "How to Build One",
+                summary: "Start from the current desktop pile, then split it into task groups."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Import Visible Windows to create one front-to-back starting pile", systemImage: "square.and.arrow.down")
+                    Label("Drag windows between lanes to move them into another Work Set", systemImage: "arrow.left.and.right.square")
+                    Label("Use Also Add on a row to keep the same window in more than one Work Set", systemImage: "plus.square.on.square")
+                    Label("Use New Work Set to spin off another lane", systemImage: "plus.rectangle.on.rectangle")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            conceptCard(
+                title: "What Activation Does",
+                summary: "Activating a Work Set re-stacks the saved windows for that desktop so that task comes forward again."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Rows run from front to back", systemImage: "line.3.horizontal.decrease")
+                    Label("Activate Work Set brings that saved order forward again", systemImage: "play.circle")
+                    Label("Backdrop can place a solid color behind that Work Set", systemImage: "rectangle.inset.filled")
+                    Label("Cycle Work Sets switches between the saved sets on the current desktop", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
         }
     }

@@ -298,7 +298,11 @@ extension AppModel {
     func deleteWindowLayoutTemplate(_ id: UUID) {
         guard let template = windowLayoutTemplate(withID: id) else { return }
         windowLayoutTemplates.removeAll { $0.id == id }
+        for index in workSets.indices where workSets[index].linkedTemplateID == id {
+            workSets[index] = workSets[index].with(linkedTemplateID: .some(nil))
+        }
         persistWindowLayoutTemplates()
+        persistWorkSets()
         lastActionMessage = "Deleted \(template.name)."
         lastErrorMessage = nil
     }

@@ -74,11 +74,11 @@ struct HowItWorksDashboardView: View {
             }
             conceptCard(
                 title: "Templates vs Work Sets",
-                summary: "Templates save layout slots. Work Sets save which windows belong together, their front-to-back order, and an optional backdrop on one desktop."
+                summary: "Templates save layout slots. Work Sets save which windows belong together on one desktop, and can now own stack order, tiled layout, or a linked template."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Templates: saved floating layout geometry", systemImage: "rectangle.3.offgrid")
-                    Label("Work Sets: saved same-desktop membership, order, live preview, and optional backdrop", systemImage: "square.stack.3d.up")
+                    Label("Work Sets: saved same-desktop membership, order, optional backdrop, and per-set layout mode", systemImage: "square.stack.3d.up")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -91,12 +91,13 @@ struct HowItWorksDashboardView: View {
             sectionHeader("Work Sets")
             conceptCard(
                 title: "What a Work Set Saves",
-                summary: "A Work Set is a same-desktop task group. It saves which windows belong together and which one should come to the front first. It does not save window positions."
+                summary: "A Work Set is a same-desktop task group. It saves which windows belong together, which one should come to the front first, and how that set should lay out when activated."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Scope picker: choose the visible desktop on the screen you want to manage", systemImage: "display")
                     Label("Board lanes: each lane is one Work Set for that desktop", systemImage: "square.stack.3d.up")
                     Label("Live Layout: shows the current wireframe of the matched windows", systemImage: "rectangle.3.group")
+                    Label("Layout mode: Floating, Tile, or Template", systemImage: "slider.horizontal.3")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -116,11 +117,12 @@ struct HowItWorksDashboardView: View {
             }
             conceptCard(
                 title: "What Activation Does",
-                summary: "Activating a Work Set re-stacks the saved windows for that desktop so that task comes forward again."
+                summary: "Activating a Work Set reapplies that task once, then stops. TilePilot does not keep rearranging the desktop afterward."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Rows run from front to back", systemImage: "line.3.horizontal.decrease")
-                    Label("Activate Work Set brings that saved order forward again", systemImage: "play.circle")
+                    Label("Floating: brings that Work Set forward without changing the current window positions", systemImage: "square.stack.3d.up")
+                    Label("Tile: tiles that Work Set when activated and leaves the result in place", systemImage: "rectangle.split.3x1")
+                    Label("Template: places the matched windows into the linked template slots", systemImage: "rectangle.3.offgrid")
                     Label("Backdrop can place a solid color behind that Work Set", systemImage: "rectangle.inset.filled")
                     Label("Cycle Work Sets switches between the saved sets on the current desktop", systemImage: "arrow.triangle.2.circlepath")
                 }

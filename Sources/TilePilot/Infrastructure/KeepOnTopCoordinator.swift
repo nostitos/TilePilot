@@ -164,6 +164,22 @@ final class KeepOnTopCoordinator {
             return false
         }
 
+        if allowFocusFallback, AXIsProcessTrusted(),
+           raiseWindowUsingAccessibility(on: model, windowID: windowID) {
+            if isWindowLikelyOccludedAfterRaise(on: model, windowID: windowID),
+               let targetSpace,
+               let currentSpace = await model.queryCurrentFocusedSpaceIndex(),
+               currentSpace == targetSpace {
+                let focus = await model.doctorService.runSupportCommand(
+                    yabaiCommand(["-m", "window", "--focus", String(windowID)], timeout: 1.5)
+                )
+                model.appendCommandLog(from: focus)
+                guard focus.isSuccess else { return false }
+            }
+            lastRaisedAtByWindowID[windowID] = now
+            return true
+        }
+
         let raise = await model.doctorService.runSupportCommand(
             yabaiCommand(["-m", "window", String(windowID), "--raise"], timeout: 1.5)
         )
@@ -359,6 +375,20 @@ final class KeepOnTopCoordinator {
         }
 
         if targetIndex == nil {
+            let targetArea = max(1.0, targetRect.width * targetRect.height)
+            for info in windowInfo {
+                let layer = info[kCGWindowLayer as String] as? Int ?? -1
+                guard layer == 0 else { continue }
+                if let alpha = info[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
+                if windowInfoEntryShouldBeIgnoredForOcclusion(info, appPID: appPID) { continue }
+                guard let bounds = cgWindowBounds(from: info) else { continue }
+                let overlap = bounds.intersection(targetRect)
+                if overlap.isNull || overlap.width <= 1 || overlap.height <= 1 { continue }
+                let overlapRatio = (overlap.width * overlap.height) / targetArea
+                if overlapRatio > 0.12 {
+                    return true
+                }
+            }
             targetIndex = fallbackIndex
             targetBounds = fallbackBounds
         }
@@ -367,12 +397,10 @@ final class KeepOnTopCoordinator {
 
         for i in 0 ..< index {
             let info = windowInfo[i]
-            guard (info[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
-            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
-            if ownerPID == appPID { continue }
+            let layer = info[kCGWindowLayer as String] as? Int ?? -1
+            guard layer == 0 else { continue }
             if let alpha = info[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
-            let owner = (info[kCGWindowOwnerName as String] as? String ?? "").lowercased()
-            if owner == "tilepilot" { continue }
+            if windowInfoEntryShouldBeIgnoredForOcclusion(info, appPID: appPID) { continue }
             guard let bounds = cgWindowBounds(from: info) else { continue }
             let overlap = bounds.intersection(targetBounds)
             if overlap.isNull || overlap.width <= 1 || overlap.height <= 1 { continue }
@@ -380,6 +408,20 @@ final class KeepOnTopCoordinator {
             if overlapRatio > 0.12 {
                 return true
             }
+        }
+        return false
+    }
+
+    private func windowInfoEntryShouldBeIgnoredForOcclusion(_ info: [String: Any], appPID: Int32) -> Bool {
+        let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? -1
+        let owner = (info[kCGWindowOwnerName as String] as? String ?? "").lowercased()
+        let name = (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let isWorkSetBackdropSurface = ownerPID == appPID && owner == "tilepilot" && name.isEmpty
+        if ownerPID == appPID && !isWorkSetBackdropSurface {
+            return true
+        }
+        if owner == "tilepilot" && !isWorkSetBackdropSurface {
+            return true
         }
         return false
     }

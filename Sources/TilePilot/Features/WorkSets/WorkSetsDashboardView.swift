@@ -12,33 +12,86 @@ struct WorkSetsDashboardView: View {
         model.visibleWorkSetContexts
     }
 
+    private var matchingVisibleContexts: [WorkSetDesktopContext] {
+        visibleContexts.filter { liveDisplayMatchesSavedScope(for: $0.scopeKey, liveDisplayName: $0.display.name) }
+    }
+
     private var currentDesktopContext: WorkSetDesktopContext? {
         model.currentDesktopWorkSetContext
     }
 
-    private var selectedContext: WorkSetDesktopContext? {
-        if let selectedScopeID,
-           let exact = visibleContexts.first(where: { $0.scopeKey.id == selectedScopeID }) {
-            return exact
+    private var savedScopeKeys: [WorkSetScopeKey] {
+        var ordered: [WorkSetScopeKey] = []
+        for workSet in model.workSets where !ordered.contains(workSet.scopeKey) {
+            ordered.append(workSet.scopeKey)
+        }
+        return ordered
+    }
+
+    private var scopeMenuKeys: [WorkSetScopeKey] {
+        var ordered = visibleContexts.map(\.scopeKey)
+        for scopeKey in savedScopeKeys where !ordered.contains(scopeKey) {
+            ordered.append(scopeKey)
+        }
+        return ordered
+    }
+
+    private var selectedScopeKey: WorkSetScopeKey? {
+        if let selectedScopeID {
+            if let exactVisible = visibleContexts.first(where: { $0.scopeKey.id == selectedScopeID })?.scopeKey {
+                return exactVisible
+            }
+            if let exactSaved = savedScopeKeys.first(where: { $0.id == selectedScopeID }) {
+                return exactSaved
+            }
+        }
+        if let current = currentDesktopContext,
+           liveDisplayMatchesSavedScope(for: current.scopeKey, liveDisplayName: current.display.name),
+           !model.workSets(for: current.scopeKey).isEmpty {
+            return current.scopeKey
+        }
+        if let visibleWithWorkSets = matchingVisibleContexts.first(where: { !model.workSets(for: $0.scopeKey).isEmpty }) {
+            return visibleWithWorkSets.scopeKey
+        }
+        if let saved = savedScopeKeys.first {
+            return saved
         }
         if let current = currentDesktopContext {
-            return current
+            return current.scopeKey
         }
-        return visibleContexts.first
+        return visibleContexts.first?.scopeKey
+    }
+
+    private var selectedContext: WorkSetDesktopContext? {
+        guard let selectedScopeKey else { return nil }
+        guard let context = model.workSetContext(for: selectedScopeKey) else { return nil }
+        guard liveDisplayMatchesSavedScope(for: selectedScopeKey, liveDisplayName: context.display.name) else {
+            return nil
+        }
+        return context
+    }
+
+    private var selectedVisibleContext: WorkSetDesktopContext? {
+        guard let selectedScopeKey else { return nil }
+        guard let context = matchingVisibleContexts.first(where: { $0.scopeKey == selectedScopeKey }) else { return nil }
+        guard liveDisplayMatchesSavedScope(for: selectedScopeKey, liveDisplayName: context.display.name) else {
+            return nil
+        }
+        return context
     }
 
     private var selectedWorkSets: [WorkSet] {
-        guard let scopeKey = selectedContext?.scopeKey else { return [] }
+        guard let scopeKey = selectedScopeKey else { return [] }
         return model.workSets(for: scopeKey)
     }
 
     private var selectedPaletteWindows: [WindowState] {
-        guard let scopeKey = selectedContext?.scopeKey else { return [] }
+        guard let scopeKey = selectedVisibleContext?.scopeKey else { return [] }
         return model.paletteWindows(for: scopeKey)
     }
 
     private var scopeSignature: String {
-        visibleContexts.map(\.scopeKey.id).joined(separator: "|")
+        (scopeMenuKeys.map(\.id) + model.workSets.map(\.id.uuidString)).joined(separator: "|")
     }
 
     var body: some View {
@@ -74,26 +127,30 @@ struct WorkSetsDashboardView: View {
 
     private var scopeToolbar: some View {
         HStack(spacing: 10) {
-            if let selectedContext {
+            if let selectedScopeKey {
                 Menu {
-                    ForEach(visibleContexts, id: \.scopeKey.id) { context in
+                    ForEach(scopeMenuKeys, id: \.id) { scopeKey in
                         Button {
-                            selectedScopeID = context.scopeKey.id
+                            selectedScopeID = scopeKey.id
                         } label: {
-                            HStack {
-                                Text(context.display.name)
-                                Text("Desktop \(context.scopeKey.spaceIndex)")
-                                Text("· \(context.windows.count) windows")
-                            }
+                            Text(scopeMenuTitle(for: scopeKey))
                         }
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        metaChip(selectedContext.display.name, systemImage: "display")
-                        metaChip("Desktop \(selectedContext.scopeKey.spaceIndex)", systemImage: "rectangle.3.group")
-                        metaChip("\(selectedContext.windows.count) window\(selectedContext.windows.count == 1 ? "" : "s")", systemImage: "macwindow")
-                        if currentDesktopContext?.scopeKey == selectedContext.scopeKey {
+                        metaChip(scopeDisplayName(for: selectedScopeKey), systemImage: "display")
+                        metaChip("Desktop \(selectedScopeKey.spaceIndex)", systemImage: "rectangle.3.group")
+                        if let windowCount = scopeWindowCount(for: selectedScopeKey) {
+                            metaChip("\(windowCount) window\(windowCount == 1 ? "" : "s")", systemImage: "macwindow")
+                        } else {
+                            let workSetCount = model.workSets(for: selectedScopeKey).count
+                            metaChip("\(workSetCount) Work Set\(workSetCount == 1 ? "" : "s")", systemImage: "square.stack.3d.up")
+                        }
+                        if currentDesktopContext?.scopeKey == selectedScopeKey {
                             statusChip("Current", systemImage: "scope", tint: .green)
+                        }
+                        if !isScopeVisible(selectedScopeKey) {
+                            statusChip("Saved", systemImage: "archivebox.fill", tint: .secondary)
                         }
                         Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))
@@ -108,26 +165,26 @@ struct WorkSetsDashboardView: View {
             }
 
             Button("Import Visible Windows") {
-                guard let scopeKey = selectedContext?.scopeKey else { return }
+                guard let scopeKey = selectedVisibleContext?.scopeKey else { return }
                 Task { @MainActor in
                     _ = model.importWorkSet(for: scopeKey)
                 }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(selectedContext == nil)
+            .disabled(selectedVisibleContext == nil)
 
             Button("Create Empty Set") {
-                guard let scopeKey = selectedContext?.scopeKey else { return }
+                guard let scopeKey = selectedVisibleContext?.scopeKey else { return }
                 _ = model.createEmptyWorkSet(for: scopeKey)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(selectedContext == nil)
+            .disabled(selectedVisibleContext == nil)
 
             Spacer(minLength: 0)
 
-            WorkSetInfoBubbleButton(text: "Use the scope picker to switch between the desktops that are currently visible on each screen. Import builds one front-to-back pile from the selected desktop.")
+            WorkSetInfoBubbleButton(text: "Use the scope picker to switch between visible desktops and saved Work Set scopes. Import builds one front-to-back pile from the selected visible desktop.")
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,11 +200,13 @@ struct WorkSetsDashboardView: View {
 
     @ViewBuilder
     private var workSetsBoard: some View {
-        if selectedContext == nil {
+        if selectedScopeKey == nil {
             EmptyStateView(
-                title: "Current desktop unavailable",
+                title: model.workSets.isEmpty ? "No Work Sets yet" : "Desktop data unavailable",
                 systemImage: "square.stack.3d.up.slash",
-                message: "TilePilot needs a live desktop snapshot before it can show Work Sets for this desktop."
+                message: model.workSets.isEmpty
+                    ? "Import visible windows to create the first Work Set."
+                    : "TilePilot needs a live desktop snapshot to attach saved Work Sets to a desktop."
             )
         } else {
             GroupBox {
@@ -159,8 +218,16 @@ struct WorkSetsDashboardView: View {
                         Spacer(minLength: 0)
                     }
 
+                    if selectedVisibleContext == nil && !selectedWorkSets.isEmpty {
+                        Text("This desktop is not visible right now. Saved Work Sets stay visible here, but import, live preview, and the window palette are unavailable until the desktop is visible.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if selectedWorkSets.isEmpty {
-                        Text("Import visible windows to create the first Work Set, or drag a current desktop window into New Work Set.")
+                        Text(selectedVisibleContext == nil
+                            ? "No saved Work Sets exist for this desktop yet."
+                            : "Import visible windows to create the first Work Set, or drag a current desktop window into New Work Set.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -171,7 +238,9 @@ struct WorkSetsDashboardView: View {
                                 workSetLane(for: workSet)
                             }
 
-                            newWorkSetLane
+                            if selectedVisibleContext != nil {
+                                newWorkSetLane
+                            }
                         }
                         .padding(.vertical, 2)
                     }
@@ -187,8 +256,8 @@ struct WorkSetsDashboardView: View {
         let resolvedMembers = model.workSetResolvedMembers(for: workSet, in: selectedContext)
         let disabledReason = model.workSetActivationDisabledReason(workSet)
 
-        return VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         if renamingWorkSetID == workSet.id {
@@ -203,10 +272,6 @@ struct WorkSetsDashboardView: View {
                                 .font(.headline)
                                 .lineLimit(1)
                         }
-
-                        Text("\(workSet.members.count) window\(workSet.members.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     Spacer(minLength: 0)
@@ -234,8 +299,7 @@ struct WorkSetsDashboardView: View {
                 }
 
                 HStack(spacing: 6) {
-                    metaChip(workSet.sourceDisplayName, systemImage: "display")
-                    metaChip("Desktop \(workSet.scopeKey.spaceIndex)", systemImage: "rectangle.3.group")
+                    metaChip("\(workSet.sourceDisplayName) · Desktop \(workSet.scopeKey.spaceIndex)", systemImage: "display")
 
                     if model.isActiveWorkSet(workSet) {
                         statusChip("Active", systemImage: "checkmark.circle.fill", tint: .green)
@@ -245,19 +309,42 @@ struct WorkSetsDashboardView: View {
                     }
                 }
 
-                HStack(spacing: 10) {
-                    Button("Activate Work Set") {
+                HStack(spacing: 8) {
+                    Button("Activate") {
                         model.activateWorkSet(workSetID: workSet.id)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(disabledReason != nil)
+                    .help("Activate Work Set")
+
+                    Picker("Restore as", selection: workSetLayoutModeBinding(for: workSet)) {
+                        ForEach(WorkSetLayoutMode.allCases, id: \.self) { layoutMode in
+                            Text(layoutMode.title).tag(layoutMode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .frame(width: 104, alignment: .leading)
+                    .help("How this Work Set restores windows")
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 10) {
+                    Toggle("Launch Missing Apps", isOn: workSetLaunchMissingAppsBinding(for: workSet))
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help("Open apps that are not running when this Work Set is activated.")
 
                     Spacer(minLength: 0)
 
                     Toggle("Backdrop", isOn: workSetBackdropEnabledBinding(for: workSet))
                         .toggleStyle(.checkbox)
                         .controlSize(.small)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     ColorPicker(
                         "",
@@ -265,8 +352,29 @@ struct WorkSetsDashboardView: View {
                         supportsOpacity: false
                     )
                     .labelsHidden()
-                    .frame(width: 30)
+                    .padding(.leading, 4)
+                    .frame(width: 40)
                     .help("Backdrop color")
+                }
+
+                if workSet.layoutMode == .template {
+                    HStack(spacing: 8) {
+                        Picker("Template", selection: workSetLinkedTemplateBinding(for: workSet)) {
+                            Text("Choose Template").tag(UUID?.none)
+                            ForEach(model.windowLayoutTemplates) { template in
+                                Text(template.name).tag(UUID?.some(template.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if let templateWarning = model.workSetTemplateWarning(workSet) {
+                        Text(templateWarning)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 
@@ -306,7 +414,7 @@ struct WorkSetsDashboardView: View {
                                 )
                             },
                             onDuplicateToNewWorkSet: {
-                                guard let scopeKey = selectedContext?.scopeKey else { return }
+                                guard let scopeKey = selectedVisibleContext?.scopeKey else { return }
                                 _ = model.createEmptyWorkSet(for: scopeKey, announce: false).flatMap { newWorkSetID in
                                     _ = model.copyWorkSetMember(
                                         from: workSet.id,
@@ -333,8 +441,8 @@ struct WorkSetsDashboardView: View {
                 }
             }
         }
-        .padding(12)
-        .frame(width: 330, alignment: .topLeading)
+        .padding(10)
+        .frame(width: 360, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.secondary.opacity(0.06))
@@ -348,11 +456,11 @@ struct WorkSetsDashboardView: View {
     private var newWorkSetLane: some View {
         WorkSetNewLane(
             onCreate: {
-                guard let scopeKey = selectedContext?.scopeKey else { return }
+                guard let scopeKey = selectedVisibleContext?.scopeKey else { return }
                 _ = model.createEmptyWorkSet(for: scopeKey)
             },
             onDropPayload: { payload in
-                guard let scopeKey = selectedContext?.scopeKey,
+                guard let scopeKey = selectedVisibleContext?.scopeKey,
                       let newWorkSetID = model.createEmptyWorkSet(for: scopeKey, announce: false) else {
                     return
                 }
@@ -380,7 +488,14 @@ struct WorkSetsDashboardView: View {
         let windows = selectedPaletteWindows
 
         return GroupBox {
-            if windows.isEmpty {
+            if selectedVisibleContext == nil {
+                EmptyStateView(
+                    title: "Desktop not visible",
+                    systemImage: "display.slash",
+                    message: "Current desktop windows only appear here when the selected Work Set desktop is visible."
+                )
+                .frame(minHeight: 120)
+            } else if windows.isEmpty {
                 EmptyStateView(
                     title: "No eligible windows",
                     systemImage: "macwindow.badge.plus",
@@ -406,14 +521,73 @@ struct WorkSetsDashboardView: View {
 
     private func syncSelectedScopeIfNeeded() {
         if let selectedScopeID,
-           visibleContexts.contains(where: { $0.scopeKey.id == selectedScopeID }) {
+           scopeMenuKeys.contains(where: { $0.id == selectedScopeID }) {
             return
         }
-        if let current = currentDesktopContext {
-            selectedScopeID = current.scopeKey.id
-        } else {
-            selectedScopeID = visibleContexts.first?.scopeKey.id
+        selectedScopeID = selectedScopeKey?.id
+    }
+
+    private func scopeDisplayName(for scopeKey: WorkSetScopeKey) -> String {
+        let savedDisplayName = savedDisplayName(for: scopeKey)
+        if let context = model.workSetContext(for: scopeKey),
+           liveDisplayMatchesSavedScope(for: scopeKey, liveDisplayName: context.display.name) {
+            return context.display.name
         }
+        if let savedDisplayName {
+            return savedDisplayName
+        }
+        return "Display \(scopeKey.displayID)"
+    }
+
+    private func scopeWindowCount(for scopeKey: WorkSetScopeKey) -> Int? {
+        guard let context = model.workSetContext(for: scopeKey),
+              liveDisplayMatchesSavedScope(for: scopeKey, liveDisplayName: context.display.name) else {
+            return nil
+        }
+        return context.windows.count
+    }
+
+    private func isScopeVisible(_ scopeKey: WorkSetScopeKey) -> Bool {
+        matchingVisibleContexts.contains(where: { $0.scopeKey == scopeKey })
+    }
+
+    private func savedDisplayName(for scopeKey: WorkSetScopeKey) -> String? {
+        model.workSets(for: scopeKey).first?.sourceDisplayName
+    }
+
+    private func liveDisplayMatchesSavedScope(for scopeKey: WorkSetScopeKey, liveDisplayName: String) -> Bool {
+        guard let workSet = model.workSets(for: scopeKey).first else { return true }
+        if let context = model.workSetContext(for: scopeKey) {
+            if let savedWidth = workSet.sourceDisplayWidth,
+               let savedHeight = workSet.sourceDisplayHeight,
+               abs(context.display.frameW - savedWidth) <= 1,
+               abs(context.display.frameH - savedHeight) <= 1 {
+                return true
+            }
+            if let shapeKey = workSet.sourceDisplayShapeKey,
+               shapeKey.matches(width: context.display.frameW, height: context.display.frameH) {
+                return true
+            }
+        }
+        return normalizedDisplayName(workSet.sourceDisplayName) == normalizedDisplayName(liveDisplayName)
+    }
+
+    private func normalizedDisplayName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+    }
+
+    private func scopeMenuTitle(for scopeKey: WorkSetScopeKey) -> String {
+        let displayName = scopeDisplayName(for: scopeKey)
+        let tail: String
+        if let windowCount = scopeWindowCount(for: scopeKey) {
+            tail = "\(windowCount) window\(windowCount == 1 ? "" : "s")"
+        } else {
+            tail = "\(model.workSets(for: scopeKey).count) Work Set\(model.workSets(for: scopeKey).count == 1 ? "" : "s")"
+        }
+        let savedSuffix = isScopeVisible(scopeKey) ? "" : " · saved"
+        return "\(displayName) · Desktop \(scopeKey.spaceIndex) · \(tail)\(savedSuffix)"
     }
 
     private func handleLaneDrop(_ payload: WorkSetDropPayload, into workSet: WorkSet, before targetMemberID: UUID?) {
@@ -475,6 +649,15 @@ struct WorkSetsDashboardView: View {
         )
     }
 
+    private func workSetLaunchMissingAppsBinding(for workSet: WorkSet) -> Binding<Bool> {
+        Binding(
+            get: { workSet.launchMissingApps },
+            set: { enabled in
+                model.setWorkSetLaunchMissingApps(enabled, workSetID: workSet.id)
+            }
+        )
+    }
+
     private func workSetBackdropColorBinding(for workSet: WorkSet) -> Binding<Color> {
         Binding(
             get: { workSet.backdropColor.swiftUIColor },
@@ -485,9 +668,28 @@ struct WorkSetsDashboardView: View {
         )
     }
 
+    private func workSetLayoutModeBinding(for workSet: WorkSet) -> Binding<WorkSetLayoutMode> {
+        Binding(
+            get: { workSet.layoutMode },
+            set: { layoutMode in
+                model.setWorkSetLayoutMode(layoutMode, workSetID: workSet.id)
+            }
+        )
+    }
+
+    private func workSetLinkedTemplateBinding(for workSet: WorkSet) -> Binding<UUID?> {
+        Binding(
+            get: { workSet.linkedTemplateID },
+            set: { templateID in
+                model.setWorkSetLinkedTemplateID(templateID, workSetID: workSet.id)
+            }
+        )
+    }
+
     private func metaChip(_ text: String, systemImage: String) -> some View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.semibold))
+            .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(Color.secondary.opacity(0.10), in: Capsule())
@@ -496,10 +698,22 @@ struct WorkSetsDashboardView: View {
     private func statusChip(_ text: String, systemImage: String, tint: Color) -> some View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.semibold))
+            .lineLimit(1)
             .foregroundStyle(tint)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(tint.opacity(0.14), in: Capsule())
+    }
+
+    private func workSetLayoutModeSystemImage(_ layoutMode: WorkSetLayoutMode) -> String {
+        switch layoutMode {
+        case .stackOnly:
+            return "square.stack.3d.up"
+        case .tiled:
+            return "rectangle.split.3x1"
+        case .template:
+            return "rectangle.3.offgrid"
+        }
     }
 }
 
@@ -549,8 +763,8 @@ private struct WorkSetMemberRow: View {
 
             Spacer(minLength: 0)
 
-            if status == .missing {
-                Text("Missing")
+            if shouldShowStatusBadge {
+                Text(status.label)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 8)
@@ -605,7 +819,31 @@ private struct WorkSetMemberRow: View {
                 onDropPayload(payload)
             }
         }
-        .help(matchedWindow == nil ? "Window is not available right now." : (member.windowTitle.isEmpty ? member.appName : "\(member.appName) - \(member.windowTitle)"))
+        .help(statusHelpText)
+    }
+
+    private var shouldShowStatusBadge: Bool {
+        switch status {
+        case .exact, .sameApp:
+            return false
+        case .minimized, .otherDesktop, .otherScreen, .missing:
+            return true
+        }
+    }
+
+    private var statusHelpText: String {
+        switch status {
+        case .exact, .sameApp:
+            return member.windowTitle.isEmpty ? member.appName : "\(member.appName) - \(member.windowTitle)"
+        case .minimized:
+            return "This window is open but minimized. Activating the Work Set will restore it."
+        case .otherDesktop:
+            return "This window is open on another desktop. Activating the Work Set can pull it back."
+        case .otherScreen:
+            return "This window is open on another screen. Activating the Work Set can pull it back."
+        case .missing:
+            return "TilePilot cannot find this saved window right now."
+        }
     }
 }
 
@@ -615,7 +853,8 @@ private struct WorkSetLayoutPreview: View {
 
     private var previewItems: [WorkSetLayoutPreviewItem] {
         resolvedMembers.enumerated().compactMap { offset, resolved in
-            guard let matchedWindow = resolved.matchedWindow,
+            guard resolved.status == .exact || resolved.status == .sameApp,
+                  let matchedWindow = resolved.matchedWindow,
                   let normalized = OverviewPreviewBuilder.normalizedPreview(
                     for: matchedWindow,
                     in: display,
@@ -627,6 +866,7 @@ private struct WorkSetLayoutPreview: View {
             return WorkSetLayoutPreviewItem(
                 memberID: resolved.member.id,
                 appName: resolved.member.appName,
+                windowTitle: resolved.member.windowTitle,
                 normalizedWindow: normalized,
                 frontOrder: offset + 1,
                 status: resolved.status
@@ -638,25 +878,12 @@ private struct WorkSetLayoutPreview: View {
         resolvedMembers.filter { $0.matchedWindow == nil }.count
     }
 
-    private var liveCount: Int {
-        previewItems.count
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("Live Layout")
+                Text("Preview")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-
-                if liveCount > 0 {
-                    Text("\(liveCount)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.10), in: Capsule())
-                }
 
                 if missingCount > 0 {
                     Text("\(missingCount) missing")
@@ -699,11 +926,17 @@ private struct WorkSetLayoutPreview: View {
 private struct WorkSetLayoutPreviewItem: Identifiable {
     let memberID: UUID
     let appName: String
+    let windowTitle: String
     let normalizedWindow: OverviewWindowPreview
     let frontOrder: Int
     let status: WorkSetMemberMatchStatus
 
     var id: UUID { memberID }
+
+    var tooltipTitle: String {
+        let trimmedTitle = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? appName : "\(appName) - \(trimmedTitle)"
+    }
 }
 
 private struct WorkSetLayoutPreviewWindow: View {
@@ -727,7 +960,7 @@ private struct WorkSetLayoutPreviewWindow: View {
         switch item.status {
         case .exact, .sameApp:
             return Color.accentColor.opacity(0.85)
-        case .missing:
+        case .minimized, .otherDesktop, .otherScreen, .missing:
             return Color.secondary.opacity(0.45)
         }
     }
@@ -752,6 +985,7 @@ private struct WorkSetLayoutPreviewWindow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     .offset(x: 4, y: 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .help(item.tooltipTitle)
             }
 
             Text("\(item.frontOrder)")
@@ -764,6 +998,7 @@ private struct WorkSetLayoutPreviewWindow: View {
         }
         .frame(width: frame.width, height: frame.height, alignment: .topLeading)
         .offset(x: frame.minX, y: frame.minY)
+        .help(item.tooltipTitle)
     }
 }
 

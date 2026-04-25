@@ -94,6 +94,72 @@ final class WorkSetModelsTests: XCTestCase {
         XCTAssertNil(resolved[1].matchedWindow)
     }
 
+    func testResolveWorkSetMembersForScopeReportsMinimizedWindow() {
+        let minimized = makeWindow(id: 101, pid: 9001, app: "Safari", title: "Inbox", isMinimized: true)
+        let member = WorkSetMember(
+            appName: "Safari",
+            windowTitle: "Inbox",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            lastSeenWindowID: 101,
+            lastSeenPID: 9001
+        )
+
+        let resolved = resolveWorkSetMembersForScope(
+            [member],
+            visibleScopeWindows: [],
+            allWindows: [minimized],
+            scopeKey: WorkSetScopeKey(displayID: 1, spaceIndex: 1)
+        )
+
+        XCTAssertEqual(resolved.first?.status, .minimized)
+        XCTAssertEqual(resolved.first?.matchedWindow?.id, 101)
+    }
+
+    func testResolveWorkSetMembersForScopeReportsOtherDesktop() {
+        let otherDesktop = makeWindow(id: 101, pid: 9001, app: "Safari", title: "Inbox", space: 2)
+        let member = WorkSetMember(
+            appName: "Safari",
+            windowTitle: "Inbox",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            lastSeenWindowID: 101,
+            lastSeenPID: 9001
+        )
+
+        let resolved = resolveWorkSetMembersForScope(
+            [member],
+            visibleScopeWindows: [],
+            allWindows: [otherDesktop],
+            scopeKey: WorkSetScopeKey(displayID: 1, spaceIndex: 1)
+        )
+
+        XCTAssertEqual(resolved.first?.status, .otherDesktop)
+        XCTAssertEqual(resolved.first?.matchedWindow?.id, 101)
+    }
+
+    func testResolveWorkSetMembersForScopeReportsOtherScreen() {
+        let otherScreen = makeWindow(id: 101, pid: 9001, app: "Safari", title: "Inbox", display: 2)
+        let member = WorkSetMember(
+            appName: "Safari",
+            windowTitle: "Inbox",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            lastSeenWindowID: 101,
+            lastSeenPID: 9001
+        )
+
+        let resolved = resolveWorkSetMembersForScope(
+            [member],
+            visibleScopeWindows: [],
+            allWindows: [otherScreen],
+            scopeKey: WorkSetScopeKey(displayID: 1, spaceIndex: 1)
+        )
+
+        XCTAssertEqual(resolved.first?.status, .otherScreen)
+        XCTAssertEqual(resolved.first?.matchedWindow?.id, 101)
+    }
+
     func testNextWorkSetToCycleReturnsFirstWhenNoActiveWorkSetExists() {
         let workSets = [
             makeWorkSet(name: "One"),
@@ -148,6 +214,42 @@ final class WorkSetModelsTests: XCTestCase {
 
         XCTAssertFalse(decoded.backdropEnabled)
         XCTAssertEqual(decoded.backdropColor, .workSetBackdropDefault)
+        XCTAssertFalse(decoded.launchMissingApps)
+    }
+
+    func testWorkSetMemberDecodeBackfillsLaunchMetadataForExistingData() throws {
+        let json = """
+        {
+          "id": "\(UUID().uuidString)",
+          "appName": "Safari",
+          "windowTitle": "Inbox",
+          "role": "AXWindow",
+          "subrole": "AXStandardWindow",
+          "lastSeenWindowID": 101,
+          "lastSeenPID": 9001
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(WorkSetMember.self, from: Data(json.utf8))
+
+        XCTAssertNil(decoded.bundleIdentifier)
+        XCTAssertNil(decoded.bundleURLPath)
+    }
+
+    func testWorkSetMemberPreservesLaunchMetadata() {
+        let member = WorkSetMember(
+            appName: "Safari",
+            windowTitle: "Inbox",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            lastSeenWindowID: 101,
+            lastSeenPID: 9001,
+            bundleIdentifier: "com.apple.Safari",
+            bundleURLPath: "/Applications/Safari.app"
+        )
+
+        XCTAssertEqual(member.bundleIdentifier, "com.apple.Safari")
+        XCTAssertEqual(member.bundleURLPath, "/Applications/Safari.app")
     }
 
     @MainActor
@@ -224,15 +326,18 @@ final class WorkSetModelsTests: XCTestCase {
         pid: Int,
         app: String,
         title: String,
+        space: Int = 1,
+        display: Int = 1,
         focused: Bool = false,
-        windowServerOrderIndex: Int? = nil
+        windowServerOrderIndex: Int? = nil,
+        isMinimized: Bool = false
     ) -> WindowState {
         WindowState(
             id: id,
             pid: pid,
             app: app,
-            space: 1,
-            display: 1,
+            space: space,
+            display: display,
             frameX: 0,
             frameY: 0,
             frameW: 100,
@@ -246,7 +351,7 @@ final class WorkSetModelsTests: XCTestCase {
             subrole: "AXStandardWindow",
             focused: focused,
             isVisible: true,
-            isMinimized: false,
+            isMinimized: isMinimized,
             isHidden: false,
             hasWindowServerMatch: true,
             windowServerOrderIndex: windowServerOrderIndex,

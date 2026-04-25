@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct WorkSetScopeKey: Codable, Hashable, Sendable, Identifiable {
     let displayID: Int
@@ -17,6 +20,8 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
     let subrole: String
     let lastSeenWindowID: Int?
     let lastSeenPID: Int?
+    let bundleIdentifier: String?
+    let bundleURLPath: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -26,6 +31,8 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
         case subrole
         case lastSeenWindowID
         case lastSeenPID
+        case bundleIdentifier
+        case bundleURLPath
     }
 
     init(
@@ -35,7 +42,9 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
         role: String,
         subrole: String,
         lastSeenWindowID: Int? = nil,
-        lastSeenPID: Int? = nil
+        lastSeenPID: Int? = nil,
+        bundleIdentifier: String? = nil,
+        bundleURLPath: String? = nil
     ) {
         self.id = id
         self.appName = appName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,6 +53,8 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
         self.subrole = subrole.trimmingCharacters(in: .whitespacesAndNewlines)
         self.lastSeenWindowID = lastSeenWindowID
         self.lastSeenPID = lastSeenPID
+        self.bundleIdentifier = bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.bundleURLPath = bundleURLPath?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     init(from decoder: Decoder) throws {
@@ -55,16 +66,28 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
         subrole = try container.decodeIfPresent(String.self, forKey: .subrole)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         lastSeenWindowID = try container.decodeIfPresent(Int.self, forKey: .lastSeenWindowID)
         lastSeenPID = try container.decodeIfPresent(Int.self, forKey: .lastSeenPID)
+        bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        bundleURLPath = try container.decodeIfPresent(String.self, forKey: .bundleURLPath)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     init(window: WindowState) {
+        #if canImport(AppKit)
+        let runningApp = NSRunningApplication(processIdentifier: pid_t(window.pid))
+        let resolvedBundleIdentifier = runningApp?.bundleIdentifier
+        let resolvedBundleURLPath = runningApp?.bundleURL?.path
+        #else
+        let resolvedBundleIdentifier: String? = nil
+        let resolvedBundleURLPath: String? = nil
+        #endif
         self.init(
             appName: window.app,
             windowTitle: window.title,
             role: window.role,
             subrole: window.subrole,
             lastSeenWindowID: window.id,
-            lastSeenPID: window.pid
+            lastSeenPID: window.pid,
+            bundleIdentifier: resolvedBundleIdentifier,
+            bundleURLPath: resolvedBundleURLPath
         )
     }
 
@@ -74,7 +97,9 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
         role: String? = nil,
         subrole: String? = nil,
         lastSeenWindowID: Int?? = nil,
-        lastSeenPID: Int?? = nil
+        lastSeenPID: Int?? = nil,
+        bundleIdentifier: String?? = nil,
+        bundleURLPath: String?? = nil
     ) -> WorkSetMember {
         WorkSetMember(
             id: id,
@@ -83,8 +108,27 @@ struct WorkSetMember: Identifiable, Codable, Hashable, Sendable {
             role: role ?? self.role,
             subrole: subrole ?? self.subrole,
             lastSeenWindowID: lastSeenWindowID ?? self.lastSeenWindowID,
-            lastSeenPID: lastSeenPID ?? self.lastSeenPID
+            lastSeenPID: lastSeenPID ?? self.lastSeenPID,
+            bundleIdentifier: bundleIdentifier ?? self.bundleIdentifier,
+            bundleURLPath: bundleURLPath ?? self.bundleURLPath
         )
+    }
+}
+
+enum WorkSetLayoutMode: String, Codable, CaseIterable, Hashable, Sendable {
+    case stackOnly
+    case tiled
+    case template
+
+    var title: String {
+        switch self {
+        case .stackOnly:
+            return "Floating"
+        case .tiled:
+            return "Tile"
+        case .template:
+            return "Template"
+        }
     }
 }
 
@@ -92,8 +136,14 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let name: String
     let sourceDisplayName: String
+    let sourceDisplayWidth: Double?
+    let sourceDisplayHeight: Double?
+    let sourceDisplayShapeKey: DisplayShapeKey?
     let scopeKey: WorkSetScopeKey
     let members: [WorkSetMember]
+    let layoutMode: WorkSetLayoutMode
+    let linkedTemplateID: UUID?
+    let launchMissingApps: Bool
     let backdropEnabled: Bool
     let backdropColor: OverlayAccentColor
 
@@ -101,8 +151,14 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
         case id
         case name
         case sourceDisplayName
+        case sourceDisplayWidth
+        case sourceDisplayHeight
+        case sourceDisplayShapeKey
         case scopeKey
         case members
+        case layoutMode
+        case linkedTemplateID
+        case launchMissingApps
         case backdropEnabled
         case backdropColor
     }
@@ -111,16 +167,31 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
         id: UUID = UUID(),
         name: String,
         sourceDisplayName: String,
+        sourceDisplayWidth: Double? = nil,
+        sourceDisplayHeight: Double? = nil,
+        sourceDisplayShapeKey: DisplayShapeKey? = nil,
         scopeKey: WorkSetScopeKey,
         members: [WorkSetMember],
+        layoutMode: WorkSetLayoutMode = .stackOnly,
+        linkedTemplateID: UUID? = nil,
+        launchMissingApps: Bool = false,
         backdropEnabled: Bool = false,
         backdropColor: OverlayAccentColor = .workSetBackdropDefault
     ) {
         self.id = id
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.sourceDisplayName = sourceDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.sourceDisplayWidth = sourceDisplayWidth
+        self.sourceDisplayHeight = sourceDisplayHeight
+        self.sourceDisplayShapeKey = sourceDisplayShapeKey ?? {
+            guard let sourceDisplayWidth, let sourceDisplayHeight else { return nil }
+            return DisplayShapeKey.from(width: sourceDisplayWidth, height: sourceDisplayHeight)
+        }()
         self.scopeKey = scopeKey
         self.members = members
+        self.layoutMode = layoutMode
+        self.linkedTemplateID = linkedTemplateID
+        self.launchMissingApps = launchMissingApps
         self.backdropEnabled = backdropEnabled
         self.backdropColor = backdropColor
     }
@@ -130,8 +201,20 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name).trimmingCharacters(in: .whitespacesAndNewlines)
         sourceDisplayName = try container.decodeIfPresent(String.self, forKey: .sourceDisplayName)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Current Display"
+        let decodedSourceDisplayWidth = try container.decodeIfPresent(Double.self, forKey: .sourceDisplayWidth)
+        let decodedSourceDisplayHeight = try container.decodeIfPresent(Double.self, forKey: .sourceDisplayHeight)
+        sourceDisplayWidth = decodedSourceDisplayWidth
+        sourceDisplayHeight = decodedSourceDisplayHeight
+        sourceDisplayShapeKey = try container.decodeIfPresent(DisplayShapeKey.self, forKey: .sourceDisplayShapeKey)
+            ?? {
+                guard let decodedSourceDisplayWidth, let decodedSourceDisplayHeight else { return nil }
+                return DisplayShapeKey.from(width: decodedSourceDisplayWidth, height: decodedSourceDisplayHeight)
+            }()
         scopeKey = try container.decode(WorkSetScopeKey.self, forKey: .scopeKey)
         members = try container.decodeIfPresent([WorkSetMember].self, forKey: .members) ?? []
+        layoutMode = try container.decodeIfPresent(WorkSetLayoutMode.self, forKey: .layoutMode) ?? .stackOnly
+        linkedTemplateID = try container.decodeIfPresent(UUID.self, forKey: .linkedTemplateID)
+        launchMissingApps = try container.decodeIfPresent(Bool.self, forKey: .launchMissingApps) ?? false
         backdropEnabled = try container.decodeIfPresent(Bool.self, forKey: .backdropEnabled) ?? false
         backdropColor = try container.decodeIfPresent(OverlayAccentColor.self, forKey: .backdropColor) ?? .workSetBackdropDefault
     }
@@ -139,8 +222,14 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
     func with(
         name: String? = nil,
         sourceDisplayName: String? = nil,
+        sourceDisplayWidth: Double?? = nil,
+        sourceDisplayHeight: Double?? = nil,
+        sourceDisplayShapeKey: DisplayShapeKey?? = nil,
         scopeKey: WorkSetScopeKey? = nil,
         members: [WorkSetMember]? = nil,
+        layoutMode: WorkSetLayoutMode? = nil,
+        linkedTemplateID: UUID?? = nil,
+        launchMissingApps: Bool? = nil,
         backdropEnabled: Bool? = nil,
         backdropColor: OverlayAccentColor? = nil
     ) -> WorkSet {
@@ -148,11 +237,23 @@ struct WorkSet: Identifiable, Codable, Hashable, Sendable {
             id: id,
             name: name ?? self.name,
             sourceDisplayName: sourceDisplayName ?? self.sourceDisplayName,
+            sourceDisplayWidth: sourceDisplayWidth ?? self.sourceDisplayWidth,
+            sourceDisplayHeight: sourceDisplayHeight ?? self.sourceDisplayHeight,
+            sourceDisplayShapeKey: sourceDisplayShapeKey ?? self.sourceDisplayShapeKey,
             scopeKey: scopeKey ?? self.scopeKey,
             members: members ?? self.members,
+            layoutMode: layoutMode ?? self.layoutMode,
+            linkedTemplateID: linkedTemplateID ?? self.linkedTemplateID,
+            launchMissingApps: launchMissingApps ?? self.launchMissingApps,
             backdropEnabled: backdropEnabled ?? self.backdropEnabled,
             backdropColor: backdropColor ?? self.backdropColor
         )
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
@@ -167,6 +268,9 @@ struct WorkSetBackdropPresentation: Equatable, Sendable {
 enum WorkSetMemberMatchStatus: String, Sendable {
     case exact
     case sameApp
+    case minimized
+    case otherDesktop
+    case otherScreen
     case missing
 
     var label: String {
@@ -175,6 +279,12 @@ enum WorkSetMemberMatchStatus: String, Sendable {
             return "Exact"
         case .sameApp:
             return "Same App"
+        case .minimized:
+            return "Minimized"
+        case .otherDesktop:
+            return "Other Desktop"
+        case .otherScreen:
+            return "Other Screen"
         case .missing:
             return "Missing"
         }
@@ -209,27 +319,9 @@ func resolveWorkSetMembers(_ members: [WorkSetMember], in windows: [WindowState]
     var resolved: [WorkSetResolvedMember] = []
 
     for member in members {
-        if let exactMatch = windows.first(where: { window in
-            !usedWindowIDs.contains(window.id) && workSetMember(member, exactlyMatches: window)
-        }) {
-            usedWindowIDs.insert(exactMatch.id)
-            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: exactMatch, status: .exact))
-            continue
-        }
-
-        if let titleRoleMatch = windows.first(where: { window in
-            !usedWindowIDs.contains(window.id) && workSetMember(member, titleRoleMatches: window)
-        }) {
-            usedWindowIDs.insert(titleRoleMatch.id)
-            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: titleRoleMatch, status: .sameApp))
-            continue
-        }
-
-        if let sameAppMatch = windows.first(where: { window in
-            !usedWindowIDs.contains(window.id) && workSetMember(member, appMatches: window)
-        }) {
-            usedWindowIDs.insert(sameAppMatch.id)
-            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: sameAppMatch, status: .sameApp))
+        if let match = matchingWorkSetWindow(for: member, in: windows, excluding: usedWindowIDs) {
+            usedWindowIDs.insert(match.window.id)
+            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: match.window, status: match.status))
             continue
         }
 
@@ -237,6 +329,77 @@ func resolveWorkSetMembers(_ members: [WorkSetMember], in windows: [WindowState]
     }
 
     return resolved
+}
+
+func resolveWorkSetMembersForScope(
+    _ members: [WorkSetMember],
+    visibleScopeWindows: [WindowState],
+    allWindows: [WindowState],
+    scopeKey: WorkSetScopeKey
+) -> [WorkSetResolvedMember] {
+    var usedWindowIDs = Set<Int>()
+    var resolved: [WorkSetResolvedMember] = []
+
+    for member in members {
+        if let match = matchingWorkSetWindow(for: member, in: visibleScopeWindows, excluding: usedWindowIDs) {
+            usedWindowIDs.insert(match.window.id)
+            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: match.window, status: match.status))
+            continue
+        }
+
+        let scopeWindows = allWindows.filter {
+            $0.display == scopeKey.displayID &&
+            $0.space == scopeKey.spaceIndex
+        }
+        if let match = matchingWorkSetWindow(for: member, in: scopeWindows.filter(\.isMinimized), excluding: usedWindowIDs) {
+            usedWindowIDs.insert(match.window.id)
+            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: match.window, status: .minimized))
+            continue
+        }
+
+        let otherScopeWindows = allWindows.filter {
+            $0.display != scopeKey.displayID ||
+            $0.space != scopeKey.spaceIndex
+        }
+        if let match = matchingWorkSetWindow(for: member, in: otherScopeWindows, excluding: usedWindowIDs) {
+            usedWindowIDs.insert(match.window.id)
+            let status: WorkSetMemberMatchStatus = match.window.display == scopeKey.displayID
+                ? .otherDesktop
+                : .otherScreen
+            resolved.append(WorkSetResolvedMember(member: member, matchedWindow: match.window, status: status))
+            continue
+        }
+
+        resolved.append(WorkSetResolvedMember(member: member, matchedWindow: nil, status: .missing))
+    }
+
+    return resolved
+}
+
+private func matchingWorkSetWindow(
+    for member: WorkSetMember,
+    in windows: [WindowState],
+    excluding usedWindowIDs: Set<Int>
+) -> (window: WindowState, status: WorkSetMemberMatchStatus)? {
+    if let exactMatch = windows.first(where: { window in
+        !usedWindowIDs.contains(window.id) && workSetMember(member, exactlyMatches: window)
+    }) {
+        return (exactMatch, .exact)
+    }
+
+    if let titleRoleMatch = windows.first(where: { window in
+        !usedWindowIDs.contains(window.id) && workSetMember(member, titleRoleMatches: window)
+    }) {
+        return (titleRoleMatch, .sameApp)
+    }
+
+    if let sameAppMatch = windows.first(where: { window in
+        !usedWindowIDs.contains(window.id) && workSetMember(member, appMatches: window)
+    }) {
+        return (sameAppMatch, .sameApp)
+    }
+
+    return nil
 }
 
 private func workSetMember(_ member: WorkSetMember, appMatches window: WindowState) -> Bool {

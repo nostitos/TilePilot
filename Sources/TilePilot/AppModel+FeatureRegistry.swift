@@ -381,6 +381,7 @@ extension AppModel {
         )
         definitions.append(contentsOf: windowLayoutTemplates.map(templateFeatureDefinition))
         definitions.append(contentsOf: workSets.map(workSetFeatureDefinition))
+        definitions.append(contentsOf: workSets.map(workSetAssignWindowFeatureDefinition))
         return definitions
     }
 
@@ -404,13 +405,40 @@ extension AppModel {
 
     func workSetFeatureDefinition(_ workSet: WorkSet) -> FeatureDefinition {
         let featureID = workSetFeatureID(for: workSet)
+        let description: String
+        switch workSet.layoutMode {
+        case .stackOnly:
+            description = "Activates this Work Set and brings its windows forward without changing their current positions."
+        case .tiled:
+            description = "Activates this Work Set and tiles only its windows on that desktop."
+        case .template:
+            description = "Activates this Work Set and places its matched windows into the linked template layout."
+        }
         return FeatureDefinition(
             id: featureID,
             group: .workSets,
             title: "Activate Work Set: \(workSet.name)",
-            description: "Brings this saved set of windows to the front on its desktop and pushes other managed windows behind.",
+            description: description,
             backend: .tilePilotAction,
             capabilityGate: .yabaiRuntime,
+            defaultCombo: nil,
+            commandMatchers: [tilePilotFeatureURL(featureID)],
+            matchAllCommandMatchers: false,
+            preferredCommand: tilePilotFeatureCommand(featureID),
+            actionID: nil,
+            isExperimental: false
+        )
+    }
+
+    func workSetAssignWindowFeatureDefinition(_ workSet: WorkSet) -> FeatureDefinition {
+        let featureID = workSetAssignWindowFeatureID(for: workSet)
+        return FeatureDefinition(
+            id: featureID,
+            group: .workSets,
+            title: "Assign Focused Window to Work Set: \(workSet.name)",
+            description: "Adds the focused window to this Work Set. From a window badge, it adds the clicked window instead.",
+            backend: .tilePilotAction,
+            capabilityGate: .none,
             defaultCombo: nil,
             commandMatchers: [tilePilotFeatureURL(featureID)],
             matchAllCommandMatchers: false,

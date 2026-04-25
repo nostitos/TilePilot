@@ -14,6 +14,21 @@ private enum VisibleWindowsLayoutOperation {
     case rebuildTileLayout
 }
 
+private struct TemplateApplyRunResult {
+    let assignedCount: Int
+    let emptyConstrainedSlotCount: Int
+    let extraWindowCount: Int
+    let limitedCount: Int
+    let failedCount: Int
+    let errorMessage: String?
+}
+
+private struct WorkSetLaunchMissingAppsResult {
+    var launched: Int = 0
+    var noWindow: Int = 0
+    var failed: Int = 0
+}
+
 private struct RuntimeLayoutWindow: Decodable {
     struct Frame: Decodable {
         let x: Double
@@ -69,8 +84,20 @@ extension AppModel {
     }
 
     func activateWorkSet(workSetID: UUID) {
-        Task { [weak self] in
-            await self?.activateWorkSetInternal(workSetID: workSetID)
+        let previousTask = workSetActivationTask
+        previousTask?.cancel()
+        workSetActivationRequestID += 1
+        let requestID = workSetActivationRequestID
+        workSetActivationTask = Task { [weak self] in
+            _ = await previousTask?.result
+            guard let self else { return }
+            guard self.workSetActivationRequestID == requestID else { return }
+            await self.activateWorkSetInternal(workSetID: workSetID, requestID: requestID)
+            await MainActor.run {
+                if self.workSetActivationRequestID == requestID {
+                    self.workSetActivationTask = nil
+                }
+            }
         }
     }
 
@@ -577,8 +604,68 @@ extension AppModel {
             return
         }
 
-        let eligibleWindows = state.windows.filter(\.isRuntimeManageable)
-        let limitedCount = state.windows.filter { !$0.isRuntimeManageable }.count
+        let result = await performTemplateApply(
+            template: template,
+            candidateWindows: state.windows,
+            display: display,
+            spaceIndex: state.spaceIndex,
+            requireMatchingDisplayShape: false,
+            noMatchesMessage: "No windows matched this template on the current desktop."
+        )
+
+        if let errorMessage = result.errorMessage {
+            await MainActor.run {
+                self.lastErrorMessage = errorMessage
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        var issues: [String] = []
+        if result.emptyConstrainedSlotCount > 0 {
+            issues.append("Left \(result.emptyConstrainedSlotCount) constrained slot(s) empty.")
+        }
+        if result.limitedCount > 0 {
+            issues.append("Skipped \(result.limitedCount) limited window(s).")
+        }
+        let extraCount = max(0, result.extraWindowCount)
+        if extraCount > 0 {
+            issues.append("Left \(extraCount) extra eligible window(s) unchanged.")
+        }
+        let failedCount = result.failedCount
+        if failedCount > 0 {
+            issues.append("\(failedCount) window(s) could not be placed.")
+        }
+
+        await MainActor.run {
+            self.lastActionMessage = "Applied template \(template.name) to \(result.assignedCount) window(s)."
+            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+        }
+        await refreshLiveState()
+    }
+
+    private func performTemplateApply(
+        template: WindowLayoutTemplate,
+        candidateWindows: [WindowState],
+        display: DisplayState,
+        spaceIndex: Int,
+        requireMatchingDisplayShape: Bool,
+        noMatchesMessage: String
+    ) async -> TemplateApplyRunResult {
+        if requireMatchingDisplayShape,
+           !template.displayShapeKey.matches(width: display.frameW, height: display.frameH) {
+            return TemplateApplyRunResult(
+                assignedCount: 0,
+                emptyConstrainedSlotCount: 0,
+                extraWindowCount: 0,
+                limitedCount: 0,
+                failedCount: 0,
+                errorMessage: "Linked template does not match this display shape."
+            )
+        }
+
+        let eligibleWindows = candidateWindows.filter(\.isRuntimeManageable)
+        let limitedCount = candidateWindows.filter { !$0.isRuntimeManageable }.count
         let assignment = assignTemplateWindows(
             for: template,
             from: eligibleWindows
@@ -586,11 +673,14 @@ extension AppModel {
         let assignedWindows = assignment.assignments.map(\.window)
 
         guard !assignedWindows.isEmpty else {
-            await MainActor.run {
-                self.lastErrorMessage = "No windows matched this template on the current desktop."
-                self.lastActionMessage = nil
-            }
-            return
+            return TemplateApplyRunResult(
+                assignedCount: 0,
+                emptyConstrainedSlotCount: assignment.emptyConstrainedSlotCount,
+                extraWindowCount: assignment.extraWindowCount,
+                limitedCount: limitedCount,
+                failedCount: 0,
+                errorMessage: noMatchesMessage
+            )
         }
 
         let floatResult = await setFloatingStateForWindows(
@@ -608,33 +698,20 @@ extension AppModel {
         )
         let stackingResult = await applyTemplateStacking(
             assignments: assignment.assignments,
-            spaceIndex: state.spaceIndex
+            spaceIndex: spaceIndex
         )
 
-        var issues: [String] = []
-        if assignment.emptyConstrainedSlotCount > 0 {
-            issues.append("Left \(assignment.emptyConstrainedSlotCount) constrained slot(s) empty.")
-        }
-        if limitedCount > 0 {
-            issues.append("Skipped \(limitedCount) limited window(s).")
-        }
-        let extraCount = max(0, assignment.extraWindowCount)
-        if extraCount > 0 {
-            issues.append("Left \(extraCount) extra eligible window(s) unchanged.")
-        }
-        let failedCount = floatResult.failed + frameResult.failed + stackingResult.failed
-        if failedCount > 0 {
-            issues.append("\(failedCount) window(s) could not be placed.")
-        }
-
-        await MainActor.run {
-            self.lastActionMessage = "Applied template \(template.name) to \(assignedWindows.count) window(s)."
-            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
-        }
-        await refreshLiveState()
+        return TemplateApplyRunResult(
+            assignedCount: assignedWindows.count,
+            emptyConstrainedSlotCount: assignment.emptyConstrainedSlotCount,
+            extraWindowCount: assignment.extraWindowCount,
+            limitedCount: limitedCount,
+            failedCount: floatResult.failed + frameResult.failed + stackingResult.failed,
+            errorMessage: nil
+        )
     }
 
-    private func activateWorkSetInternal(workSetID: UUID) async {
+    private func activateWorkSetInternal(workSetID: UUID, requestID: Int) async {
         guard let workSet = workSet(withID: workSetID) else {
             await MainActor.run {
                 self.lastErrorMessage = "Work Set no longer exists."
@@ -642,8 +719,23 @@ extension AppModel {
             }
             return
         }
+        guard isCurrentWorkSetActivation(requestID) else { return }
 
-        await refreshLiveState()
+        activeWorkSetLayoutSyncTask?.cancel()
+        activeWorkSetLayoutSyncTask = nil
+        pendingActiveWorkSetLayoutSync = false
+        workSetActivationInProgress = true
+        defer { workSetActivationInProgress = false }
+
+        let targetScopeVisible = await prepareWorkSetActivationScope(workSet.scopeKey)
+        guard isCurrentWorkSetActivation(requestID) else { return }
+        guard targetScopeVisible else {
+            await MainActor.run {
+                self.lastErrorMessage = "Make Desktop \(workSet.scopeKey.spaceIndex) on \(workSet.sourceDisplayName) visible to activate this Work Set."
+                self.lastActionMessage = nil
+            }
+            return
+        }
 
         if let disabledReason = workSetActivationDisabledReason(workSet) {
             await MainActor.run {
@@ -653,7 +745,63 @@ extension AppModel {
             return
         }
 
-        guard let context = currentDesktopWorkSetContext else {
+        guard visibleWorkSetContexts.contains(where: { $0.scopeKey == workSet.scopeKey }) else {
+            await MainActor.run {
+                self.lastErrorMessage = "Make Desktop \(workSet.scopeKey.spaceIndex) on \(workSet.sourceDisplayName) visible to activate this Work Set."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        var restoreMinimizedResult = await restoreMinimizedWorkSetMembers(
+            resolveWorkSetMembers(
+                workSet.members,
+                in: workSetActivationCandidateWindows(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+            )
+        )
+        guard isCurrentWorkSetActivation(requestID) else { return }
+        if restoreMinimizedResult.restored > 0 {
+            await refreshLiveState()
+            guard isCurrentWorkSetActivation(requestID) else { return }
+        }
+
+        let launchMissingAppsResult: WorkSetLaunchMissingAppsResult
+        if workSet.launchMissingApps {
+            launchMissingAppsResult = await launchMissingAppsForWorkSet(workSet)
+            guard isCurrentWorkSetActivation(requestID) else { return }
+        } else {
+            launchMissingAppsResult = WorkSetLaunchMissingAppsResult()
+        }
+
+        let globalEligibleWindows = workSetActivationCandidateWindows(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+        let globallyResolvedMembers = resolveWorkSetMembers(workSet.members, in: globalEligibleWindows)
+        let moveResult = await moveWorkSetWindowsIntoScope(
+            globallyResolvedMembers.compactMap(\.matchedWindow),
+            scopeKey: workSet.scopeKey
+        )
+        guard isCurrentWorkSetActivation(requestID) else { return }
+
+        if moveResult.moved > 0 {
+            await refreshLiveState()
+            guard isCurrentWorkSetActivation(requestID) else { return }
+        }
+
+        if moveResult.moved > 0 {
+            let movedRestoreResult = await restoreMinimizedWorkSetMembers(
+                resolveWorkSetMembers(
+                    workSet.members,
+                    in: workSetActivationCandidateWindows(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+                )
+            )
+            restoreMinimizedResult = mergeWorkSetRestoreResults(restoreMinimizedResult, movedRestoreResult)
+            guard isCurrentWorkSetActivation(requestID) else { return }
+            if movedRestoreResult.restored > 0 {
+                await refreshLiveState()
+                guard isCurrentWorkSetActivation(requestID) else { return }
+            }
+        }
+
+        guard let refreshedContext = workSetContext(for: workSet.scopeKey) else {
             await MainActor.run {
                 self.lastErrorMessage = "Current desktop data is unavailable right now."
                 self.lastActionMessage = nil
@@ -661,55 +809,1173 @@ extension AppModel {
             return
         }
 
-        let resolvedMembers = resolveWorkSetMembers(workSet.members, in: context.windows)
-        let activeResolvedMembers = resolvedMembers.filter { $0.matchedWindow != nil }
-        guard !activeResolvedMembers.isEmpty else {
-            await MainActor.run {
-                self.lastErrorMessage = "No saved windows from this Work Set are available on the current desktop."
-                self.lastActionMessage = nil
+        let scopeWindows = workSetActivationCandidateWindows(
+            in: latestLiveStateSnapshot ?? liveStateSnapshot,
+            scopeKey: workSet.scopeKey
+        )
+        let resolvedMembers = resolveWorkSetMembers(workSet.members, in: scopeWindows)
+        let manageableResolvedMembers = resolvedMembers.filter {
+            guard let matchedWindow = $0.matchedWindow else { return false }
+            return matchedWindow.isRuntimeManageable && !matchedWindow.isMinimized
+        }
+        let limitedResolvedMembers = resolvedMembers.filter { resolved in
+            guard let matchedWindow = resolved.matchedWindow else { return false }
+            return !matchedWindow.isRuntimeManageable
+        }
+        let sameAppCount = resolvedMembers.filter { $0.status == .sameApp }.count
+        let missingCount = resolvedMembers.filter { $0.status == .missing }.count
+        let activeWindowIDs = Set(manageableResolvedMembers.compactMap { $0.matchedWindow?.id })
+        let recoveryMessages = workSetActivationRecoveryMessages(
+            restoredMinimized: restoreMinimizedResult.restored,
+            failedMinimizedRestore: restoreMinimizedResult.failed,
+            launchResult: launchMissingAppsResult
+        )
+
+        switch workSet.layoutMode {
+        case .stackOnly:
+            guard !manageableResolvedMembers.isEmpty else {
+                await MainActor.run {
+                    let baseMessage = limitedResolvedMembers.isEmpty
+                        ? "No saved windows from this Work Set are available on the current desktop."
+                        : "No saved windows from this Work Set can be managed on the current desktop."
+                    self.lastErrorMessage = ([baseMessage] + recoveryMessages).joined(separator: " ")
+                    self.lastActionMessage = nil
+                }
+                return
             }
-            return
+
+            if workSet.backdropEnabled {
+                updateWorkSetBackdropPresentation(
+                    for: workSet,
+                    context: refreshedContext,
+                    activeWindowIDs: activeWindowIDs,
+                    resetDismissal: true
+                )
+            }
+
+            let transitionReset = await resetWorkSetScopeForActivation(
+                scopeKey: workSet.scopeKey,
+                incomingWorkSetID: workSet.id,
+                incomingLayoutMode: workSet.layoutMode,
+                preserveBackdrop: workSet.backdropEnabled
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+
+            if workSet.backdropEnabled {
+                updateWorkSetBackdropPresentation(
+                    for: workSet,
+                    context: refreshedContext,
+                    activeWindowIDs: activeWindowIDs,
+                    resetDismissal: false
+                )
+            }
+
+            let activeStackResult = await stackWorkSetWindows(
+                manageableResolvedMembers.compactMap(\.matchedWindow).reversed(),
+                primaryWindowID: manageableResolvedMembers.first?.matchedWindow?.id,
+                requiresBackdropClearance: workSet.backdropEnabled
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+            let scopeFloatCleanup: (updated: Int, failed: Int)
+            if transitionReset.layoutResetAttempted && transitionReset.layoutResetSucceeded {
+                scopeFloatCleanup = (0, 0)
+            } else {
+                scopeFloatCleanup = await normalizeWorkSetScopeToFloatingIfNeeded(scopeKey: workSet.scopeKey)
+            }
+
+            await MainActor.run {
+                self.setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
+
+                var issues = recoveryMessages
+                if sameAppCount > 0 {
+                    issues.append("Used \(sameAppCount) same-app fallback window(s).")
+                }
+                if moveResult.moved > 0 {
+                    issues.append("Pulled \(moveResult.moved) window(s) in from another desktop or display.")
+                }
+                if limitedResolvedMembers.count > 0 {
+                    issues.append("Skipped \(limitedResolvedMembers.count) limited member window(s).")
+                }
+                if missingCount > 0 {
+                    issues.append("\(missingCount) member(s) were missing.")
+                }
+                if transitionReset.failed > 0 {
+                    issues.append("Could not fully clear \(transitionReset.failed) leftover tiled window(s).")
+                }
+                if transitionReset.layoutResetAttempted && !transitionReset.layoutResetSucceeded {
+                    issues.append("Could not fully leave tiled desktop mode.")
+                }
+                let failedCount = moveResult.failed
+                    + activeStackResult.failed
+                    + scopeFloatCleanup.failed
+                    + (activeStackResult.primaryFocused ? 0 : 1)
+                if failedCount > 0 {
+                    issues.append("\(failedCount) window operation(s) failed.")
+                }
+
+                self.lastActionMessage = "Activated Work Set \(workSet.name)."
+                self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+            }
+
+        case .tiled:
+            guard !manageableResolvedMembers.isEmpty else {
+                await MainActor.run {
+                    let baseMessage = limitedResolvedMembers.isEmpty
+                        ? "No saved windows from this Work Set are available on the current desktop."
+                        : "No saved windows from this Work Set can be tiled on the current desktop."
+                    self.lastErrorMessage = ([baseMessage] + recoveryMessages).joined(separator: " ")
+                    self.lastActionMessage = nil
+                }
+                return
+            }
+
+            setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
+
+            rememberOriginalDesktopLayoutBeforeTiledWorkSetOverrideIfNeeded(
+                scopeKey: workSet.scopeKey,
+                snapshot: latestLiveStateSnapshot ?? liveStateSnapshot
+            )
+
+            if workSet.backdropEnabled {
+                updateWorkSetBackdropPresentation(
+                    for: workSet,
+                    context: refreshedContext,
+                    activeWindowIDs: activeWindowIDs,
+                    resetDismissal: true
+                )
+            }
+
+            let transitionReset = await resetWorkSetScopeForActivation(
+                scopeKey: workSet.scopeKey,
+                incomingWorkSetID: workSet.id,
+                incomingLayoutMode: workSet.layoutMode,
+                preserveBackdrop: workSet.backdropEnabled
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+
+            if workSet.backdropEnabled {
+                updateWorkSetBackdropPresentation(
+                    for: workSet,
+                    context: refreshedContext,
+                    activeWindowIDs: activeWindowIDs,
+                    resetDismissal: false
+                )
+            }
+
+            let tiledResult = await applyTiledWorkSetLayout(
+                scopeKey: workSet.scopeKey,
+                scopeWindows: visibleWindowsForWorkSetScope(workSet.scopeKey, in: latestLiveStateSnapshot ?? liveStateSnapshot),
+                activeWindows: manageableResolvedMembers.compactMap(\.matchedWindow),
+                focusPrimary: true
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+
+            await MainActor.run {
+                self.setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
+
+                var issues = recoveryMessages
+                if sameAppCount > 0 {
+                    issues.append("Used \(sameAppCount) same-app fallback window(s).")
+                }
+                if moveResult.moved > 0 {
+                    issues.append("Pulled \(moveResult.moved) window(s) in from another desktop or display.")
+                }
+                if limitedResolvedMembers.count > 0 {
+                    issues.append("Skipped \(limitedResolvedMembers.count) limited member window(s).")
+                }
+                if missingCount > 0 {
+                    issues.append("\(missingCount) member(s) were missing.")
+                }
+                if transitionReset.failed > 0 {
+                    issues.append("Could not fully clear \(transitionReset.failed) leftover tiled window(s).")
+                }
+                let failedCount = moveResult.failed
+                    + (transitionReset.layoutResetAttempted && !transitionReset.layoutResetSucceeded ? 1 : 0)
+                    + tiledResult.failed
+                    + (tiledResult.primaryFocused ? 0 : 1)
+                if failedCount > 0 {
+                    issues.append("\(failedCount) window operation(s) failed.")
+                }
+
+                self.lastActionMessage = "Activated Work Set \(workSet.name)."
+                self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+            }
+
+        case .template:
+            guard let linkedTemplateID = workSet.linkedTemplateID else {
+                await MainActor.run {
+                    self.lastErrorMessage = "Choose a linked template for this Work Set first."
+                    self.lastActionMessage = nil
+                }
+                return
+            }
+            guard let template = windowLayoutTemplate(withID: linkedTemplateID) else {
+                await MainActor.run {
+                    self.lastErrorMessage = "Linked template is missing."
+                    self.lastActionMessage = nil
+                }
+                return
+            }
+
+            let transitionReset = await resetWorkSetScopeForActivation(
+                scopeKey: workSet.scopeKey,
+                incomingWorkSetID: workSet.id,
+                incomingLayoutMode: workSet.layoutMode,
+                preserveBackdrop: false
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+
+            let templateResult = await performTemplateApply(
+                template: template,
+                candidateWindows: manageableResolvedMembers.compactMap(\.matchedWindow),
+                display: refreshedContext.display,
+                spaceIndex: refreshedContext.scopeKey.spaceIndex,
+                requireMatchingDisplayShape: true,
+                noMatchesMessage: "No saved windows from this Work Set matched the linked template on this desktop."
+            )
+            guard isCurrentWorkSetActivation(requestID) else { return }
+
+            if let errorMessage = templateResult.errorMessage {
+                await MainActor.run {
+                    self.lastErrorMessage = errorMessage
+                    self.lastActionMessage = nil
+                }
+                return
+            }
+
+            updateWorkSetBackdropPresentation(
+                for: workSet,
+                context: refreshedContext,
+                activeWindowIDs: activeWindowIDs,
+                resetDismissal: true
+            )
+
+            let primaryFocused: Bool
+            if let primaryWindow = manageableResolvedMembers.first?.matchedWindow {
+                primaryFocused = await focusWindowWithRestore(
+                    windowID: primaryWindow.id,
+                    knownWindow: primaryWindow
+                )
+            } else {
+                primaryFocused = false
+            }
+            guard isCurrentWorkSetActivation(requestID) else { return }
+            let scopeFloatCleanup: (updated: Int, failed: Int)
+            if transitionReset.layoutResetAttempted && transitionReset.layoutResetSucceeded {
+                scopeFloatCleanup = (0, 0)
+            } else {
+                scopeFloatCleanup = await normalizeWorkSetScopeToFloatingIfNeeded(scopeKey: workSet.scopeKey)
+            }
+
+            await MainActor.run {
+                self.setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
+
+                var issues = recoveryMessages
+                if sameAppCount > 0 {
+                    issues.append("Used \(sameAppCount) same-app fallback window(s).")
+                }
+                if moveResult.moved > 0 {
+                    issues.append("Pulled \(moveResult.moved) window(s) in from another desktop or display.")
+                }
+                if templateResult.emptyConstrainedSlotCount > 0 {
+                    issues.append("Left \(templateResult.emptyConstrainedSlotCount) constrained slot(s) empty.")
+                }
+                if templateResult.extraWindowCount > 0 {
+                    issues.append("Left \(templateResult.extraWindowCount) extra eligible window(s) unchanged.")
+                }
+                if templateResult.limitedCount > 0 {
+                    issues.append("Skipped \(templateResult.limitedCount) limited member window(s).")
+                }
+                if missingCount > 0 {
+                    issues.append("\(missingCount) member(s) were missing.")
+                }
+                if transitionReset.failed > 0 {
+                    issues.append("Could not fully clear \(transitionReset.failed) leftover tiled window(s).")
+                }
+                if transitionReset.layoutResetAttempted && !transitionReset.layoutResetSucceeded {
+                    issues.append("Could not fully leave tiled desktop mode.")
+                }
+                let failedCount = moveResult.failed
+                    + templateResult.failedCount
+                    + scopeFloatCleanup.failed
+                    + (primaryFocused ? 0 : 1)
+                if failedCount > 0 {
+                    issues.append("\(failedCount) window operation(s) failed.")
+                }
+
+                self.lastActionMessage = "Activated Work Set \(workSet.name)."
+                self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+            }
         }
 
-        let activeWindowIDs = Set(activeResolvedMembers.compactMap { $0.matchedWindow?.id })
-        let anchorWindow = workSetBackdropAnchorWindow(
-            scopeKey: workSet.scopeKey,
-            excluding: activeWindowIDs
+        await refreshLiveState()
+    }
+
+    private func isCurrentWorkSetActivation(_ requestID: Int) -> Bool {
+        !Task.isCancelled && workSetActivationRequestID == requestID
+    }
+
+    private func workSetActivationCandidateWindows(
+        in snapshot: LiveStateSnapshot?,
+        scopeKey: WorkSetScopeKey? = nil
+    ) -> [WindowState] {
+        guard let snapshot else { return [] }
+        return snapshot.windows.filter { window in
+            if let scopeKey,
+               (window.space != scopeKey.spaceIndex || window.display != scopeKey.displayID) {
+                return false
+            }
+            guard !window.isHidden,
+                  window.isVisible || window.isMinimized else {
+                return false
+            }
+            return !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: window.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedRole: window.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedSubrole: window.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                in: snapshot
+            )
+        }
+        .sorted(by: workSetWindowSort)
+    }
+
+    private func restoreMinimizedWorkSetMembers(
+        _ resolvedMembers: [WorkSetResolvedMember]
+    ) async -> (restored: Int, failed: Int) {
+        var seenWindowIDs = Set<Int>()
+        let minimizedWindows = resolvedMembers.compactMap(\.matchedWindow).filter { window in
+            window.isMinimized && seenWindowIDs.insert(window.id).inserted
+        }
+        guard !minimizedWindows.isEmpty else { return (0, 0) }
+
+        var restored = 0
+        var failed = 0
+        for window in minimizedWindows {
+            guard !Task.isCancelled else { break }
+            if await restoreMinimizedWorkSetWindow(window) {
+                restored += 1
+            } else {
+                failed += 1
+            }
+        }
+        return (restored, failed)
+    }
+
+    private func mergeWorkSetRestoreResults(
+        _ lhs: (restored: Int, failed: Int),
+        _ rhs: (restored: Int, failed: Int)
+    ) -> (restored: Int, failed: Int) {
+        (lhs.restored + rhs.restored, lhs.failed + rhs.failed)
+    }
+
+    private func restoreMinimizedWorkSetWindow(_ window: WindowState) async -> Bool {
+        let restore = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", "--deminimize", String(window.id)], timeout: 1.5)
         )
-        clearDismissedWorkSetBackdrop(for: workSet.scopeKey)
+        await MainActor.run {
+            appendCommandLog(from: restore)
+        }
+        if restore.isSuccess {
+            return true
+        }
+
+        guard window.hasAXReference else { return false }
+        let appElement = AXUIElementCreateApplication(pid_t(window.pid))
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success,
+              let windows = windowsRef as? [AXUIElement],
+              let targetWindow = matchingAXWindow(for: window, in: windows) else {
+            return false
+        }
+
+        let unminimized = AXUIElementSetAttributeValue(
+            targetWindow,
+            kAXMinimizedAttribute as CFString,
+            kCFBooleanFalse
+        ) == .success
+        if unminimized {
+            _ = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString)
+        }
+        return unminimized
+    }
+
+    private func launchMissingAppsForWorkSet(_ workSet: WorkSet) async -> WorkSetLaunchMissingAppsResult {
+        let candidates = workSetActivationCandidateWindows(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+        let resolvedMembers = resolveWorkSetMembers(workSet.members, in: candidates)
+        let missingMembers = resolvedMembers.compactMap { resolved -> WorkSetMember? in
+            resolved.matchedWindow == nil ? resolved.member : nil
+        }
+        guard !missingMembers.isEmpty else { return WorkSetLaunchMissingAppsResult() }
+
+        var result = WorkSetLaunchMissingAppsResult()
+        var launchedMembersByKey: [String: WorkSetMember] = [:]
+
+        for member in missingMembers {
+            guard !Task.isCancelled else { break }
+            guard let launchKey = workSetLaunchKey(for: member),
+                  launchedMembersByKey[launchKey] == nil,
+                  !workSetMemberAppIsRunning(member) else {
+                continue
+            }
+
+            let launched = await launchWorkSetMemberApp(member)
+            if launched {
+                launchedMembersByKey[launchKey] = member
+                result.launched += 1
+            } else {
+                result.failed += 1
+            }
+        }
+
+        guard !launchedMembersByKey.isEmpty else { return result }
+
+        var unresolvedLaunchKeys = Set(launchedMembersByKey.keys)
+        for attempt in 0..<16 {
+            guard !Task.isCancelled else { break }
+            try? await Task.sleep(for: .milliseconds(250))
+            await refreshLiveState()
+
+            let refreshedCandidates = workSetActivationCandidateWindows(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+            let refreshedResolvedMembers = resolveWorkSetMembers(workSet.members, in: refreshedCandidates)
+            for resolved in refreshedResolvedMembers where resolved.matchedWindow != nil {
+                if let launchKey = workSetLaunchKey(for: resolved.member) {
+                    unresolvedLaunchKeys.remove(launchKey)
+                }
+            }
+
+            if unresolvedLaunchKeys.isEmpty || attempt == 15 {
+                break
+            }
+        }
+
+        result.noWindow = unresolvedLaunchKeys.count
+        return result
+    }
+
+    private func workSetLaunchKey(for member: WorkSetMember) -> String? {
+        if let bundleIdentifier = member.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !bundleIdentifier.isEmpty {
+            return "bundle:\(bundleIdentifier.lowercased())"
+        }
+        let appName = normalizedAppRuleKey(member.appName)
+        return appName.isEmpty ? nil : "app:\(appName)"
+    }
+
+    private func workSetMemberAppIsRunning(_ member: WorkSetMember) -> Bool {
+        if let bundleIdentifier = member.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !bundleIdentifier.isEmpty,
+           !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty {
+            return true
+        }
+
+        let appName = normalizedAppRuleKey(member.appName)
+        guard !appName.isEmpty else { return false }
+        return NSWorkspace.shared.runningApplications.contains { runningApp in
+            normalizedAppRuleKey(runningApp.localizedName ?? "") == appName
+        }
+    }
+
+    private func launchWorkSetMemberApp(_ member: WorkSetMember) async -> Bool {
+        let command: ShellCommand
+        if let bundleURLPath = member.bundleURLPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !bundleURLPath.isEmpty,
+           FileManager.default.fileExists(atPath: bundleURLPath) {
+            command = ShellCommand("/usr/bin/open", [bundleURLPath], timeout: 3.0)
+        } else if let bundleIdentifier = member.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !bundleIdentifier.isEmpty {
+            command = ShellCommand("/usr/bin/open", ["-b", bundleIdentifier], timeout: 3.0)
+        } else {
+            let appName = member.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !appName.isEmpty else { return false }
+            command = ShellCommand("/usr/bin/open", ["-a", appName], timeout: 3.0)
+        }
+
+        let launch = await doctorService.runSupportCommand(command)
+        await MainActor.run {
+            appendCommandLog(from: launch)
+        }
+        return launch.isSuccess
+    }
+
+    private func workSetActivationRecoveryMessages(
+        restoredMinimized: Int,
+        failedMinimizedRestore: Int,
+        launchResult: WorkSetLaunchMissingAppsResult
+    ) -> [String] {
+        var messages: [String] = []
+        if restoredMinimized > 0 {
+            messages.append("Restored \(restoredMinimized) minimized window(s).")
+        }
+        if failedMinimizedRestore > 0 {
+            messages.append("Could not restore \(failedMinimizedRestore) minimized window(s).")
+        }
+        if launchResult.launched > 0 {
+            messages.append("Launched \(launchResult.launched) app(s).")
+        }
+        if launchResult.noWindow > 0 {
+            messages.append("\(launchResult.noWindow) launched app(s) opened no window.")
+        }
+        if launchResult.failed > 0 {
+            messages.append("\(launchResult.failed) app launch(es) failed.")
+        }
+        return messages
+    }
+
+    private func resetWorkSetScopeForActivation(
+        scopeKey: WorkSetScopeKey,
+        incomingWorkSetID: UUID,
+        incomingLayoutMode: WorkSetLayoutMode,
+        preserveBackdrop: Bool
+    ) async -> (updated: Int, failed: Int, layoutResetAttempted: Bool, layoutResetSucceeded: Bool) {
+        guard let activeID = activeWorkSetID(for: scopeKey),
+              activeID != incomingWorkSetID,
+              let activeWorkSet = workSet(withID: activeID),
+              activeWorkSet.layoutMode == .tiled else {
+            return (0, 0, false, true)
+        }
+
+        if !preserveBackdrop {
+            hideWorkSetBackdrop(for: scopeKey)
+        }
+
+        if incomingLayoutMode == .tiled {
+            return (0, 0, false, true)
+        }
+
+        let switchedToFloat = await runBestEffortYabaiCommand(
+            ["-m", "space", String(scopeKey.spaceIndex), "--layout", "float"],
+            timeout: 1.5,
+            log: true
+        )
+        if switchedToFloat {
+            savedDesktopLayoutBeforeTiledWorkSetByScope.removeValue(forKey: scopeKey)
+            savedWindowFramesBeforeTiledWorkSetByScope.removeValue(forKey: scopeKey)
+        }
+
+        return (0, 0, true, switchedToFloat)
+    }
+
+    private func updateWorkSetBackdropPresentation(
+        for workSet: WorkSet,
+        context: WorkSetDesktopContext,
+        activeWindowIDs: Set<Int>,
+        resetDismissal: Bool
+    ) {
+        if resetDismissal {
+            clearDismissedWorkSetBackdrop(for: workSet.scopeKey)
+        }
         if workSet.backdropEnabled {
+            let anchorWindow = workSetBackdropAnchorWindow(
+                scopeKey: workSet.scopeKey,
+                excluding: activeWindowIDs
+            )
             showWorkSetBackdrop(for: workSet, display: context.display, anchorWindow: anchorWindow)
         } else {
             hideWorkSetBackdrop(for: workSet.scopeKey)
         }
+    }
 
-        let activeStackResult = await stackWorkSetWindows(
-            activeResolvedMembers.compactMap(\.matchedWindow).reversed(),
-            primaryWindowID: activeResolvedMembers.first?.matchedWindow?.id
+    private func visibleWindowsForWorkSetScope(
+        _ scopeKey: WorkSetScopeKey,
+        in snapshot: LiveStateSnapshot?
+    ) -> [WindowState] {
+        guard let snapshot else { return [] }
+        return snapshot.windows.filter {
+            $0.space == scopeKey.spaceIndex &&
+            $0.isVisible &&
+            !$0.isMinimized &&
+            !$0.isHidden &&
+            !isBackdropSurfaceWindow(
+                $0,
+                normalizedTitle: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedRole: $0.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedSubrole: $0.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                in: snapshot
+            )
+        }
+        .sorted(by: workSetWindowSort)
+    }
+
+    private func rememberOriginalDesktopLayoutBeforeTiledWorkSetOverrideIfNeeded(
+        scopeKey: WorkSetScopeKey,
+        snapshot: LiveStateSnapshot?
+    ) {
+        guard savedDesktopLayoutBeforeTiledWorkSetByScope[scopeKey] == nil,
+              let layout = snapshot?.spaces.first(where: { $0.index == scopeKey.spaceIndex && $0.displayId == scopeKey.displayID })?.layout?.lowercased(),
+              !layout.isEmpty else {
+            return
+        }
+        savedDesktopLayoutBeforeTiledWorkSetByScope[scopeKey] = layout
+        if savedWindowFramesBeforeTiledWorkSetByScope[scopeKey] == nil,
+           let snapshot {
+            let windows = visibleWindowsForWorkSetScope(scopeKey, in: snapshot).filter(\.isRuntimeManageable)
+            savedWindowFramesBeforeTiledWorkSetByScope[scopeKey] = Dictionary(
+                uniqueKeysWithValues: windows.map { ($0.id, WorkSetSavedWindowFrame(window: $0)) }
+            )
+        }
+    }
+
+    func restoreSavedTiledWorkSetDesktopLayoutIfNeeded(scopeKey: WorkSetScopeKey) async -> Bool {
+        guard let savedLayout = savedDesktopLayoutBeforeTiledWorkSetByScope[scopeKey] else {
+            return true
+        }
+        let restored = await runBestEffortYabaiCommand(
+            ["-m", "space", String(scopeKey.spaceIndex), "--layout", savedLayout],
+            timeout: 1.5,
+            log: true
         )
+        if restored {
+            savedDesktopLayoutBeforeTiledWorkSetByScope.removeValue(forKey: scopeKey)
+            savedWindowFramesBeforeTiledWorkSetByScope.removeValue(forKey: scopeKey)
+        }
+        return restored
+    }
 
-        await MainActor.run {
-            self.setActiveWorkSetID(workSet.id, for: workSet.scopeKey)
-
-            let sameAppCount = resolvedMembers.filter { $0.status == .sameApp }.count
-            let missingCount = resolvedMembers.filter { $0.status == .missing }.count
-            var issues: [String] = []
-            if sameAppCount > 0 {
-                issues.append("Used \(sameAppCount) same-app fallback window(s).")
-            }
-            if missingCount > 0 {
-                issues.append("\(missingCount) member(s) were missing.")
-            }
-            let failedCount = activeStackResult.failed + (activeStackResult.primaryFocused ? 0 : 1)
-            if failedCount > 0 {
-                issues.append("\(failedCount) window operation(s) failed.")
-            }
-
-            self.lastActionMessage = "Activated Work Set \(workSet.name)."
-            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+    private func restoreSavedWindowFramesAfterTiledWorkSetIfNeeded(
+        scopeKey: WorkSetScopeKey,
+        windows: [WindowState]? = nil,
+        refreshAfterRestore: Bool = true
+    ) async -> (updated: Int, failed: Int) {
+        guard let savedFrames = savedWindowFramesBeforeTiledWorkSetByScope.removeValue(forKey: scopeKey),
+              !savedFrames.isEmpty else {
+            return (0, 0)
         }
 
+        let targetWindows = (windows ?? visibleWindowsForWorkSetScope(scopeKey, in: latestLiveStateSnapshot ?? liveStateSnapshot))
+            .filter(\.isRuntimeManageable)
+        var updated = 0
+        var failed = 0
+
+        for window in targetWindows {
+            guard !Task.isCancelled else { break }
+            guard let savedFrame = savedFrames[window.id] else { continue }
+
+            let resizeResult = await doctorService.runSupportCommand(
+                yabaiCommand(
+                    ["-m", "window", String(window.id), "--resize", "abs:\(Int(savedFrame.width)):\(Int(savedFrame.height))"],
+                    timeout: 1.5
+                )
+            )
+            await MainActor.run {
+                appendCommandLog(from: resizeResult)
+            }
+
+            let moveResult = await doctorService.runSupportCommand(
+                yabaiCommand(
+                    ["-m", "window", String(window.id), "--move", "abs:\(Int(savedFrame.x)):\(Int(savedFrame.y))"],
+                    timeout: 1.5
+                )
+            )
+            await MainActor.run {
+                appendCommandLog(from: moveResult)
+            }
+
+            if resizeResult.isSuccess && moveResult.isSuccess {
+                updated += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        if refreshAfterRestore, updated > 0 {
+            try? await Task.sleep(for: .milliseconds(60))
+            await refreshLiveState()
+        }
+
+        return (updated, failed)
+    }
+
+    private func normalizeWorkSetScopeToFloatingIfNeeded(
+        scopeKey: WorkSetScopeKey
+    ) async -> (updated: Int, failed: Int) {
+        var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        if snapshot == nil {
+            await refreshLiveState()
+            snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        }
+        let windows = visibleWindowsForWorkSetScope(scopeKey, in: snapshot)
+            .filter { $0.isRuntimeManageable && !$0.floating }
+        guard !windows.isEmpty else { return (0, 0) }
+
+        let result = await setFloatingStateForWindows(windows, shouldFloat: true)
+        if result.updated > 0 {
+            try? await Task.sleep(for: .milliseconds(60))
+            await refreshLiveState()
+        }
+        return result
+    }
+
+    private func applyTiledWorkSetLayout(
+        scopeKey: WorkSetScopeKey,
+        scopeWindows: [WindowState],
+        activeWindows: [WindowState],
+        focusPrimary: Bool
+    ) async -> (updated: Int, failed: Int, primaryFocused: Bool) {
+        guard !activeWindows.isEmpty else { return (0, 0, false) }
+
+        let activeWindowIDs = Set(activeWindows.map(\.id))
+        let nonMembers = scopeWindows.filter {
+            !activeWindowIDs.contains($0.id) && $0.isRuntimeManageable
+        }
+
+        let floatedNonMembers = await setFloatingStateForWindows(
+            nonMembers.filter { !$0.floating },
+            shouldFloat: true
+        )
+        if floatedNonMembers.updated > 0 {
+            try? await Task.sleep(for: .milliseconds(35))
+        }
+
+        let rebuildResult = await rebuildBalancedTileLayout(
+            spaceIndex: scopeKey.spaceIndex,
+            windows: activeWindows
+        )
+
+        let restackResult = await restackTiledWorkSetWindowsAboveBackdrop(
+            activeWindows.reversed(),
+            primaryWindow: focusPrimary ? activeWindows.first : nil
+        )
+
+        return (
+            updated: floatedNonMembers.updated + rebuildResult.updated + restackResult.updated,
+            failed: floatedNonMembers.failed + rebuildResult.failed + restackResult.failed,
+            primaryFocused: restackResult.primaryFocused
+        )
+    }
+
+    private func restackTiledWorkSetWindowsAboveBackdrop<S: Sequence>(
+        _ windows: S,
+        primaryWindow: WindowState?
+    ) async -> (updated: Int, failed: Int, primaryFocused: Bool) where S.Element == WindowState {
+        var updated = 0
+        var failed = 0
+
+        for window in windows {
+            guard !Task.isCancelled else { break }
+            let raised = await focusWorkSetStackWindow(window)
+            if raised {
+                updated += 1
+            } else {
+                failed += 1
+            }
+            try? await Task.sleep(for: .milliseconds(4))
+        }
+
+        let primaryFocused: Bool
+        if let primaryWindow {
+            primaryFocused = await focusWindowWithRestore(
+                windowID: primaryWindow.id,
+                knownWindow: primaryWindow
+            )
+        } else {
+            primaryFocused = true
+        }
+
+        return (updated, failed, primaryFocused)
+    }
+
+    private func prepareWorkSetActivationScope(_ scopeKey: WorkSetScopeKey) async -> Bool {
+        for attempt in 0..<6 {
+            await refreshLiveState()
+            if visibleWorkSetContexts.contains(where: { $0.scopeKey == scopeKey }) {
+                return true
+            }
+            if attempt < 5 {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        return visibleWorkSetContexts.contains(where: { $0.scopeKey == scopeKey })
+    }
+
+    private func moveWorkSetWindowsIntoScope(
+        _ windows: [WindowState],
+        scopeKey: WorkSetScopeKey
+    ) async -> (moved: Int, failed: Int) {
+        guard !windows.isEmpty else { return (0, 0) }
+
+        var moved = 0
+        var failed = 0
+        let targetDisplay = workSetContext(for: scopeKey)?.display
+
+        for window in windows {
+            guard !Task.isCancelled else { break }
+            guard !workSetWindowMatchesScope(window, scopeKey: scopeKey, targetDisplay: targetDisplay) else {
+                continue
+            }
+
+            let movedIntoScope = await moveWindowIntoWorkSetScope(
+                window: window,
+                scopeKey: scopeKey,
+                targetDisplay: targetDisplay
+            )
+            if movedIntoScope {
+                moved += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        return (moved, failed)
+    }
+
+    private func moveWindowIntoWorkSetScope(
+        window: WindowState,
+        scopeKey: WorkSetScopeKey,
+        targetDisplay: DisplayState?
+    ) async -> Bool {
+        let windowID = window.id
+        let primaryMove = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", String(windowID), "--space", String(scopeKey.spaceIndex)], timeout: 1.8)
+        )
+        await MainActor.run {
+            appendCommandLog(from: primaryMove)
+        }
+
+        if primaryMove.isSuccess {
+            if await workSetWindowIsInScope(windowID: windowID, scopeKey: scopeKey, targetDisplay: targetDisplay) {
+                return true
+            }
+        }
+
+        let displayMove = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", String(windowID), "--display", String(scopeKey.displayID)], timeout: 1.8)
+        )
+        await MainActor.run {
+            appendCommandLog(from: displayMove)
+        }
+        if displayMove.isSuccess {
+            let finalizeMove = await doctorService.runSupportCommand(
+                yabaiCommand(["-m", "window", String(windowID), "--space", String(scopeKey.spaceIndex)], timeout: 1.8)
+            )
+            await MainActor.run {
+                appendCommandLog(from: finalizeMove)
+            }
+
+            if finalizeMove.isSuccess,
+               await workSetWindowIsInScope(windowID: windowID, scopeKey: scopeKey, targetDisplay: targetDisplay) {
+                return true
+            }
+        }
+
+        guard let targetDisplay,
+              window.hasAXReference,
+              window.canMove else {
+            return false
+        }
+
+        return await moveWindowIntoWorkSetScopeUsingAccessibility(
+            window: window,
+            scopeKey: scopeKey,
+            targetDisplay: targetDisplay
+        )
+    }
+
+    private func workSetWindowIsInScope(
+        windowID: Int,
+        scopeKey: WorkSetScopeKey,
+        targetDisplay: DisplayState?
+    ) async -> Bool {
+        try? await Task.sleep(for: .milliseconds(140))
         await refreshLiveState()
+        guard let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot,
+              let updated = snapshot.windows.first(where: { $0.id == windowID }) else {
+            return false
+        }
+        let resolvedTargetDisplay = snapshot.displays.first(where: { $0.id == scopeKey.displayID }) ?? targetDisplay
+        return workSetWindowMatchesScope(updated, scopeKey: scopeKey, targetDisplay: resolvedTargetDisplay)
+    }
+
+    private func moveWindowIntoWorkSetScopeUsingAccessibility(
+        window: WindowState,
+        scopeKey: WorkSetScopeKey,
+        targetDisplay: DisplayState
+    ) async -> Bool {
+        let appPID = pid_t(window.pid)
+        NSRunningApplication(processIdentifier: appPID)?.activate(options: [.activateIgnoringOtherApps])
+
+        let appElement = AXUIElementCreateApplication(appPID)
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success,
+              let windows = windowsRef as? [AXUIElement],
+              !windows.isEmpty,
+              let targetWindow = matchingAXWindow(for: window, in: windows) else {
+            return false
+        }
+
+        if window.isMinimized || axBoolValue(targetWindow, kAXMinimizedAttribute as CFString) == true {
+            _ = AXUIElementSetAttributeValue(targetWindow, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+
+        var targetPoint = workSetAccessibilityTargetPoint(for: window, targetDisplay: targetDisplay)
+        guard let positionValue = AXValueCreate(.cgPoint, &targetPoint) else {
+            return false
+        }
+
+        let positionSet = AXUIElementSetAttributeValue(
+            targetWindow,
+            kAXPositionAttribute as CFString,
+            positionValue
+        ) == .success
+        let raised = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString) == .success
+
+        guard positionSet || raised else {
+            return false
+        }
+
+        return await workSetWindowIsInScope(
+            windowID: window.id,
+            scopeKey: scopeKey,
+            targetDisplay: targetDisplay
+        )
+    }
+
+    private func workSetAccessibilityTargetPoint(
+        for window: WindowState,
+        targetDisplay: DisplayState
+    ) -> CGPoint {
+        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        let sourceDisplay = snapshot?.displays.first(where: { $0.id == window.display })
+
+        let horizontalInset = min(max(targetDisplay.frameW * 0.04, 28), 84)
+        let verticalInset = min(max(targetDisplay.frameH * 0.05, 42), 108)
+        let fallbackX = targetDisplay.frameX + horizontalInset
+        let fallbackY = targetDisplay.frameY + verticalInset
+
+        let desiredX: Double
+        let desiredY: Double
+        if let sourceDisplay {
+            desiredX = targetDisplay.frameX + (window.frameX - sourceDisplay.frameX)
+            desiredY = targetDisplay.frameY + (window.frameY - sourceDisplay.frameY)
+        } else {
+            desiredX = fallbackX
+            desiredY = fallbackY
+        }
+
+        let maxX = max(fallbackX, targetDisplay.frameX + targetDisplay.frameW - max(window.frameW, 180) - horizontalInset)
+        let maxY = max(fallbackY, targetDisplay.frameY + targetDisplay.frameH - max(window.frameH, 140) - verticalInset)
+
+        return CGPoint(
+            x: min(max(desiredX, fallbackX), maxX),
+            y: min(max(desiredY, fallbackY), maxY)
+        )
+    }
+
+    private func workSetWindowMatchesScope(
+        _ window: WindowState,
+        scopeKey: WorkSetScopeKey,
+        targetDisplay: DisplayState?
+    ) -> Bool {
+        guard window.space == scopeKey.spaceIndex,
+              window.display == scopeKey.displayID else {
+            return false
+        }
+        guard let targetDisplay else {
+            return true
+        }
+        return workSetWindowAppearsOnDisplay(window, display: targetDisplay)
+    }
+
+    private func workSetWindowAppearsOnDisplay(_ window: WindowState, display: DisplayState) -> Bool {
+        let displayRect = CGRect(
+            x: display.frameX,
+            y: display.frameY,
+            width: display.frameW,
+            height: display.frameH
+        )
+        let windowRect = CGRect(
+            x: window.frameX,
+            y: window.frameY,
+            width: window.frameW,
+            height: window.frameH
+        )
+        guard !displayRect.isEmpty, !windowRect.isEmpty else {
+            return false
+        }
+
+        let center = CGPoint(x: windowRect.midX, y: windowRect.midY)
+        if displayRect.contains(center) {
+            return true
+        }
+
+        let intersection = displayRect.intersection(windowRect)
+        guard !intersection.isNull, !intersection.isEmpty else {
+            return false
+        }
+
+        let windowArea = max(windowRect.width * windowRect.height, 1)
+        let visibleShare = (intersection.width * intersection.height) / windowArea
+        return visibleShare >= 0.35
+    }
+
+    func requestActiveWorkSetOwnedLayoutSync() {
+        guard !workSetActivationInProgress else {
+            return
+        }
+        guard let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            return
+        }
+        scheduleActiveWorkSetOwnedLayoutSyncIfNeeded(using: snapshot)
+    }
+
+    private func scheduleActiveWorkSetOwnedLayoutSyncIfNeeded(using snapshot: LiveStateSnapshot) {
+        guard snapshot.source == .yabai, !snapshot.degraded else { return }
+        if activeWorkSetLayoutSyncTask != nil {
+            pendingActiveWorkSetLayoutSync = true
+            return
+        }
+
+        activeWorkSetLayoutSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.syncActiveWorkSetOwnedLayoutsIfNeeded()
+            self.activeWorkSetLayoutSyncTask = nil
+            if self.pendingActiveWorkSetLayoutSync {
+                self.pendingActiveWorkSetLayoutSync = false
+                self.requestActiveWorkSetOwnedLayoutSync()
+            }
+        }
+    }
+
+    private func syncActiveWorkSetOwnedLayoutsIfNeeded() async {
+        guard !Task.isCancelled else { return }
+        guard let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            return
+        }
+
+        let visibleContexts = visibleWorkSetContexts(in: snapshot)
+        let contextsByScope = Dictionary(uniqueKeysWithValues: visibleContexts.map { ($0.scopeKey, $0) })
+        let activeTiledWorkSets = workSets.filter {
+            activeWorkSetID(for: $0.scopeKey) == $0.id &&
+            $0.layoutMode == .tiled &&
+            contextsByScope[$0.scopeKey] != nil
+        }
+        let activeTiledScopeIDs = Set(activeTiledWorkSets.map { $0.scopeKey.id })
+
+        for scopeKey in savedDesktopLayoutBeforeTiledWorkSetByScope.keys.sorted(by: { $0.id < $1.id }) {
+            guard !Task.isCancelled else { return }
+            guard !activeTiledScopeIDs.contains(scopeKey.id),
+                  contextsByScope[scopeKey] != nil else {
+                continue
+            }
+            if await restoreSavedTiledWorkSetDesktopLayoutIfNeeded(scopeKey: scopeKey) {
+                lastWorkSetOwnedLayoutSyncSignatureByScope.removeValue(forKey: scopeKey.id)
+                await refreshLiveState()
+            }
+        }
+
+        for workSet in activeTiledWorkSets {
+            guard !Task.isCancelled else { return }
+            guard let signature = workSetOwnedLayoutSyncSignature(for: workSet, snapshot: snapshot),
+                  lastWorkSetOwnedLayoutSyncSignatureByScope[workSet.scopeKey.id] != signature,
+                  let context = contextsByScope[workSet.scopeKey] else {
+                continue
+            }
+
+            let scopeWindows = visibleWindowsForWorkSetScope(workSet.scopeKey, in: snapshot)
+            let resolvedMembers = resolveWorkSetMembers(workSet.members, in: scopeWindows)
+            let activeWindows = resolvedMembers.compactMap(\.matchedWindow).filter(\.isRuntimeManageable)
+            guard !activeWindows.isEmpty else {
+                lastWorkSetOwnedLayoutSyncSignatureByScope[workSet.scopeKey.id] = signature
+                continue
+            }
+
+            rememberOriginalDesktopLayoutBeforeTiledWorkSetOverrideIfNeeded(
+                scopeKey: workSet.scopeKey,
+                snapshot: snapshot
+            )
+
+            let result = await applyTiledWorkSetLayout(
+                scopeKey: workSet.scopeKey,
+                scopeWindows: scopeWindows,
+                activeWindows: activeWindows,
+                focusPrimary: false
+            )
+
+            updateWorkSetBackdropPresentation(
+                for: workSet,
+                context: context,
+                activeWindowIDs: Set(activeWindows.map(\.id)),
+                resetDismissal: false
+            )
+
+            if result.updated > 0 || result.failed > 0 {
+                await refreshLiveState()
+            }
+
+            let appliedSnapshot = latestLiveStateSnapshot ?? liveStateSnapshot ?? snapshot
+            lastWorkSetOwnedLayoutSyncSignatureByScope[workSet.scopeKey.id] =
+                workSetOwnedLayoutSyncSignature(for: workSet, snapshot: appliedSnapshot) ?? signature
+        }
+
+        lastWorkSetOwnedLayoutSyncSignatureByScope = lastWorkSetOwnedLayoutSyncSignatureByScope.filter { scopeID, _ in
+            activeTiledScopeIDs.contains(scopeID)
+        }
+    }
+
+    private func workSetOwnedLayoutSyncSignature(
+        for workSet: WorkSet,
+        snapshot: LiveStateSnapshot
+    ) -> String? {
+        guard snapshot.source == .yabai,
+              !snapshot.degraded,
+              snapshot.spaces.contains(where: { $0.index == workSet.scopeKey.spaceIndex && $0.displayId == workSet.scopeKey.displayID }) else {
+            return nil
+        }
+
+        let memberSignature = workSet.members.map { member in
+            [
+                member.id.uuidString.lowercased(),
+                normalizedAppRuleKey(member.appName),
+                normalizedWorkSetSyncMetadata(member.windowTitle),
+                normalizedWorkSetSyncMetadata(member.role),
+                normalizedWorkSetSyncMetadata(member.subrole),
+                member.lastSeenWindowID.map(String.init) ?? "",
+                member.lastSeenPID.map(String.init) ?? ""
+            ].joined(separator: ":")
+        }
+        .joined(separator: "|")
+
+        let windowSignature = visibleWindowsForWorkSetScope(workSet.scopeKey, in: snapshot)
+            .sorted { lhs, rhs in
+                if lhs.id != rhs.id { return lhs.id < rhs.id }
+                if lhs.space != rhs.space { return lhs.space < rhs.space }
+                return lhs.display < rhs.display
+            }
+            .map { window in
+                [
+                    String(window.id),
+                    String(window.space),
+                    String(window.display),
+                    window.floating ? "1" : "0",
+                    window.isRuntimeManageable ? "1" : "0"
+                ].joined(separator: ":")
+            }
+            .joined(separator: "|")
+
+        let layout = snapshot.spaces.first(where: {
+            $0.index == workSet.scopeKey.spaceIndex && $0.displayId == workSet.scopeKey.displayID
+        })?.layout?.lowercased() ?? "unknown"
+
+        return [
+            workSet.id.uuidString.lowercased(),
+            workSet.layoutMode.rawValue,
+            workSet.linkedTemplateID?.uuidString.lowercased() ?? "",
+            layout,
+            memberSignature,
+            windowSignature
+        ].joined(separator: "###")
+    }
+
+    private func normalizedWorkSetSyncMetadata(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
     }
 
     private func currentDesktopVisibleWindowsForBulkLayout(template: WindowLayoutTemplate? = nil) async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
@@ -795,6 +2061,7 @@ extension AppModel {
         var failed = 0
 
         for window in windows {
+            guard !Task.isCancelled else { break }
             let toggled = await setWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
             if toggled {
                 updated += 1
@@ -992,26 +2259,57 @@ extension AppModel {
 
     private func stackWorkSetWindows<S: Sequence>(
         _ windows: S,
-        primaryWindowID: Int?
+        primaryWindowID: Int?,
+        requiresBackdropClearance: Bool
     ) async -> (updated: Int, failed: Int, primaryFocused: Bool) where S.Element == WindowState {
+        let orderedWindows = Array(windows)
         var updated = 0
         var failed = 0
-        var primaryFocused = false
 
-        for window in windows {
-            let focused = await focusWindowWithRestore(windowID: window.id, knownWindow: window)
-            if focused {
+        for window in orderedWindows {
+            guard !Task.isCancelled else { break }
+            let raised: Bool
+            if requiresBackdropClearance {
+                raised = await focusWorkSetStackWindow(window)
+            } else {
+                raised = raiseWindowUsingAccessibilityOnly(
+                    windowID: window.id,
+                    bypassCooldown: true
+                )
+            }
+            if raised {
                 updated += 1
             } else {
                 failed += 1
             }
-            if primaryWindowID == window.id {
-                primaryFocused = focused
-            }
-            try? await Task.sleep(for: .milliseconds(10))
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+
+        let primaryFocused: Bool
+        if let primaryWindowID,
+           let primaryWindow = orderedWindows.first(where: { $0.id == primaryWindowID }) {
+            primaryFocused = await focusWindowWithRestore(windowID: primaryWindowID, knownWindow: primaryWindow)
+        } else {
+            primaryFocused = true
         }
 
         return (updated, failed, primaryFocused)
+    }
+
+    private func focusWorkSetStackWindow(_ window: WindowState) async -> Bool {
+        let focus = await doctorService.runSupportCommand(
+            yabaiCommand(["-m", "window", "--focus", String(window.id)], timeout: 1.0)
+        )
+        await MainActor.run {
+            appendCommandLog(from: focus)
+        }
+        if focus.isSuccess {
+            return true
+        }
+        return raiseWindowUsingAccessibilityOnly(
+            windowID: window.id,
+            bypassCooldown: true
+        )
     }
 
     private func applyGridFrames(
@@ -1073,6 +2371,9 @@ extension AppModel {
         let packableIDs = Set(packable.map(\.id))
 
         for window in packable {
+            guard !Task.isCancelled else {
+                return (0, failedWindowIDs.count)
+            }
             let ensured = await ensureWindowFloatingState(window: window, shouldFloat: true)
             if !ensured {
                 failedWindowIDs.insert(window.id)
@@ -1087,16 +2388,19 @@ extension AppModel {
         }
         guard layoutResult.isSuccess else { return (0, packable.count) }
 
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(25))
 
         let rootWindow = packable[0]
         if !(await ensureWindowFloatingState(window: rootWindow, shouldFloat: false)) {
             failedWindowIDs.insert(rootWindow.id)
         }
 
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(25))
 
         for window in packable.dropFirst() {
+            guard !Task.isCancelled else {
+                return (0, failedWindowIDs.count)
+            }
             if let target = await largestManagedRetileTarget(spaceIndex: spaceIndex, allowedWindowIDs: packableIDs) {
                 _ = await focusRetileWindow(target.id)
                 await ensureSplitType(windowID: target.id, desired: target.frameW >= target.frameH ? "vertical" : "horizontal")
@@ -1106,12 +2410,12 @@ extension AppModel {
                 failedWindowIDs.insert(window.id)
             }
 
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(18))
             _ = await runBestEffortYabaiCommand(["-m", "space", "--balance"], timeout: 1.0, log: false)
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(12))
         }
 
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(25))
         _ = await runBestEffortYabaiCommand(["-m", "space", "--balance"], timeout: 1.0, log: false)
 
         let finalWindows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) ?? []
@@ -1134,6 +2438,10 @@ extension AppModel {
             return true
         }
 
+        return await toggleWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
+    }
+
+    private func toggleWindowFloatingSilently(window: WindowState, shouldFloat: Bool) async -> Bool {
         let toggle = await doctorService.runSupportCommand(
             yabaiCommand(["-m", "window", String(window.id), "--toggle", "float"], timeout: 1.5)
         )
@@ -1153,13 +2461,21 @@ extension AppModel {
     }
 
     private func ensureWindowFloatingState(window: WindowState, shouldFloat: Bool) async -> Bool {
-        for _ in 0..<5 {
+        if let current = await queryRuntimeWindow(windowID: window.id)?.isFloating, current == shouldFloat {
+            return true
+        }
+
+        for attempt in 0..<3 {
+            _ = await toggleWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
+            try? await Task.sleep(for: .milliseconds(20))
             if let current = await queryRuntimeWindow(windowID: window.id)?.isFloating, current == shouldFloat {
                 return true
             }
-            _ = await setWindowFloatingSilently(window: window, shouldFloat: shouldFloat)
-            try? await Task.sleep(for: .milliseconds(60))
+            if attempt < 2 {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
         }
+
         return await queryRuntimeWindow(windowID: window.id)?.isFloating == shouldFloat
     }
 
@@ -1175,7 +2491,7 @@ extension AppModel {
             timeout: 1.0,
             log: false
         )
-        try? await Task.sleep(for: .milliseconds(40))
+        try? await Task.sleep(for: .milliseconds(15))
     }
 
     private func focusRetileWindow(_ windowID: Int) async -> Bool {

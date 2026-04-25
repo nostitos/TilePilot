@@ -55,6 +55,10 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         activateWorkSet(workSetID: workSetID)
         return
     }
+    if let workSetID = workSetIDForAssignWindowFeature(from: featureID) {
+        assignFocusedWindowToWorkSet(workSetID)
+        return
+    }
     if featureID == Self.cycleWorkSetsFeatureID {
         cycleWorkSetsCurrentDesktop()
         return
@@ -249,6 +253,12 @@ func featureDisabledReason(for definition: FeatureDefinition) -> String? {
             return "Work Set no longer exists."
         }
         return workSetActivationDisabledReason(workSet)
+    }
+    if let workSetID = workSetIDForAssignWindowFeature(from: definition.id) {
+        guard workSet(withID: workSetID) != nil else {
+            return "Work Set no longer exists."
+        }
+        return nil
     }
     if definition.id == Self.cycleWorkSetsFeatureID {
         return cycleWorkSetsDisabledReason()

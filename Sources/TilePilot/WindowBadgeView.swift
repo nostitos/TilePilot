@@ -26,6 +26,10 @@ struct WindowBadgeView: View {
         !pinnedContextItems.isEmpty
     }
 
+    private var assignableWorkSets: [WorkSet] {
+        model.workSetsForWindowAssignment(windowID: badge.windowID)
+    }
+
     private var openTilePilotRow: FeatureControlRow? {
         model.featureControlRow(forID: FeatureControlID(rawValue: "app.open-tilepilot"))
     }
@@ -103,6 +107,30 @@ struct WindowBadgeView: View {
             }
 
             if hasPinnedContextActions {
+                Divider()
+            }
+
+            if !assignableWorkSets.isEmpty {
+                Menu("Assign to Work Set") {
+                    ForEach(assignableWorkSets) { workSet in
+                        let alreadyAssigned = model.isWindowAssignedToWorkSet(windowID: badge.windowID, workSet: workSet)
+                        let leftTitle = model.workSetAssignmentMenuTitle(for: workSet, windowID: badge.windowID)
+                        let featureID = model.workSetAssignWindowFeatureID(for: workSet)
+                        let combo = model.featureControlRow(forID: featureID).flatMap { row in
+                            row.shortcutEntry.map { model.displayShortcutComboSymbols($0) }
+                                ?? row.assignedCombo.map { model.displayShortcutComboSymbols(from: $0) }
+                        }
+                        let title = menuTitle(left: leftTitle, rightShortcut: spacedSymbols(combo))
+
+                        Button {
+                            model.assignWindowToWorkSet(workSetID: workSet.id, windowID: badge.windowID)
+                        } label: {
+                            Label(title, systemImage: alreadyAssigned ? "checkmark" : "square.stack.3d.up")
+                        }
+                        .disabled(alreadyAssigned)
+                    }
+                }
+
                 Divider()
             }
 

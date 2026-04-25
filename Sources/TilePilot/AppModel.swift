@@ -37,6 +37,20 @@ struct TilePilotActionCard: Identifiable {
     let disabledReason: String?
 }
 
+struct WorkSetSavedWindowFrame: Sendable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    init(window: WindowState) {
+        self.x = window.frameX
+        self.y = window.frameY
+        self.width = window.frameW
+        self.height = window.frameH
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     enum RuntimeBurstSource: CaseIterable {
@@ -435,6 +449,14 @@ final class AppModel: ObservableObject {
     private var lastLiveStateUIPublishAt: Date?
     var latestLiveStateSnapshot: LiveStateSnapshot?
     var dismissedWorkSetBackdropIDsByScope: [WorkSetScopeKey: UUID] = [:]
+    var savedDesktopLayoutBeforeTiledWorkSetByScope: [WorkSetScopeKey: String] = [:]
+    var savedWindowFramesBeforeTiledWorkSetByScope: [WorkSetScopeKey: [Int: WorkSetSavedWindowFrame]] = [:]
+    var lastWorkSetOwnedLayoutSyncSignatureByScope: [String: String] = [:]
+    var activeWorkSetLayoutSyncTask: Task<Void, Never>?
+    var workSetActivationTask: Task<Void, Never>?
+    var workSetActivationRequestID = 0
+    var pendingActiveWorkSetLayoutSync = false
+    var workSetActivationInProgress = false
     private var overviewCachesDirty = true
     private var shortcutPresentationCachesDirty = true
     private var runtimeBurstSamples: [RuntimeBurstSource: [Date]] = [:]
@@ -695,6 +717,7 @@ final class AppModel: ObservableObject {
 
         let snapshot = makeLiveStateSnapshot(from: poll)
         latestLiveStateSnapshot = snapshot
+        _ = reconcileWorkSetScopesIfNeeded(using: snapshot)
         let contentSignature = liveStateContentSignature(for: snapshot)
         if lastLiveStateContentSignature == contentSignature {
             recordRuntimeBurst(.unchangedPoll)

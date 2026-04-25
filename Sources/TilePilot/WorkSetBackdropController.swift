@@ -43,7 +43,6 @@ final class WorkSetBackdropController {
 
     private func bind() {
         model.$workSetBackdropPresentations
-            .receive(on: RunLoop.main)
             .sink { [weak self] presentations in
                 self?.applyBackdropPresentations(presentations)
             }
@@ -208,6 +207,12 @@ final class WorkSetBackdropController {
         guard let rawInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
               !rawInfo.isEmpty else {
             return nil
+        }
+
+        if let orderIndex = window.windowServerOrderIndex,
+           rawInfo.indices.contains(orderIndex),
+           let number = rawInfo[orderIndex][kCGWindowNumber as String] as? NSNumber {
+            return CGWindowID(number.uint32Value)
         }
 
         let targetRect = resolvedGlobalRect(for: window)

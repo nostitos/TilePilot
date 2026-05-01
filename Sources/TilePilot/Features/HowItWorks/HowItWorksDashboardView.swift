@@ -8,6 +8,7 @@ struct HowItWorksDashboardView: View {
                     introCard
                     windowBehaviorSection
                     shortcutsSection
+                    recentWindowPickerSection
                     workSetsSection
                 }
                 .padding()
@@ -68,7 +69,7 @@ struct HowItWorksDashboardView: View {
             }
             conceptCard(
                 title: "Layout Outcomes",
-                summary: "Some layout actions leave windows floating. Others finish with windows tiled."
+                summary: "Some layout actions leave windows floating. Others finish with windows tiled. The name should tell you the result before you run it."
             ) {
                 LayoutOutcomeExplainerDiagram()
             }
@@ -79,6 +80,50 @@ struct HowItWorksDashboardView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Templates: saved floating layout geometry", systemImage: "rectangle.3.offgrid")
                     Label("Work Sets: saved same-desktop membership, order, optional backdrop, and per-set layout mode", systemImage: "square.stack.3d.up")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var recentWindowPickerSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Pick Windows to Tile")
+            conceptCard(
+                title: "What It Is For",
+                summary: "Use this when you want to tile only a small recent set instead of the whole desktop."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("The list is front-to-back window order on the current desktop", systemImage: "square.stack.3d.up")
+                    Label("The picker starts with your last selected count; first use starts at 4", systemImage: "number")
+                    Label("Click rows to include or exclude windows", systemImage: "checkmark.circle")
+                    Label("Window titles are shown first when they add useful context", systemImage: "textformat")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            conceptCard(
+                title: "Preview and Order",
+                summary: "The preview shows the exact floating grid result before you apply it."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Numbers in the list and preview are placement order", systemImage: "list.number")
+                    Label("Drag rows or preview tiles to change which window goes into each spot", systemImage: "arrow.up.arrow.down.square")
+                    Label("Spare grid cells are filled by stretching nearby windows vertically", systemImage: "arrow.down.to.line.compact")
+                    Label("Floating Grid moves the selected windows exactly; Auto-Tiled uses yabai tiling", systemImage: "rectangle.grid.2x2")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            conceptCard(
+                title: "Floating Grid vs Auto-Tiled",
+                summary: "Floating Grid is the predictable picker default. Auto-Tiled makes the selected windows the real yabai tiled set."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Floating Grid keeps windows floating and places them into exact slots", systemImage: "rectangle.3.group")
+                    Label("Auto-Tiled floats non-selected windows so only the selected set joins the tiled layout", systemImage: "rectangle.split.3x1")
+                    Label("AX-only apps can often use Floating Grid even when they cannot join yabai tiling", systemImage: "accessibility")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

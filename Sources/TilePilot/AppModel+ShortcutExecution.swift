@@ -83,6 +83,10 @@ func runFeatureControl(_ featureID: FeatureControlID, source: FeatureRunSource, 
         rebuildTileLayoutCurrentDesktop()
         return
     }
+    if featureID.rawValue == "screen.pick-windows-to-tile" {
+        presentRecentWindowTiler()
+        return
+    }
     if featureID.rawValue == "app.open-megamap" {
         presentMegamap()
         return

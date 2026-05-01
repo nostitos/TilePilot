@@ -98,6 +98,7 @@ final class AppModel: ObservableObject {
     static let appUpdateLastSuccessfulCheckAtDefaultsKey = "TilePilot.appUpdate.lastSuccessfulCheckAt"
     static let appUpdateLatestKnownReleaseDefaultsKey = "TilePilot.appUpdate.latestKnownRelease"
     static let appUpdateDismissedVersionDefaultsKey = "TilePilot.appUpdate.dismissedVersion"
+    static let recentWindowTilerPreferredSelectionCountDefaultsKey = "TilePilot.recentWindowTiler.preferredSelectionCount"
     static let appUpdateAutomaticChecksEnabledInfoKey = "TilePilotEnableAutomaticUpdateChecks"
 
     private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
@@ -197,6 +198,7 @@ final class AppModel: ObservableObject {
     @Published var appUpdateStatus: AppUpdateStatus = .idle
     @Published var appUpdateLastSuccessfulCheckAt: Date? = UserDefaults.standard.object(forKey: AppModel.appUpdateLastSuccessfulCheckAtDefaultsKey) as? Date
     @Published var dismissedAppUpdateVersion: String? = UserDefaults.standard.string(forKey: AppModel.appUpdateDismissedVersionDefaultsKey)
+    @Published var recentWindowTilerState: RecentWindowTilerPresentationState?
     @Published var windowLayoutTemplates: [WindowLayoutTemplate] = AppModel.loadWindowLayoutTemplates()
     @Published var workSets: [WorkSet] = AppModel.loadWorkSets()
     @Published var activeWorkSetIDsByScope: [String: String] = AppModel.loadActiveWorkSetIDsByScope()

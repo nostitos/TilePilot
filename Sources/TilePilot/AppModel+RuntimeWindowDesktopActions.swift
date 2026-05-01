@@ -29,6 +29,17 @@ private struct WorkSetLaunchMissingAppsResult {
     var failed: Int = 0
 }
 
+private struct RecentWindowTilerDesktopState {
+    let spaceIndex: Int
+    let display: DisplayState?
+    let windows: [WindowState]
+}
+
+private struct RecentWindowTilerAccessibilityInfo {
+    let title: String
+    let canMoveAndResize: Bool
+}
+
 private struct RuntimeLayoutWindow: Decodable {
     struct Frame: Decodable {
         let x: Double
@@ -572,6 +583,288 @@ extension AppModel {
 
         await refreshLiveState()
         await refreshDoctor()
+    }
+
+    func presentRecentWindowTiler() {
+        acknowledgeInitialStatusIfNeeded()
+        guard canRunYabaiRuntimeCommands else {
+            lastErrorMessage = yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
+            lastActionMessage = nil
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refreshLiveState()
+            guard let state = await self.currentDesktopWindowsForRecentWindowTiler() else { return }
+            let candidates = self.recentWindowTilerCandidates(from: state.windows)
+            guard !candidates.isEmpty else {
+                self.lastErrorMessage = "No controllable windows on the current desktop."
+                self.lastActionMessage = nil
+                self.recentWindowTilerState = nil
+                return
+            }
+
+            let defaultMode = RecentWindowTilerMode.floatingGrid
+            let preferredSelectionCount = self.recentWindowTilerPreferredSelectionCount()
+            let selectedWindowIDs = Set(candidates
+                .filter { $0.isSelectable(in: defaultMode) }
+                .prefix(preferredSelectionCount)
+                .map(\.windowID)
+            )
+            self.recentWindowTilerState = RecentWindowTilerPresentationState(
+                candidates: candidates,
+                selectedWindowIDs: selectedWindowIDs,
+                mode: defaultMode,
+                displayAspectRatio: self.recentWindowGridAspectRatio(display: state.display)
+            )
+            self.lastErrorMessage = nil
+        }
+    }
+
+    func dismissRecentWindowTiler() {
+        recentWindowTilerState = nil
+    }
+
+    func toggleRecentWindowTilerSelection(windowID: Int) {
+        guard var state = recentWindowTilerState,
+              let candidate = state.candidates.first(where: { $0.windowID == windowID }),
+              candidate.isSelectable(in: state.mode) else {
+            return
+        }
+        if state.selectedWindowIDs.contains(windowID) {
+            state.selectedWindowIDs.remove(windowID)
+        } else {
+            state.selectedWindowIDs.insert(windowID)
+        }
+        persistRecentWindowTilerPreferredSelectionCount(state.selectedCount)
+        recentWindowTilerState = state
+    }
+
+    func setRecentWindowTilerMode(_ mode: RecentWindowTilerMode) {
+        guard var state = recentWindowTilerState, state.mode != mode else { return }
+        state.mode = mode
+        state.selectedWindowIDs.formIntersection(state.selectableWindowIDs(for: mode))
+        persistRecentWindowTilerPreferredSelectionCount(state.selectedCount)
+        recentWindowTilerState = state
+    }
+
+    func reorderRecentWindowTilerCandidate(draggedWindowID: Int, targetWindowID: Int) {
+        guard var state = recentWindowTilerState,
+              draggedWindowID != targetWindowID,
+              let sourceIndex = state.candidates.firstIndex(where: { $0.windowID == draggedWindowID }),
+              let targetIndex = state.candidates.firstIndex(where: { $0.windowID == targetWindowID }) else {
+            return
+        }
+
+        let candidate = state.candidates.remove(at: sourceIndex)
+        let insertionIndex = sourceIndex < targetIndex ? targetIndex : targetIndex
+        state.candidates.insert(candidate, at: insertionIndex)
+        recentWindowTilerState = state
+    }
+
+    func applyRecentWindowTilerSelection() {
+        guard let state = recentWindowTilerState else { return }
+        applyRecentWindowTilerSelection(orderedWindowIDs: state.orderedEffectiveSelectedWindowIDs, mode: state.mode)
+    }
+
+    func applyRecentWindowTilerSelection(orderedWindowIDs: [Int], mode: RecentWindowTilerMode) {
+        guard !orderedWindowIDs.isEmpty else {
+            lastErrorMessage = "Select at least one window."
+            lastActionMessage = nil
+            return
+        }
+
+        persistRecentWindowTilerPreferredSelectionCount(orderedWindowIDs.count)
+        recentWindowTilerState = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.applyRecentWindowTilerSelectionInternal(orderedWindowIDs: orderedWindowIDs, mode: mode)
+        }
+    }
+
+    private func recentWindowTilerCandidates(from windows: [WindowState]) -> [RecentWindowTilerCandidate] {
+        windows
+            .sorted(by: workSetWindowSort)
+            .compactMap(recentWindowTilerCandidate)
+    }
+
+    private func recentWindowTilerPreferredSelectionCount() -> Int {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: AppModel.recentWindowTilerPreferredSelectionCountDefaultsKey) != nil else {
+            return 4
+        }
+        return max(1, min(defaults.integer(forKey: AppModel.recentWindowTilerPreferredSelectionCountDefaultsKey), 32))
+    }
+
+    private func persistRecentWindowTilerPreferredSelectionCount(_ count: Int) {
+        guard count > 0 else { return }
+        UserDefaults.standard.set(
+            max(1, min(count, 32)),
+            forKey: AppModel.recentWindowTilerPreferredSelectionCountDefaultsKey
+        )
+    }
+
+    private func recentWindowTilerCandidate(from window: WindowState) -> RecentWindowTilerCandidate? {
+        let accessibilityInfo = recentWindowTilerAccessibilityInfo(for: window)
+        let canAutoTile = window.isRuntimeManageable
+        let canFloatingGrid = canAutoTile || accessibilityInfo?.canMoveAndResize == true
+        guard canFloatingGrid else { return nil }
+
+        let title = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? accessibilityInfo?.title ?? ""
+            : window.title
+
+        return RecentWindowTilerCandidate(
+            windowID: window.id,
+            pid: window.pid,
+            app: window.app,
+            title: title,
+            focused: window.focused,
+            floating: window.floating,
+            canAutoTile: canAutoTile,
+            canFloatingGrid: canFloatingGrid
+        )
+    }
+
+    private func applyRecentWindowTilerSelectionInternal(
+        orderedWindowIDs: [Int],
+        mode: RecentWindowTilerMode
+    ) async {
+        guard canRunYabaiRuntimeCommands else {
+            await MainActor.run {
+                self.lastErrorMessage = self.yabaiRuntimeControlDisabledReason ?? "Window controls are unavailable right now."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        guard let state = await currentDesktopWindowsForRecentWindowTiler() else { return }
+        let candidates = recentWindowTilerCandidates(from: state.windows)
+        let allowedWindowIDs = Set(candidates.filter { $0.isSelectable(in: mode) }.map(\.windowID))
+        let selectedWindowIDs = orderedWindowIDs.filter { allowedWindowIDs.contains($0) }
+        let windowsByID = Dictionary(uniqueKeysWithValues: state.windows.map { ($0.id, $0) })
+        let selectedWindows = selectedWindowIDs.compactMap { windowsByID[$0] }
+        let selectedIDs = Set(selectedWindows.map(\.id))
+        let nonSelectedWindows = state.windows.filter {
+            $0.isRuntimeManageable && !selectedIDs.contains($0.id)
+        }
+
+        guard !selectedWindows.isEmpty else {
+            await MainActor.run {
+                self.lastErrorMessage = "Selected windows are no longer available on this desktop."
+                self.lastActionMessage = nil
+            }
+            return
+        }
+
+        let result: (updated: Int, failed: Int, primaryFocused: Bool)
+        switch mode {
+        case .autoTiled:
+            result = await applyRecentAutoTiledLayout(
+                spaceIndex: state.spaceIndex,
+                selectedWindows: selectedWindows,
+                nonSelectedWindows: nonSelectedWindows
+            )
+        case .floatingGrid:
+            result = await applyRecentFloatingGridLayout(
+                display: state.display,
+                selectedWindows: selectedWindows
+            )
+        }
+
+        await refreshLiveState()
+        await refreshDoctor()
+
+        await MainActor.run {
+            var issues: [String] = []
+            if nonSelectedWindows.count > 0, mode == .autoTiled {
+                issues.append("Floated \(nonSelectedWindows.count) non-selected window(s).")
+            }
+            if result.failed > 0 {
+                issues.append("\(result.failed) window operation(s) failed.")
+            }
+            if !result.primaryFocused {
+                issues.append("Could not focus the first selected window.")
+            }
+
+            switch mode {
+            case .autoTiled:
+                self.lastActionMessage = "Tiled \(selectedWindows.count) selected window(s)."
+            case .floatingGrid:
+                self.lastActionMessage = "Arranged \(selectedWindows.count) selected window(s) into a floating grid."
+            }
+            self.lastErrorMessage = issues.isEmpty ? nil : issues.joined(separator: " ")
+        }
+    }
+
+    private func applyRecentAutoTiledLayout(
+        spaceIndex: Int,
+        selectedWindows: [WindowState],
+        nonSelectedWindows: [WindowState]
+    ) async -> (updated: Int, failed: Int, primaryFocused: Bool) {
+        let floatOthers = await setFloatingStateForWindows(
+            nonSelectedWindows.filter { !$0.floating },
+            shouldFloat: true
+        )
+        if floatOthers.updated > 0 {
+            try? await Task.sleep(for: .milliseconds(35))
+        }
+
+        let rebuild = await rebuildBalancedTileLayout(
+            spaceIndex: spaceIndex,
+            windows: selectedWindows
+        )
+
+        let primaryFocused: Bool
+        if let primaryWindow = selectedWindows.first {
+            primaryFocused = await focusWindowWithRestore(windowID: primaryWindow.id, knownWindow: primaryWindow)
+        } else {
+            primaryFocused = true
+        }
+
+        return (
+            updated: floatOthers.updated + rebuild.updated,
+            failed: floatOthers.failed + rebuild.failed,
+            primaryFocused: primaryFocused
+        )
+    }
+
+    private func applyRecentFloatingGridLayout(
+        display: DisplayState?,
+        selectedWindows: [WindowState]
+    ) async -> (updated: Int, failed: Int, primaryFocused: Bool) {
+        let floatSelected = await setFloatingStateForWindows(
+            selectedWindows.filter { $0.isRuntimeManageable && !$0.floating },
+            shouldFloat: true
+        )
+        if floatSelected.updated > 0 {
+            try? await Task.sleep(for: .milliseconds(60))
+            await refreshLiveState()
+        }
+
+        let refreshedByID = Dictionary(
+            uniqueKeysWithValues: (latestLiveStateSnapshot ?? liveStateSnapshot)?.windows.map { ($0.id, $0) } ?? []
+        )
+        let refreshedSelected = selectedWindows.map { refreshedByID[$0.id] ?? $0 }
+        let grid = await applyGridFramesWithAccessibilityFallback(to: refreshedSelected, display: display)
+        let stack = await stackWorkSetWindows(
+            refreshedSelected.filter(\.isRuntimeManageable).reversed(),
+            primaryWindowID: refreshedSelected.first?.id,
+            requiresBackdropClearance: false
+        )
+        let primaryFocused: Bool
+        if let primaryWindow = refreshedSelected.first, !primaryWindow.isRuntimeManageable {
+            primaryFocused = await focusWindowWithRestore(windowID: primaryWindow.id, knownWindow: primaryWindow)
+        } else {
+            primaryFocused = stack.primaryFocused
+        }
+
+        return (
+            updated: floatSelected.updated + grid.updated + stack.updated,
+            failed: floatSelected.failed + grid.failed + stack.failed,
+            primaryFocused: primaryFocused
+        )
     }
 
     private func applyWindowLayoutTemplateInternal(templateID: UUID) async {
@@ -1978,6 +2271,59 @@ extension AppModel {
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
     }
 
+    private func currentDesktopWindowsForRecentWindowTiler() async -> RecentWindowTilerDesktopState? {
+        var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
+            await refreshLiveState()
+            snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        }
+
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded,
+              let spaceIndex = activeSpaceIndex(in: snapshot) else {
+            await MainActor.run {
+                self.lastErrorMessage = "Current desktop data is unavailable right now."
+                self.lastActionMessage = nil
+            }
+            return nil
+        }
+
+        let spaceDisplay = snapshot.spaces.first(where: { $0.index == spaceIndex }).flatMap { space in
+            snapshot.displays.first(where: { $0.id == space.displayId })
+        }
+
+        let windows = snapshot.windows.filter { window in
+            guard window.space == spaceIndex,
+                  !window.isMinimized,
+                  !window.isHidden else {
+                return false
+            }
+            guard !isBackdropSurfaceWindow(
+                window,
+                normalizedTitle: window.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedRole: window.role.trimmingCharacters(in: .whitespacesAndNewlines),
+                normalizedSubrole: window.subrole.trimmingCharacters(in: .whitespacesAndNewlines),
+                in: snapshot
+            ) else {
+                return false
+            }
+
+            if window.isVisible || window.hasWindowServerMatch || window.isRuntimeManageable {
+                return true
+            }
+
+            return recentWindowTilerAccessibilityInfo(for: window)?.canMoveAndResize == true
+        }
+        .sorted(by: workSetWindowSort)
+
+        return RecentWindowTilerDesktopState(
+            spaceIndex: spaceIndex,
+            display: spaceDisplay,
+            windows: windows
+        )
+    }
+
     private func currentDesktopVisibleWindowsForBulkLayout(template: WindowLayoutTemplate? = nil) async -> (spaceIndex: Int, display: DisplayState?, windows: [WindowState])? {
         var snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
         if snapshot == nil || snapshot?.source != .yabai || snapshot?.degraded == true {
@@ -2312,30 +2658,122 @@ extension AppModel {
         )
     }
 
+    private func applyGridFramesWithAccessibilityFallback(
+        to windows: [WindowState],
+        display: DisplayState?
+    ) async -> (updated: Int, failed: Int) {
+        guard !windows.isEmpty else { return (0, 0) }
+
+        let grid = recentWindowGridDimensions(windowCount: windows.count, display: display)
+        let placements = RecentWindowGridPlanner.placements(
+            windowCount: windows.count,
+            rows: grid.rows,
+            cols: grid.cols
+        )
+        var updated = 0
+        var failed = 0
+
+        for (index, window) in windows.enumerated() {
+            guard placements.indices.contains(index) else {
+                failed += 1
+                continue
+            }
+            let placement = placements[index]
+
+            if window.isRuntimeManageable {
+                let result = await doctorService.runSupportCommand(
+                    yabaiCommand(
+                        ["-m", "window", String(window.id), "--grid", "\(grid.rows):\(grid.cols):\(placement.col):\(placement.row):\(placement.colSpan):\(placement.rowSpan)"],
+                        timeout: 1.5
+                    )
+                )
+                await MainActor.run {
+                    appendCommandLog(from: result)
+                }
+                if result.isSuccess {
+                    updated += 1
+                } else if let frame = recentWindowGridFrame(
+                    placement: placement,
+                    rows: grid.rows,
+                    cols: grid.cols,
+                    display: display
+                ),
+                          setWindowFrameUsingAccessibility(window: window, frame: frame) {
+                    updated += 1
+                } else {
+                    failed += 1
+                }
+                continue
+            }
+
+            guard let frame = recentWindowGridFrame(
+                placement: placement,
+                rows: grid.rows,
+                cols: grid.cols,
+                display: display
+            ),
+                  setWindowFrameUsingAccessibility(window: window, frame: frame) else {
+                failed += 1
+                continue
+            }
+            updated += 1
+        }
+
+        return (updated, failed)
+    }
+
+    private func recentWindowGridDimensions(windowCount count: Int, display: DisplayState?) -> (rows: Int, cols: Int) {
+        let aspectRatio = recentWindowGridAspectRatio(display: display)
+        return RecentWindowGridPlanner.dimensions(windowCount: count, displayAspectRatio: aspectRatio)
+    }
+
+    private func recentWindowGridAspectRatio(display: DisplayState?) -> Double {
+        guard let display, display.frameH > 1 else { return 1.6 }
+        return max(display.frameW / display.frameH, 0.5)
+    }
+
+    private func recentWindowGridFrame(
+        placement: RecentWindowGridPlacement,
+        rows: Int,
+        cols: Int,
+        display: DisplayState?
+    ) -> CGRect? {
+        guard let display else { return nil }
+        let cellWidth = display.frameW / Double(max(cols, 1))
+        let cellHeight = display.frameH / Double(max(rows, 1))
+        return CGRect(
+            x: display.frameX + (Double(placement.col) * cellWidth),
+            y: display.frameY + (Double(placement.row) * cellHeight),
+            width: max(80, cellWidth * Double(max(placement.colSpan, 1))),
+            height: max(60, cellHeight * Double(max(placement.rowSpan, 1)))
+        ).integral
+    }
+
     private func applyGridFrames(
         to windows: [WindowState],
         display: DisplayState?
     ) async -> (updated: Int, failed: Int) {
         guard !windows.isEmpty else { return (0, 0) }
 
-        let aspectRatio = {
-            guard let display, display.frameH > 1 else { return 1.6 }
-            return max(display.frameW / display.frameH, 0.5)
-        }()
-
-        let count = windows.count
-        let cols = max(1, Int(ceil(sqrt(Double(count) * aspectRatio))))
-        let rows = max(1, Int(ceil(Double(count) / Double(cols))))
+        let grid = recentWindowGridDimensions(windowCount: windows.count, display: display)
+        let placements = RecentWindowGridPlanner.placements(
+            windowCount: windows.count,
+            rows: grid.rows,
+            cols: grid.cols
+        )
 
         var updated = 0
         var failed = 0
 
         for (index, window) in windows.enumerated() {
-            let row = index / cols
-            let col = index % cols
+            guard placements.indices.contains(index) else {
+                failed += 1
+                continue
+            }
+            let placement = placements[index]
             let result = await doctorService.runSupportCommand(
                 yabaiCommand(
-                    ["-m", "window", String(window.id), "--grid", "\(rows):\(cols):\(col):\(row):1:1"],
+                    ["-m", "window", String(window.id), "--grid", "\(grid.rows):\(grid.cols):\(placement.col):\(placement.row):\(placement.colSpan):\(placement.rowSpan)"],
                     timeout: 1.5
                 )
             )
@@ -3086,6 +3524,72 @@ extension AppModel {
         return raised || mainSet || focusedSet || frontmostPID == Int(appPID)
     }
 
+    private func recentWindowTilerAccessibilityInfo(for window: WindowState) -> RecentWindowTilerAccessibilityInfo? {
+        let appPID = pid_t(window.pid)
+        let appElement = AXUIElementCreateApplication(appPID)
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success,
+              let windows = windowsRef as? [AXUIElement],
+              let targetWindow = matchingAXWindow(for: window, in: windows) else {
+            return nil
+        }
+
+        let role = axStringValue(targetWindow, kAXRoleAttribute as CFString) ?? ""
+        let subrole = axStringValue(targetWindow, kAXSubroleAttribute as CFString) ?? ""
+        guard role == "AXWindow", subrole == "AXStandardWindow" else {
+            return nil
+        }
+
+        let canMove = axAttributeIsSettable(targetWindow, kAXPositionAttribute as CFString)
+        let canResize = axAttributeIsSettable(targetWindow, kAXSizeAttribute as CFString)
+        let title = axStringValue(targetWindow, kAXTitleAttribute as CFString)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        return RecentWindowTilerAccessibilityInfo(
+            title: title,
+            canMoveAndResize: canMove && canResize
+        )
+    }
+
+    private func setWindowFrameUsingAccessibility(window: WindowState, frame: CGRect) -> Bool {
+        let appPID = pid_t(window.pid)
+        let appElement = AXUIElementCreateApplication(appPID)
+        var windowsRef: CFTypeRef?
+        let windowsResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        guard windowsResult == .success,
+              let windows = windowsRef as? [AXUIElement],
+              let targetWindow = matchingAXWindow(for: window, in: windows),
+              axAttributeIsSettable(targetWindow, kAXPositionAttribute as CFString),
+              axAttributeIsSettable(targetWindow, kAXSizeAttribute as CFString) else {
+            return false
+        }
+
+        var size = frame.size
+        var origin = frame.origin
+        guard let sizeValue = AXValueCreate(.cgSize, &size),
+              let positionValue = AXValueCreate(.cgPoint, &origin) else {
+            return false
+        }
+
+        let sizeSet = AXUIElementSetAttributeValue(
+            targetWindow,
+            kAXSizeAttribute as CFString,
+            sizeValue
+        ) == .success
+        let positionSet = AXUIElementSetAttributeValue(
+            targetWindow,
+            kAXPositionAttribute as CFString,
+            positionValue
+        ) == .success
+
+        if sizeSet || positionSet {
+            _ = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString)
+        }
+
+        return sizeSet && positionSet
+    }
+
     private func matchingAXWindow(for window: WindowState, in windows: [AXUIElement]) -> AXUIElement? {
         let wantedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !wantedTitle.isEmpty,
@@ -3131,6 +3635,11 @@ extension AppModel {
             return number.boolValue
         }
         return nil
+    }
+
+    private func axAttributeIsSettable(_ element: AXUIElement, _ attribute: CFString) -> Bool {
+        var settable = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(element, attribute, &settable) == .success && settable.boolValue
     }
 
     private func axFrameValue(_ element: AXUIElement) -> CGRect? {

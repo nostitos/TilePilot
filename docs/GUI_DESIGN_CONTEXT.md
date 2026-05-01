@@ -27,9 +27,12 @@ Current top-level tab order:
 1. `Overview`
 2. `Behaviors`
 3. `Actions & Shortcuts`
-4. `Appearance`
-5. `Config Files`
-6. `System`
+4. `Templates`
+5. `Work Sets`
+6. `Appearance`
+7. `Config Files`
+8. `How It Works`
+9. `System`
 
 Main screen roles:
 
@@ -41,13 +44,22 @@ Main screen roles:
   - purpose: yabai behavior controls, precedence rules, desktop tiling, app defaults, focus/cursor, mouse dragging
 - `Actions & Shortcuts`
   - file: `Sources/TilePilot/Features/Shortcuts/ShortcutsDashboardView.swift`
-  - purpose: searchable control catalog, shortcut recording/testing/editing, right-click menu pinning, ordering
+  - purpose: searchable control catalog, shortcut recording/testing/editing, right-click menu pinning, ordering, dynamic actions for Templates and Work Sets
+- `Templates`
+  - file: `Sources/TilePilot/Features/Templates/TemplatesDashboardView.swift`
+  - purpose: custom floating slot layouts, current-desktop import, per-slot app allow-lists, z-order control, template actions
+- `Work Sets`
+  - file: `Sources/TilePilot/Features/WorkSets/WorkSetsDashboardView.swift`
+  - purpose: desktop-scoped window groups, board-style membership editing, backdrop controls, layout modes, launch/restore options
 - `Appearance`
   - file: `Sources/TilePilot/Features/Appearance/AppearanceDashboardView.swift`
   - purpose: overlay toggles, outline width, global tiling spacing
 - `Config Files`
   - file: `Sources/TilePilot/FilesDashboardView.swift`
   - purpose: split-view editor/browser for config and referenced scripts
+- `How It Works`
+  - file: `Sources/TilePilot/Features/HowItWorks/HowItWorksDashboardView.swift`
+  - purpose: compact concept explanations that keep settings screens focused on changing behavior
 - `System`
   - file: `Sources/TilePilot/Features/System/SystemDashboardView.swift`
   - purpose: setup summary, guided setup entrypoint, essentials, performance, diagnostics
@@ -60,6 +72,12 @@ Supporting modal/window surfaces:
 - `MegaMap`
   - file: `Sources/TilePilot/Features/Megamap/MegamapWindow.swift`
   - separate `NSWindow`, not another tab
+- `Pick Windows to Tile`
+  - files:
+    - `Sources/TilePilot/RecentWindowTilerWindowController.swift`
+    - `Sources/TilePilot/Features/RecentWindowTiler/RecentWindowTilerPickerView.swift`
+  - separate picker `NSPanel` opened by the `Pick Windows to Tile...` action
+  - shows current-desktop recent windows, a reorderable list, and a reorderable preview grid
 
 ## Visual Language
 
@@ -166,6 +184,52 @@ Mini-map details:
 - Uses fixed columns, search, inline row actions, and reorder mode.
 - The top pinned section mirrors the right-click menu and is explicitly named `Right-Click Menu`.
 - Many rows use small semantic chips for state such as pinned or default.
+- First-class actions include dynamic template apply actions and Work Set actions.
+- `Pick Windows to Tile...` belongs with layout actions and should stay discoverable from this surface.
+
+### Pick Windows to Tile
+
+- Separate compact panel, not a full tab.
+- Default mode is `Floating Grid`.
+- List rows:
+  - numbered by placement order
+  - click toggles selection
+  - drag changes placement order
+  - useful window title is primary text; app name becomes secondary text
+  - app/title duplicates should not render as repeated labels
+- Preview:
+  - shows the exact grid shape
+  - uses app icons and placement numbers
+  - preview tiles are draggable to change order
+  - spare grid cells are represented by vertical spans rather than blank holes
+- Primary button should stay visually primary even when the panel loses focus.
+- The picker remembers selected count, not selected window identity.
+
+### Templates
+
+- Management surface has a left-side template list and a right-side editor canvas.
+- Import Current Desktop is a first-class action in the Templates tab.
+- Canvas slots can overlap and have z-order.
+- Slots display allowed app icons where configured.
+- Slot app allow-lists are edited visually through app icons and exact app names.
+- Applying a template is a floating layout operation, not a yabai tiled layout.
+
+### Work Sets
+
+- Board-style layout with one lane per Work Set for the selected desktop scope.
+- Scope selection must stay understandable when displays are renamed, reordered, or primary display changes.
+- Lane headers are dense; avoid cramming too many controls into a single row.
+- Work Set member rows emphasize:
+  - app icon
+  - app name
+  - window title
+  - actionable status only when something needs attention
+- Work Set controls include:
+  - activate
+  - layout mode: Floating, Tile Work Set, Apply Template
+  - optional backdrop
+  - optional Launch Missing Apps
+- Live Layout previews should help users understand what activation will bring forward or place.
 
 ### Appearance
 
@@ -258,6 +322,12 @@ Badge behavior:
   - `Enable Screen Recording`
   - `Pin More Shortcuts...`
   - `Float Windows on This Desktop`
+  - `Pick Windows to Tile...`
+  - `Floating Grid`
+  - `Tile Work Set`
+  - `Apply Template`
+  - `Launch Missing Apps`
+  - `Never Auto-Tile App`
   - `Retile and Rebalance Windows`
 - When scope matters, labels use `on This Desktop` rather than abstract terms like `visible`.
 - Important buttons are expected to be visibly prominent. Tiny faint CTA text is contrary to the current direction.

@@ -226,6 +226,7 @@ func featureControlRowSortPriority(_ row: FeatureControlRow) -> Int {
         case "screen.bring-floating-front": return 25
         case "screen.grid-floating": return 30
         case "screen.grid-auto-tiled": return 40
+        case "screen.pick-windows-to-tile": return 45
         case "screen.balance-current-desktop": return 50
         case "screen.current-desktop-tiling-on": return 55
         case "screen.current-desktop-tiling-off": return 56

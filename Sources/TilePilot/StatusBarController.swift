@@ -684,6 +684,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
     private var windowBadgeOverlayController: WindowBadgeOverlayController?
     private var workSetBackdropController: WorkSetBackdropController?
+    private var recentWindowTilerWindowController: RecentWindowTilerWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if shouldTerminateAsDuplicateInstance() {
@@ -709,6 +710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         windowBadgeOverlayController = WindowBadgeOverlayController(model: model)
         workSetBackdropController = WorkSetBackdropController(model: model)
+        recentWindowTilerWindowController = RecentWindowTilerWindowController(model: model)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(showMegamapWindow),
@@ -861,5 +863,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowBadgeOverlayController = nil
         NotificationCenter.default.removeObserver(self, name: .tilePilotOpenMegamap, object: nil)
         NotificationCenter.default.removeObserver(self, name: .tilePilotHideMegamap, object: nil)
+        recentWindowTilerWindowController = nil
     }
 }

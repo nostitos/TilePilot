@@ -149,6 +149,20 @@ extension AppModel {
                 isExperimental: false
             ),
             FeatureDefinition(
+                id: "screen.pick-windows-to-tile",
+                group: .tilingLayout,
+                title: "Pick Windows to Tile…",
+                description: "Choose frontmost windows on this desktop, then tile only those windows.",
+                backend: .tilePilotAction,
+                capabilityGate: .yabaiRuntime,
+                defaultCombo: nil,
+                commandMatchers: [tilePilotFeatureURL("screen.pick-windows-to-tile")],
+                matchAllCommandMatchers: false,
+                preferredCommand: tilePilotFeatureCommand("screen.pick-windows-to-tile"),
+                actionID: nil,
+                isExperimental: false
+            ),
+            FeatureDefinition(
                 id: "screen.layout-bsp-balance",
                 group: .tilingLayout,
                 title: "Set This Desktop to Tiled Layout and Rebalance",

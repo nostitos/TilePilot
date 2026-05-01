@@ -218,7 +218,7 @@ struct SetupGuideView: View {
 
                 Spacer()
 
-                if step.isSkippable || step.isBlocking {
+                if hasRemainingIncompleteSteps, step.isSkippable || step.isBlocking {
                     Button("Skip for Now") {
                         model.dismissSetupGuide()
                     }

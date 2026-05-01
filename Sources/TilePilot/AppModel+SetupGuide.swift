@@ -214,6 +214,10 @@ extension AppModel {
 
     func presentSetupGuide(source: SetupGuidePresentationSource = .manual, startingAt stepKind: SetupGuideStepKind? = nil) {
         acknowledgeInitialStatusIfNeeded()
+        if source == .automatic, !hasIncompleteEssentialSetupGuideSteps {
+            setupGuidePresentationState = .hidden
+            return
+        }
         let selected = stepKind ?? preferredStartingSetupGuideStep(for: source)?.kind
         setupGuidePresentationState = SetupGuidePresentationState(isPresented: true, source: source, selectedStepKind: selected)
     }
@@ -244,8 +248,18 @@ extension AppModel {
 
     func refreshSetupGuidePresentationAfterStateChange() {
         if setupGuidePresentationState.isPresented {
+            if setupGuidePresentationState.source == .automatic, !hasIncompleteEssentialSetupGuideSteps {
+                setupGuidePresentationState = .hidden
+                return
+            }
+
             if let selectedKind = setupGuidePresentationState.selectedStepKind,
-               setupGuideSteps.contains(where: { $0.kind == selectedKind }) {
+               let selectedStep = setupGuideSteps.first(where: { $0.kind == selectedKind }) {
+                if setupGuidePresentationState.source == .automatic,
+                   selectedStep.isSatisfied,
+                   let next = preferredStartingSetupGuideStep(for: .automatic) {
+                    setupGuidePresentationState.selectedStepKind = next.kind
+                }
                 return
             }
 

@@ -3,6 +3,7 @@
 ## Related Docs
 
 - GUI and design context: `docs/GUI_DESIGN_CONTEXT.md`
+- Product requirements: `PRD.md`
 
 ## Breaking Shortcut Change (Directional Cluster)
 
@@ -14,6 +15,32 @@ If you are testing against an older local setup that still uses `HJKL`, expect m
 
 ```bash
 swift build
+```
+
+## Recent Window Picker Notes
+
+The `Pick Windows to Tile...` feature is a first-class action backed by:
+
+- model/state: `Sources/TilePilot/Models/RecentWindowTilerModels.swift`
+- runtime/apply logic: `Sources/TilePilot/AppModel+RuntimeWindowDesktopActions.swift`
+- panel controller: `Sources/TilePilot/RecentWindowTilerWindowController.swift`
+- SwiftUI panel: `Sources/TilePilot/Features/RecentWindowTiler/RecentWindowTilerPickerView.swift`
+- regression tests: `Tests/TilePilotTests/RecentWindowGridPlannerTests.swift`
+
+Important behavior:
+
+- first open selects 4 windows
+- later opens select the last chosen count from `UserDefaults`
+- picker order is placement order
+- `Floating Grid` is the default mode
+- spare grid cells are filled with vertical spans where possible
+- AX-only windows can be placed by Floating Grid when Accessibility can move and resize them
+- `Auto-Tiled` remains real yabai tiling and cannot include AX-only windows that yabai cannot manage
+
+Run the focused picker/grid tests with:
+
+```bash
+swift test --filter RecentWindowGridPlannerTests
 ```
 
 ## Run (SwiftPM executable)

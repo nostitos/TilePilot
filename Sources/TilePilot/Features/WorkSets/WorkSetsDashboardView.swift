@@ -184,7 +184,7 @@ struct WorkSetsDashboardView: View {
 
             Spacer(minLength: 0)
 
-            WorkSetInfoBubbleButton(text: "Use the scope picker to switch between visible desktops and saved Work Set scopes. Import builds one front-to-back pile from the selected visible desktop.")
+            WorkSetInfoBubbleButton(text: "Use the scope picker to switch between visible desktops and saved Work Set scopes. Work Sets are shown left to right, front to back. Import builds one pile from the selected visible desktop.")
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,46 +209,44 @@ struct WorkSetsDashboardView: View {
                     : "TilePilot needs a live desktop snapshot to attach saved Work Sets to a desktop."
             )
         } else {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
-                        Label("Front to back", systemImage: "line.3.horizontal.decrease")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-
-                    if selectedVisibleContext == nil && !selectedWorkSets.isEmpty {
-                        Text("This desktop is not visible right now. Saved Work Sets stay visible here, but import, live preview, and the window palette are unavailable until the desktop is visible.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if selectedWorkSets.isEmpty {
-                        Text(selectedVisibleContext == nil
-                            ? "No saved Work Sets exist for this desktop yet."
-                            : "Import visible windows to create the first Work Set, or drag a current desktop window into New Work Set.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ScrollView(.horizontal) {
-                        LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(selectedWorkSets) { workSet in
-                                workSetLane(for: workSet)
-                            }
-
-                            if selectedVisibleContext != nil {
-                                newWorkSetLane
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                if selectedVisibleContext == nil && !selectedWorkSets.isEmpty {
+                    Text("This desktop is not visible right now. Saved Work Sets stay visible here, but import, live preview, and the window palette are unavailable until the desktop is visible.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } label: {
-                Label("Work Sets Board", systemImage: "square.stack.3d.up")
+
+                if selectedWorkSets.isEmpty {
+                    Text(selectedVisibleContext == nil
+                        ? "No saved Work Sets exist for this desktop yet."
+                        : "Import visible windows to create the first Work Set, or drag a current desktop window into New Work Set.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(selectedWorkSets) { workSet in
+                            workSetLane(for: workSet)
+                        }
+
+                        if selectedVisibleContext != nil {
+                            newWorkSetLane
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
             }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.secondary.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+            )
         }
     }
 

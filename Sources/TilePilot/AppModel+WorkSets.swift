@@ -99,7 +99,8 @@ extension AppModel {
     }
 
     var currentDesktopWorkSetContext: WorkSetDesktopContext? {
-        currentDesktopWorkSetContext(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+        rebuildWorkSetRuntimeCachesIfNeeded()
+        return cachedCurrentDesktopWorkSetContext
     }
 
     var currentDesktopWorkSetScopeKey: WorkSetScopeKey? {
@@ -117,7 +118,8 @@ extension AppModel {
     }
 
     var visibleWorkSetContexts: [WorkSetDesktopContext] {
-        visibleWorkSetContexts(in: latestLiveStateSnapshot ?? liveStateSnapshot)
+        rebuildWorkSetRuntimeCachesIfNeeded()
+        return cachedWorkSetVisibleContexts
     }
 
     func activeWorkSetID(for scopeKey: WorkSetScopeKey) -> UUID? {
@@ -159,12 +161,12 @@ extension AppModel {
     }
 
     func workSetResolvedMembers(for workSet: WorkSet, in context: WorkSetDesktopContext?) -> [WorkSetResolvedMember] {
-        let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot
+        rebuildWorkSetRuntimeCachesIfNeeded()
         let visibleScopeWindows = context?.scopeKey == workSet.scopeKey ? context?.windows ?? [] : []
         return resolveWorkSetMembersForScope(
             workSet.members,
             visibleScopeWindows: visibleScopeWindows,
-            allWindows: workSetStatusCandidateWindows(in: snapshot),
+            allWindows: cachedWorkSetStatusCandidateWindows,
             scopeKey: workSet.scopeKey
         )
     }
@@ -640,22 +642,108 @@ extension AppModel {
     }
 
     func workSetContext(for scopeKey: WorkSetScopeKey) -> WorkSetDesktopContext? {
-        workSetContext(for: scopeKey, in: latestLiveStateSnapshot ?? liveStateSnapshot)
+        rebuildWorkSetRuntimeCachesIfNeeded()
+        return cachedWorkSetContextByScopeKey[scopeKey]
     }
 
     func workSetContext(for scopeKey: WorkSetScopeKey, in snapshot: LiveStateSnapshot?) -> WorkSetDesktopContext? {
         guard let snapshot,
               snapshot.source == .yabai,
               !snapshot.degraded,
-              let space = snapshot.spaces.first(where: { $0.index == scopeKey.spaceIndex && $0.displayId == scopeKey.displayID }),
-              let display = snapshot.displays.first(where: { $0.id == space.displayId }) else {
+              let space = snapshot.spaces.first(where: { $0.index == scopeKey.spaceIndex && $0.displayId == scopeKey.displayID }) else {
             return nil
         }
 
+        let displaysByID = Dictionary(uniqueKeysWithValues: snapshot.displays.map { ($0.id, $0) })
+        let eligibleWindowsBySpace = Dictionary(
+            grouping: eligibleWindowsForWorkSets(in: snapshot),
+            by: \.space
+        )
+        return workSetContext(
+            for: scopeKey,
+            space: space,
+            displaysByID: displaysByID,
+            eligibleWindowsBySpace: eligibleWindowsBySpace
+        )
+    }
+
+    func rebuildWorkSetRuntimeCachesIfNeeded() {
+        guard let snapshot = latestLiveStateSnapshot ?? liveStateSnapshot else {
+            clearWorkSetRuntimeCaches()
+            return
+        }
+        guard cachedWorkSetRuntimeSnapshotUpdatedAt != snapshot.lastUpdatedAt else { return }
+        rebuildWorkSetRuntimeCaches(using: snapshot)
+    }
+
+    func rebuildWorkSetRuntimeCaches(using snapshot: LiveStateSnapshot?, contentSignature: String? = nil) {
+        guard let snapshot,
+              snapshot.source == .yabai,
+              !snapshot.degraded else {
+            clearWorkSetRuntimeCaches()
+            return
+        }
+
+        let resolvedSignature = contentSignature ?? liveStateContentSignature(for: snapshot)
+        guard cachedWorkSetRuntimeContentSignature != resolvedSignature else {
+            cachedWorkSetRuntimeSnapshotUpdatedAt = snapshot.lastUpdatedAt
+            return
+        }
+
+        let displaysByID = Dictionary(uniqueKeysWithValues: snapshot.displays.map { ($0.id, $0) })
+        let eligibleWindowsBySpace = Dictionary(
+            grouping: eligibleWindowsForWorkSets(in: snapshot),
+            by: \.space
+        )
+        let spacesByScopeKey = Dictionary(
+            uniqueKeysWithValues: snapshot.spaces.map {
+                (WorkSetScopeKey(displayID: $0.displayId, spaceIndex: $0.index), $0)
+            }
+        )
+        let contexts = snapshot.spaces.compactMap { space in
+            workSetContext(
+                for: WorkSetScopeKey(displayID: space.displayId, spaceIndex: space.index),
+                space: space,
+                displaysByID: displaysByID,
+                eligibleWindowsBySpace: eligibleWindowsBySpace
+            )
+        }
+        let contextByScopeKey = Dictionary(uniqueKeysWithValues: contexts.map { ($0.scopeKey, $0) })
+        let currentScopeKey = currentWorkSetScopeKey(in: snapshot)
+
+        cachedWorkSetRuntimeContentSignature = resolvedSignature
+        cachedWorkSetRuntimeSnapshotUpdatedAt = snapshot.lastUpdatedAt
+        cachedWorkSetContextByScopeKey = contextByScopeKey
+        cachedCurrentDesktopWorkSetContext = currentScopeKey.flatMap { contextByScopeKey[$0] }
+        cachedWorkSetVisibleContexts = sortWorkSetVisibleContexts(
+            contexts.filter { context in
+                spacesByScopeKey[context.scopeKey]?.visible == true
+            },
+            currentScopeKey: currentScopeKey
+        )
+        cachedWorkSetStatusCandidateWindows = workSetStatusCandidateWindows(in: snapshot)
+    }
+
+    private func clearWorkSetRuntimeCaches() {
+        cachedWorkSetRuntimeContentSignature = nil
+        cachedWorkSetRuntimeSnapshotUpdatedAt = nil
+        cachedWorkSetVisibleContexts = []
+        cachedWorkSetContextByScopeKey = [:]
+        cachedCurrentDesktopWorkSetContext = nil
+        cachedWorkSetStatusCandidateWindows = []
+    }
+
+    private func workSetContext(
+        for scopeKey: WorkSetScopeKey,
+        space: SpaceState,
+        displaysByID: [Int: DisplayState],
+        eligibleWindowsBySpace: [Int: [WindowState]]
+    ) -> WorkSetDesktopContext? {
+        guard let display = displaysByID[space.displayId] else { return nil }
         return WorkSetDesktopContext(
             scopeKey: scopeKey,
             display: display,
-            windows: eligibleWindowsForWorkSets(in: snapshot, spaceIndex: scopeKey.spaceIndex)
+            windows: eligibleWindowsBySpace[scopeKey.spaceIndex] ?? []
         )
     }
 
@@ -725,21 +813,8 @@ extension AppModel {
             return []
         }
 
-        return snapshot.spaces
-            .filter(\.visible)
-            .compactMap { space in
-                workSetContext(
-                    for: WorkSetScopeKey(displayID: space.displayId, spaceIndex: space.index),
-                    in: snapshot
-                )
-            }
-            .sorted { lhs, rhs in
-                if lhs.scopeKey == currentDesktopWorkSetScopeKey { return true }
-                if rhs.scopeKey == currentDesktopWorkSetScopeKey { return false }
-                if lhs.display.focused != rhs.display.focused { return lhs.display.focused && !rhs.display.focused }
-                if lhs.scopeKey.spaceIndex != rhs.scopeKey.spaceIndex { return lhs.scopeKey.spaceIndex < rhs.scopeKey.spaceIndex }
-                return lhs.display.name.localizedCaseInsensitiveCompare(rhs.display.name) == .orderedAscending
-            }
+        rebuildWorkSetRuntimeCaches(using: snapshot)
+        return cachedWorkSetVisibleContexts
     }
 
     func eligibleWindowsForWorkSets(in snapshot: LiveStateSnapshot, spaceIndex: Int) -> [WindowState] {
@@ -769,14 +844,42 @@ extension AppModel {
         .sorted(by: workSetWindowSort)
     }
 
+    private func currentWorkSetScopeKey(in snapshot: LiveStateSnapshot) -> WorkSetScopeKey? {
+        guard let spaceIndex = activeSpaceIndex(in: snapshot),
+              let space = snapshot.spaces.first(where: { $0.index == spaceIndex }) else {
+            return nil
+        }
+        return WorkSetScopeKey(displayID: space.displayId, spaceIndex: spaceIndex)
+    }
+
+    private func sortWorkSetVisibleContexts(
+        _ contexts: [WorkSetDesktopContext],
+        currentScopeKey: WorkSetScopeKey?
+    ) -> [WorkSetDesktopContext] {
+        contexts.sorted { lhs, rhs in
+            let lhsCurrent = lhs.scopeKey == currentScopeKey
+            let rhsCurrent = rhs.scopeKey == currentScopeKey
+            if lhsCurrent != rhsCurrent { return lhsCurrent }
+            if lhs.display.focused != rhs.display.focused { return lhs.display.focused && !rhs.display.focused }
+            if lhs.scopeKey.spaceIndex != rhs.scopeKey.spaceIndex { return lhs.scopeKey.spaceIndex < rhs.scopeKey.spaceIndex }
+            return lhs.display.name.localizedCaseInsensitiveCompare(rhs.display.name) == .orderedAscending
+        }
+    }
+
     @discardableResult
-    func reconcileWorkSetScopesIfNeeded(using snapshot: LiveStateSnapshot?) -> Bool {
+    func reconcileWorkSetScopesIfNeeded(using snapshot: LiveStateSnapshot?, contentSignature: String? = nil) -> Bool {
         guard let snapshot,
               snapshot.source == .yabai,
               !snapshot.degraded,
               !workSets.isEmpty else {
+            lastWorkSetScopeReconciliationSignature = nil
             return false
         }
+
+        let resolvedContentSignature = contentSignature ?? liveStateContentSignature(for: snapshot)
+        let reconciliationSignature = workSetScopeReconciliationSignature(contentSignature: resolvedContentSignature)
+        guard reconciliationSignature != lastWorkSetScopeReconciliationSignature else { return false }
+        lastWorkSetScopeReconciliationSignature = reconciliationSignature
 
         var updatedWorkSets = workSets
         var didChange = false
@@ -807,7 +910,36 @@ extension AppModel {
         guard didChange else { return false }
         workSets = updatedWorkSets
         persistWorkSets()
+        lastWorkSetScopeReconciliationSignature = workSetScopeReconciliationSignature(contentSignature: resolvedContentSignature)
         return true
+    }
+
+    private func workSetScopeReconciliationSignature(contentSignature: String) -> String {
+        let workSetSignature = workSets
+            .map { workSet in
+                let members = workSet.members.map {
+                    [
+                        $0.appName,
+                        $0.windowTitle,
+                        $0.role,
+                        $0.subrole,
+                        $0.lastSeenWindowID.map { String($0) } ?? "",
+                        $0.lastSeenPID.map { String($0) } ?? "",
+                        $0.bundleIdentifier ?? "",
+                    ].joined(separator: "|")
+                }.joined(separator: ",")
+                return [
+                    workSet.id.uuidString,
+                    workSet.scopeKey.id,
+                    workSet.sourceDisplayName,
+                    workSet.sourceDisplayWidth.map { String($0) } ?? "",
+                    workSet.sourceDisplayHeight.map { String($0) } ?? "",
+                    workSet.sourceDisplayShapeKey?.description ?? "",
+                    members,
+                ].joined(separator: "||")
+            }
+            .joined(separator: "###")
+        return [contentSignature, workSetSignature].joined(separator: "%%%%")
     }
 
     private func resolvedScopeKey(for workSet: WorkSet, in snapshot: LiveStateSnapshot) -> WorkSetScopeKey {

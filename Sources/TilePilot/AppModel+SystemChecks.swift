@@ -152,11 +152,11 @@ extension AppModel {
         }
         rows.append(SystemCheckRow(
             id: "accessibility",
-            title: "Accessibility Review",
+            title: "Accessibility Access (Optional)",
             detail: firstDetail(
                 accessibilitySetup?.detail,
                 accessibilityCap?.message,
-                fallback: "Review TilePilot in Accessibility, and on a new or migrated Mac also check whether yabai and skhd appear there before starting helper services."
+                fallback: "Optional during setup. Review only if macOS prompts for TilePilot, yabai, or skhd, or if helper startup reports a permission error."
             ),
             status: accessibilityStatus,
             actions: accessibilityStatus == .good ? [.recheck] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
@@ -164,14 +164,14 @@ extension AppModel {
 
         rows.append(SystemCheckRow(
             id: "screen-recording",
-            title: "Screen Recording for MegaMap (Optional)",
+            title: "MegaMap Screenshots (Optional)",
             detail: screenRecordingAuthorized
                 ? "Enabled for real MegaMap screenshots."
-                : "Needed only for real MegaMap screenshots. If TilePilot is not listed yet in Screen Recording settings, use Enable Screen Recording first so macOS can register the request.",
+                : "Needed only for real MegaMap screenshots. Ignore this unless you use MegaMap and want real screenshots instead of the fallback preview.",
             status: screenRecordingAuthorized ? .good : .notice,
             actions: screenRecordingAuthorized
                 ? [.recheck]
-                : [.requestScreenRecordingAccess, .openScreenRecordingSettings, .recheck]
+                : [.openScreenRecordingSettings, .recheck]
         ))
 
         let missionWarningCount = missionControlChecks.filter { $0.status == .warning }.count
@@ -186,11 +186,11 @@ extension AppModel {
         }
         let missionDetail: String
         if missionWarningCount > 0 {
-            missionDetail = "Review the checklist below and match both Mission Control values."
+            missionDetail = "Optional. Review the checklist only if desktop navigation or desktop scrub behaves unpredictably."
         } else if missionUnknownCount > 0 {
-            missionDetail = "TilePilot could not verify one or both values automatically. Review the checklist below manually."
+            missionDetail = "TilePilot could not verify one or both values automatically. You can ignore this unless desktop navigation is unreliable."
         } else if missionControlChecks.isEmpty {
-            missionDetail = "Review the checklist below manually."
+            missionDetail = "Optional manual review for desktop navigation behavior."
         } else {
             missionDetail = "The checklist below matches the expected Mission Control values."
         }
@@ -204,7 +204,18 @@ extension AppModel {
                 : [.openMissionControlSettings, .openMissionControlKeyboardShortcuts, .recheck]
         ))
 
+        let passiveOptionalRowIDs: Set<String> = [
+            "accessibility",
+            "screen-recording",
+            "mission-control",
+            "start-at-logon",
+        ]
         return rows.sorted { lhs, rhs in
+            let lhsPassiveOptional = passiveOptionalRowIDs.contains(lhs.id)
+            let rhsPassiveOptional = passiveOptionalRowIDs.contains(rhs.id)
+            if lhsPassiveOptional != rhsPassiveOptional {
+                return !lhsPassiveOptional
+            }
             if lhs.status.severityRank != rhs.status.severityRank {
                 return lhs.status.severityRank > rhs.status.severityRank
             }

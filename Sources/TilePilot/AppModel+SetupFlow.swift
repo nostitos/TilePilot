@@ -28,9 +28,6 @@ extension AppModel {
         if !helpersInstalledForSetup {
             return .installHelpers
         }
-        if managedHelpersInstalledButNotStartedForSetup {
-            return .reviewAccessibility
-        }
         if !helperServicesRunningForSetup {
             return .startHelperServices
         }
@@ -49,9 +46,9 @@ extension AppModel {
             }
             return "TilePilot needs two helper tools to manage windows and keyboard shortcuts. TilePilot can install them for you."
         case .reviewAccessibility:
-            return "Before the first helper start, review Accessibility for TilePilot and check whether yabai and skhd also appear there on this Mac."
+            return "Optional. Review Accessibility only if macOS prompts for TilePilot or helpers, or if focus/bring-to-front fallbacks do not work."
         case .startHelperServices:
-            return "TilePilot helpers are installed. After reviewing Accessibility, start the background services."
+            return "TilePilot helpers are installed. Start the background services to enable window control and shortcuts."
         case .recheck:
             return "TilePilot is still checking this Mac. Recheck setup if the status looks stale."
         case .ready:
@@ -87,7 +84,6 @@ extension AppModel {
         let optionalIDs: Set<String> = [
             "start-at-logon",
             "accessibility",
-            "screen-recording",
             "mission-control",
         ]
         return systemCheckRows.filter { optionalIDs.contains($0.id) }

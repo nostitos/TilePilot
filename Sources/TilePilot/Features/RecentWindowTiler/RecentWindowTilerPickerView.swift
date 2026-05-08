@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct RecentWindowTilerPickerView: View {
     @ObservedObject var model: AppModel
 
-    private let rowHeight: CGFloat = 52
+    private let rowHeight: CGFloat = 42
     @State private var draggedWindowID: Int?
 
     var body: some View {
@@ -14,23 +14,16 @@ struct RecentWindowTilerPickerView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     header
 
-                    Picker("", selection: Binding(
-                        get: { state.mode },
-                        set: { model.setRecentWindowTilerMode($0) }
-                    )) {
-                        ForEach(RecentWindowTilerMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    modePickerRow(state: state)
 
-                    RecentWindowTilerGridPreview(
-                        candidates: state.orderedEffectiveSelectedCandidates,
+                    RecentWindowTilerResultPreview(
+                        state: state,
                         displayAspectRatio: state.displayAspectRatio,
                         draggedWindowID: $draggedWindowID,
                         model: model
                     )
 
+                    let idealListHeight = listHeight(for: state.candidates.count)
                     ScrollView {
                         LazyVStack(spacing: 6) {
                             ForEach(Array(state.candidates.enumerated()), id: \.element.windowID) { index, candidate in
@@ -39,7 +32,13 @@ struct RecentWindowTilerPickerView: View {
                                     candidate: candidate,
                                     mode: state.mode,
                                     isSelected: state.effectiveSelectedWindowIDs.contains(candidate.windowID),
-                                    isEnabled: candidate.isSelectable(in: state.mode)
+                                    isEnabled: candidate.isSelectable(in: state.mode),
+                                    onFocus: {
+                                        model.focusRecentWindowTilerCandidate(windowID: candidate.windowID)
+                                    },
+                                    onClose: {
+                                        model.closeRecentWindowTilerCandidate(windowID: candidate.windowID)
+                                    }
                                 ) {
                                     model.toggleRecentWindowTilerSelection(windowID: candidate.windowID)
                                 }
@@ -59,7 +58,7 @@ struct RecentWindowTilerPickerView: View {
                         }
                         .padding(.vertical, 1)
                     }
-                    .frame(height: listHeight(for: state.candidates.count))
+                    .frame(minHeight: min(idealListHeight, rowHeight), idealHeight: idealListHeight, maxHeight: .infinity)
 
                     HStack {
                         Text("\(state.selectedCount) selected")
@@ -73,35 +72,131 @@ struct RecentWindowTilerPickerView: View {
                         }
                         .keyboardShortcut(.cancelAction)
 
-                        Button("Tile Selected Windows") {
+                        Button(primaryActionTitle(for: state)) {
                             model.applyRecentWindowTilerSelection()
                         }
                         .buttonStyle(RecentWindowTilerPrimaryButtonStyle())
                         .keyboardShortcut(.defaultAction)
-                        .disabled(state.selectedCount == 0)
+                        .disabled(!canApply(state))
                     }
                 }
                 .padding(16)
-                .frame(width: 500)
+                .frame(minWidth: 500, maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
             } else {
                 EmptyView()
-                    .frame(width: 500, height: 120)
+                    .frame(minWidth: 500, minHeight: 120)
             }
         }
     }
 
+    @ViewBuilder
+    private func modePickerRow(state: RecentWindowTilerPresentationState) -> some View {
+        HStack(spacing: 8) {
+            Picker("", selection: Binding(
+                get: { state.mode },
+                set: { model.setRecentWindowTilerMode($0) }
+            )) {
+                ForEach(RecentWindowTilerMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                        .disabled(mode == .template && !state.canUseTemplateMode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(minWidth: 300, maxWidth: 380)
+
+            if state.mode == .template {
+                templatePicker(state: state)
+                    .frame(minWidth: 180, maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func templatePicker(state: RecentWindowTilerPresentationState) -> some View {
+        if state.templateOptions.isEmpty {
+            Text("No matching templates for this display.")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("", selection: Binding(
+                get: { state.selectedTemplateID },
+                set: { if let templateID = $0 { model.setRecentWindowTilerTemplate(templateID) } }
+            )) {
+                ForEach(state.templateOptions) { template in
+                    Text("\(template.name) · \(template.slotCount) slot\(template.slotCount == 1 ? "" : "s")")
+                        .tag(Optional(template.id))
+                }
+            }
+            .labelsHidden()
+        }
+    }
+
+    private func primaryActionTitle(for state: RecentWindowTilerPresentationState) -> String {
+        switch state.mode {
+        case .autoTiled:
+            return "Tile Selected Windows"
+        case .floatingGrid:
+            return "Arrange Selected Windows"
+        case .template:
+            return "Apply Template"
+        }
+    }
+
+    private func canApply(_ state: RecentWindowTilerPresentationState) -> Bool {
+        guard state.selectedCount > 0 else { return false }
+        guard state.mode != .template || state.selectedTemplateID != nil else { return false }
+        return true
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("Pick Windows to Tile")
                 .font(.title3.weight(.semibold))
-            Text("Click to select. Drag rows to change placement order.")
-                .font(.callout)
+            Text("Drag to reorder")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button {
+                model.refreshRecentWindowTiler()
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .help("Refresh this picker snapshot")
         }
     }
 
     private func listHeight(for count: Int) -> CGFloat {
-        CGFloat(min(max(count, 1), 8)) * rowHeight + CGFloat(max(0, min(count, 8) - 1) * 6)
+        CGFloat(min(max(count, 1), 10)) * rowHeight + CGFloat(max(0, min(count, 10) - 1) * 6)
+    }
+}
+
+private struct RecentWindowTilerResultPreview: View {
+    let state: RecentWindowTilerPresentationState
+    let displayAspectRatio: Double
+    @Binding var draggedWindowID: Int?
+    let model: AppModel
+
+    var body: some View {
+        if state.mode == .template, let template = state.selectedTemplateOption {
+            RecentWindowTilerTemplatePreview(
+                template: template,
+                slotCandidates: state.templateSlotCandidates,
+                displayAspectRatio: displayAspectRatio,
+                draggedWindowID: $draggedWindowID,
+                model: model
+            )
+        } else {
+            RecentWindowTilerGridPreview(
+                candidates: state.orderedEffectiveSelectedCandidates,
+                displayAspectRatio: displayAspectRatio,
+                draggedWindowID: $draggedWindowID,
+                model: model
+            )
+        }
     }
 }
 
@@ -127,24 +222,7 @@ private struct RecentWindowTilerGridPreview: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Result Preview")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("Drag tiles to reorder")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                if !candidates.isEmpty {
-                    Text("\(grid.rows) x \(grid.cols)")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.12), in: Capsule())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 0) {
             GeometryReader { proxy in
                 let canvas = previewCanvasSize(in: proxy.size)
                 let origin = CGPoint(
@@ -270,6 +348,134 @@ private struct RecentWindowTilerGridPreview: View {
     }
 }
 
+private struct RecentWindowTilerTemplatePreview: View {
+    let template: RecentWindowTilerTemplateOption
+    let slotCandidates: [RecentWindowTilerCandidate?]
+    let displayAspectRatio: Double
+    @Binding var draggedWindowID: Int?
+    let model: AppModel
+
+    private var slots: [WindowLayoutSlot] {
+        WindowLayoutTemplate.sortedSlots(template.slots)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeometryReader { proxy in
+                let canvas = previewCanvasSize(in: proxy.size)
+                let origin = CGPoint(
+                    x: (proxy.size.width - canvas.width) / 2,
+                    y: (proxy.size.height - canvas.height) / 2
+                )
+
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(0.06))
+                        .frame(width: canvas.width, height: canvas.height)
+                        .position(x: origin.x + (canvas.width / 2), y: origin.y + (canvas.height / 2))
+
+                    ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                        let rect = previewRect(for: slot, canvas: canvas)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.secondary.opacity(0.05))
+                            )
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: origin.x + rect.midX, y: origin.y + rect.midY)
+
+                        Text("\(index + 1)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .padding(5)
+                            .position(x: origin.x + rect.minX + 14, y: origin.y + rect.minY + 14)
+                    }
+
+                    ForEach(slots.indices, id: \.self) { index in
+                        if slotCandidates.indices.contains(index),
+                           let candidate = slotCandidates[index] {
+                            let slot = slots[index]
+                            let rect = previewRect(for: slot, canvas: canvas)
+                            let iconSize = min(56, max(32, min(rect.width, rect.height) * 0.68))
+
+                            RecentWindowTilerGridPreviewTile(candidate: candidate, order: index + 1, iconSize: iconSize)
+                                .frame(width: rect.width, height: rect.height)
+                                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .position(x: origin.x + rect.midX, y: origin.y + rect.midY)
+                                .zIndex(Double(index + 1))
+                                .gesture(
+                                    DragGesture(minimumDistance: 3, coordinateSpace: .named("RecentWindowTilerTemplatePreview"))
+                                        .onChanged { value in
+                                            let activeWindowID = draggedWindowID ?? candidate.windowID
+                                            draggedWindowID = activeWindowID
+
+                                            guard let targetWindowID = previewTargetWindowID(
+                                                at: value.location,
+                                                canvas: canvas,
+                                                origin: origin
+                                            ),
+                                                targetWindowID != activeWindowID else {
+                                                return
+                                            }
+
+                                            model.reorderRecentWindowTilerCandidate(
+                                                draggedWindowID: activeWindowID,
+                                                targetWindowID: targetWindowID
+                                            )
+                                        }
+                                        .onEnded { _ in
+                                            draggedWindowID = nil
+                                        }
+                                )
+                        }
+                    }
+                }
+                .coordinateSpace(name: "RecentWindowTilerTemplatePreview")
+            }
+            .frame(height: 220)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func previewCanvasSize(in size: CGSize) -> CGSize {
+        guard size.width > 0, size.height > 0 else { return .zero }
+        let aspectRatio = max(displayAspectRatio, 0.5)
+        let widthFromHeight = size.height * aspectRatio
+        if widthFromHeight <= size.width {
+            return CGSize(width: widthFromHeight, height: size.height)
+        }
+        return CGSize(width: size.width, height: size.width / aspectRatio)
+    }
+
+    private func previewRect(for slot: WindowLayoutSlot, canvas: CGSize) -> CGRect {
+        let fitted = RecentWindowTemplatePlanner.fittedNormalizedRect(
+            for: slot,
+            template: template,
+            targetAspectRatio: Double(canvas.width / max(canvas.height, 1))
+        )
+        return CGRect(
+            x: fitted.minX * canvas.width,
+            y: fitted.minY * canvas.height,
+            width: fitted.width * canvas.width,
+            height: fitted.height * canvas.height
+        )
+    }
+
+    private func previewTargetWindowID(at point: CGPoint, canvas: CGSize, origin: CGPoint) -> Int? {
+        for index in slots.indices.reversed() {
+            guard slotCandidates.indices.contains(index),
+                  let candidate = slotCandidates[index] else { continue }
+            let rect = previewRect(for: slots[index], canvas: canvas).offsetBy(dx: origin.x, dy: origin.y)
+            if rect.contains(point) {
+                return candidate.windowID
+            }
+        }
+        return nil
+    }
+}
+
 private struct RecentWindowTilerGridPreviewTile: View {
     let candidate: RecentWindowTilerCandidate
     let order: Int
@@ -351,13 +557,12 @@ private struct RecentWindowTilerCandidateRow: View {
     let mode: RecentWindowTilerMode
     let isSelected: Bool
     let isEnabled: Bool
+    let onFocus: () -> Void
+    let onClose: () -> Void
     let onToggle: () -> Void
 
     var body: some View {
-        Button(action: {
-            guard isEnabled else { return }
-            onToggle()
-        }) {
+        HStack(spacing: 8) {
             HStack(spacing: 10) {
                 Text("\(order)")
                     .font(.caption.weight(.bold))
@@ -370,26 +575,22 @@ private struct RecentWindowTilerCandidateRow: View {
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(candidate.primaryDisplayText)
-                            .font(.callout.weight(.semibold))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if candidate.focused {
-                            chip("Focused", tint: .blue)
-                        }
-                        if candidate.isAXOnly {
-                            chip("AX-only", tint: .teal)
-                        }
-                        chip(candidate.floating ? "Floating" : "Tiled", tint: candidate.floating ? .orange : .green)
+                HStack(spacing: 6) {
+                    Text(candidate.primaryDisplayText)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
+                    if candidate.focused {
+                        chip("Focused", tint: .blue)
                     }
-                    if let secondaryText = candidate.secondaryDisplayText {
-                        Text(secondaryText)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    if candidate.minimized {
+                        chip("Minimized", tint: .secondary)
                     }
+                    if candidate.isAXOnly {
+                        chip("AX-only", tint: .teal)
+                    }
+                    chip(candidate.floating ? "Floating" : "Tiled", tint: candidate.floating ? .orange : .green)
                 }
 
                 Spacer()
@@ -398,17 +599,37 @@ private struct RecentWindowTilerCandidateRow: View {
                     .font(.title3)
                     .foregroundStyle(checkColor)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 52)
-            .background(rowBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.16), lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .opacity(isEnabled ? 1 : 0.56)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard isEnabled else { return }
+                onToggle()
+            }
+
+            Button(action: onFocus) {
+                Image(systemName: "eye")
+                    .font(.callout.weight(.semibold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(RecentWindowTilerIconButtonStyle(tint: .blue))
+            .help("Focus this window")
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(RecentWindowTilerIconButtonStyle(tint: .red))
+            .help("Close this window")
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(height: 42)
+        .background(rowBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .help(candidate.disabledReason(in: mode) ?? rowHelpText)
     }
 
@@ -439,5 +660,19 @@ private struct RecentWindowTilerCandidateRow: View {
             return icon
         }
         return NSImage(systemSymbolName: "app.dashed", accessibilityDescription: "App") ?? NSImage(size: NSSize(width: 28, height: 28))
+    }
+}
+
+private struct RecentWindowTilerIconButtonStyle: ButtonStyle {
+    let tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(tint)
+            .background(
+                Circle()
+                    .fill(tint.opacity(configuration.isPressed ? 0.22 : 0.12))
+            )
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }

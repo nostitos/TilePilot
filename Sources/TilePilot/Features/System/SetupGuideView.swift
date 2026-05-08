@@ -120,7 +120,7 @@ struct SetupGuideView: View {
                     .padding(.vertical, 4)
                     .background(color(for: step.status).opacity(0.12), in: Capsule())
 
-                Text(step.status == .good ? "Complete" : "Needs attention")
+                Text(statusLabel(for: step))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(step.status == .good ? .green : .secondary)
             }
@@ -186,7 +186,7 @@ struct SetupGuideView: View {
                 }
             }
 
-            detailSection(title: "Why TilePilot needs this", step.whyItMatters)
+            detailSection(title: step.category == .featureOptional ? "What this enables" : "Why TilePilot needs this", step.whyItMatters)
 
             Spacer(minLength: 0)
 
@@ -294,6 +294,16 @@ struct SetupGuideView: View {
         case .error:
             return .red
         }
+    }
+
+    private func statusLabel(for step: SetupGuideStep) -> String {
+        if step.status == .good {
+            return "Complete"
+        }
+        if step.category == .featureOptional {
+            return "Optional"
+        }
+        return "Needs attention"
     }
 
     private func primaryButtonLabel(for step: SetupGuideStep, action: SystemCheckAction) -> String {

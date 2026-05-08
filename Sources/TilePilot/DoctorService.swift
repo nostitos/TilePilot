@@ -205,8 +205,8 @@ final class DoctorService: @unchecked Sendable {
                 key: "accessibility",
                 status: accessibilityTrusted ? .available : .unknown,
                 reasonCode: accessibilityTrusted ? nil : "tilepilot-accessibility-optional",
-                message: accessibilityTrusted ? "TilePilot Accessibility permission is granted." : "TilePilot could not confirm Accessibility permission for the current app process.",
-                remediationSteps: accessibilityTrusted ? [] : ["Optional: Open System Settings > Privacy & Security > Accessibility and enable \(accessibilityClientName) if you want TilePilot-triggered prompts/helpers.", "If it is already enabled there, use Recheck or relaunch TilePilot."]
+                message: accessibilityTrusted ? "TilePilot Accessibility permission is granted." : "TilePilot Accessibility permission is off. This is optional unless macOS prompts for it or a focus/bring-to-front fallback fails.",
+                remediationSteps: accessibilityTrusted ? [] : ["Optional: Open System Settings > Privacy & Security > Accessibility and enable \(accessibilityClientName) only if a feature you use asks for it.", "If it is already enabled there, use Recheck or relaunch TilePilot."]
             )
         )
 

@@ -6,10 +6,6 @@ extension AppModel {
         Dictionary(uniqueKeysWithValues: setupChecklistItems.map { ($0.id, $0) })
     }
 
-    private var screenRecordingAuthorizedForSetupGuide: Bool {
-        megamapCaptureService.screenRecordingAuthorized()
-    }
-
     var missionControlChecklistItems: [MissionControlChecklistItem] {
         buildMissionControlChecklistItems(from: doctorSnapshot?.missionControlChecks ?? [])
     }
@@ -57,8 +53,6 @@ extension AppModel {
             missionControlStatus = .good
         }
 
-        let screenRecordingStatus: SystemCheckStatus = screenRecordingAuthorizedForSetupGuide ? .good : .notice
-
         return [
             SetupGuideStep(
                 kind: .installHelpers,
@@ -85,22 +79,22 @@ extension AppModel {
             ),
             SetupGuideStep(
                 kind: .accessibility,
-                category: .recommended,
-                title: "Review Accessibility Permissions",
-                summary: accessibilityStatus == .good ? "TilePilot Accessibility access is already granted." : "Before the first helper start, review Accessibility for TilePilot and any helper entries macOS shows for yabai and skhd.",
-                whyItMatters: "TilePilot uses Accessibility for some window focus and bring-to-front fallbacks. On a new or migrated Mac, macOS may also require yabai and skhd to be re-enabled in Accessibility before they work reliably again.",
-                whatToDo: "Request TilePilot's permission first. Then open Accessibility settings and make sure TilePilot is enabled. On a new or migrated Mac, also look for yabai and skhd there and re-enable them if they appear before you start helper services.",
+                category: .featureOptional,
+                title: "Accessibility Access (Optional)",
+                summary: accessibilityStatus == .good ? "TilePilot Accessibility access is already granted." : "Accessibility is optional during setup. Review it later only if macOS prompts, helper startup fails with a permission error, or focus fallbacks do not work.",
+                whyItMatters: "TilePilot can use Accessibility for bring-to-front/focus fallbacks. Core helper installation and startup should not wait on this unless macOS explicitly reports a permission failure.",
+                whatToDo: "Continue setup now. If macOS shows TilePilot, yabai, or skhd in Accessibility later, enable only the entries needed for the feature you are using.",
                 detail: firstNonEmptyGuideDetail([
-                    accessibilityStatus == .good ? nil : "If yabai or skhd still report socket, startup, or permission failures after migration, the missing approval is often in the Accessibility list rather than inside TilePilot itself.",
+                    accessibilityStatus == .good ? nil : "Not required for MegaMap screenshots. Not required just to complete initial setup.",
                     accessibilitySetup?.detail,
                     capabilityByKey["accessibility"]?.message,
                 ]),
-                verificationText: "Return to TilePilot after changing the setting. It will recheck automatically.",
+                verificationText: "You can come back to this from System if a feature later needs it.",
                 status: accessibilityStatus == .good ? .good : .notice,
                 isBlocking: false,
                 isSkippable: true,
-                primaryAction: accessibilityStatus == .good ? nil : .requestAccessibilityAccess,
-                secondaryActions: accessibilityStatus == .good ? [] : [.openAccessibilitySettings, .recheck]
+                primaryAction: nil,
+                secondaryActions: accessibilityStatus == .good ? [] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
             ),
             SetupGuideStep(
                 kind: .startHelperServices,
@@ -108,12 +102,12 @@ extension AppModel {
                 title: "Start Helper Services",
                 summary: helperServicesStatus == .good ? "Helper services are running." : "TilePilot helpers are installed, but the background services are not fully running yet.",
                 whyItMatters: "TilePilot can only query desktops and react to shortcuts when yabai and skhd are active.",
-                whatToDo: "After reviewing Accessibility, start the helper services. If startup still fails, revisit Accessibility and re-enable TilePilot, yabai, and skhd if they are listed there.",
+                whatToDo: "Start the helper services. If macOS prompts for a helper permission, approve it in System Settings and recheck.",
                 detail: firstNonEmptyGuideDetail([
                     capabilityByKey["yabai-query"]?.message,
                     capabilityByKey["yabai-daemon"]?.message,
                     capabilityByKey["skhd-daemon"]?.message,
-                    helperServicesStatus == .good ? nil : "TilePilot installs helpers first and waits for you to review Accessibility before the first daemon start to avoid repeated permission prompts.",
+                    helperServicesStatus == .good ? nil : "If startup fails with a permission message, open Accessibility and enable the helper entry macOS names in the prompt.",
                     yabaiServiceSetup?.detail,
                     skhdServiceSetup?.detail,
                 ]),
@@ -122,7 +116,7 @@ extension AppModel {
                 isBlocking: true,
                 isSkippable: true,
                 primaryAction: .startYabai,
-                secondaryActions: [.openAccessibilitySettings, .restartYabai, .restartSkhd, .recheck]
+                secondaryActions: [.restartYabai, .restartSkhd, .openAccessibilitySettings, .recheck]
             ),
             SetupGuideStep(
                 kind: .startAtLogon,
@@ -143,41 +137,24 @@ extension AppModel {
             ),
             SetupGuideStep(
                 kind: .missionControl,
-                category: .recommended,
+                category: .featureOptional,
                 title: "Review Mission Control Settings",
-                summary: missionControlStatus == .good ? "Mission Control settings look compatible." : "Mission Control settings can affect how reliably macOS desktops behave for TilePilot.",
-                whyItMatters: "Desktop ordering and display grouping need to be predictable for overview and desktop navigation features.",
+                summary: missionControlStatus == .good ? "Mission Control settings look compatible." : "Mission Control settings only affect desktop-navigation reliability. They are not required to finish setup.",
+                whyItMatters: "Desktop scrub and some desktop-navigation previews work best when desktop ordering and display grouping are predictable.",
                 whatToDo: missionControlWhatToDo(missionControlChecks),
                 detail: missionControlGuideDetail(missionControlChecks),
-                verificationText: "After reviewing the settings, come back to TilePilot and press Recheck. If you change Displays have separate Spaces, macOS may ask you to log out first.",
+                verificationText: "Review this later only if desktop navigation behaves unpredictably. If you change Displays have separate Spaces, macOS may ask you to log out first.",
                 status: missionControlStatus,
                 isBlocking: false,
                 isSkippable: true,
                 primaryAction: missionControlStatus == .good ? nil : .openMissionControlSettings,
                 secondaryActions: missionControlStatus == .good ? [] : [.openMissionControlKeyboardShortcuts, .recheck]
             ),
-            SetupGuideStep(
-                kind: .screenRecording,
-                category: .featureOptional,
-                title: "Enable Screen Recording for MegaMap",
-                summary: screenRecordingStatus == .good ? "Screen Recording is enabled for MegaMap screenshots." : "MegaMap needs Screen Recording only for real screenshots. Without it, TilePilot shows the synthetic fallback.",
-                whyItMatters: "MegaMap uses macOS screen capture APIs to build real desktop screenshots.",
-                whatToDo: "Use Enable Screen Recording first. TilePilot will request capture access, then open Screen Recording settings.",
-                detail: screenRecordingStatus == .good
-                    ? "TilePilot can already capture real MegaMap screenshots."
-                    : "If TilePilot is not listed in Screen Recording yet, macOS has not registered the capture request. Use Enable Screen Recording again, then reopen the settings page and look for TilePilot manually.",
-                verificationText: "After you return to TilePilot, Screen Recording will be rechecked automatically.",
-                status: screenRecordingStatus,
-                isBlocking: false,
-                isSkippable: true,
-                primaryAction: screenRecordingStatus == .good ? nil : .requestScreenRecordingAccess,
-                secondaryActions: screenRecordingStatus == .good ? [] : [.openScreenRecordingSettings, .recheck]
-            ),
         ]
     }
 
     var incompleteSetupGuideSteps: [SetupGuideStep] {
-        setupGuideSteps.filter { !$0.isSatisfied }
+        setupGuideSteps.filter { !$0.isSatisfied && $0.category != .featureOptional }
     }
 
     var incompleteEssentialSetupGuideSteps: [SetupGuideStep] {
@@ -278,10 +255,6 @@ extension AppModel {
     }
 
     private func preferredStartingSetupGuideStep(for source: SetupGuidePresentationSource) -> SetupGuideStep? {
-        if managedHelpersInstalledButNotStartedForSetup,
-           let accessibilityStep = setupGuideSteps.first(where: { $0.kind == .accessibility && !$0.isSatisfied }) {
-            return accessibilityStep
-        }
         switch source {
         case .automatic:
             return incompleteEssentialSetupGuideSteps.first ?? incompleteSetupGuideSteps.first

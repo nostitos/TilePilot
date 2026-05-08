@@ -99,6 +99,8 @@ final class AppModel: ObservableObject {
     static let appUpdateLatestKnownReleaseDefaultsKey = "TilePilot.appUpdate.latestKnownRelease"
     static let appUpdateDismissedVersionDefaultsKey = "TilePilot.appUpdate.dismissedVersion"
     static let recentWindowTilerPreferredSelectionCountDefaultsKey = "TilePilot.recentWindowTiler.preferredSelectionCount"
+    static let recentWindowTilerLastModeDefaultsKey = "TilePilot.recentWindowTiler.lastMode"
+    static let recentWindowTilerLastTemplateIDDefaultsKey = "TilePilot.recentWindowTiler.lastTemplateID"
     static let appUpdateAutomaticChecksEnabledInfoKey = "TilePilotEnableAutomaticUpdateChecks"
 
     private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
@@ -200,7 +202,11 @@ final class AppModel: ObservableObject {
     @Published var dismissedAppUpdateVersion: String? = UserDefaults.standard.string(forKey: AppModel.appUpdateDismissedVersionDefaultsKey)
     @Published var recentWindowTilerState: RecentWindowTilerPresentationState?
     @Published var windowLayoutTemplates: [WindowLayoutTemplate] = AppModel.loadWindowLayoutTemplates()
-    @Published var workSets: [WorkSet] = AppModel.loadWorkSets()
+    @Published var workSets: [WorkSet] = AppModel.loadWorkSets() {
+        didSet {
+            lastWorkSetScopeReconciliationSignature = nil
+        }
+    }
     @Published var activeWorkSetIDsByScope: [String: String] = AppModel.loadActiveWorkSetIDsByScope()
     @Published var workSetBackdropPresentations: [WorkSetScopeKey: WorkSetBackdropPresentation] = [:]
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
@@ -436,6 +442,12 @@ final class AppModel: ObservableObject {
     private(set) var cachedPinnedShortcutContextItems: [PinnedShortcutContextItem] = []
     var cachedAvailableAppNamesFromLiveState: [String] = []
     var cachedAppNamesForBehaviorEditor: [String] = []
+    var cachedWorkSetRuntimeContentSignature: String?
+    var cachedWorkSetRuntimeSnapshotUpdatedAt: Date?
+    var cachedWorkSetVisibleContexts: [WorkSetDesktopContext] = []
+    var cachedWorkSetContextByScopeKey: [WorkSetScopeKey: WorkSetDesktopContext] = [:]
+    var cachedCurrentDesktopWorkSetContext: WorkSetDesktopContext?
+    var cachedWorkSetStatusCandidateWindows: [WindowState] = []
     var cachedSelectedEditableFile: EditableConfigFile?
     var cachedAppTilingBehaviorByNormalizedName: [String: AppTilingBehavior] = [:]
     var cachedAppForegroundPolicyByExactNormalizedName: [String: AppForegroundPolicy] = [:]
@@ -454,6 +466,7 @@ final class AppModel: ObservableObject {
     var savedDesktopLayoutBeforeTiledWorkSetByScope: [WorkSetScopeKey: String] = [:]
     var savedWindowFramesBeforeTiledWorkSetByScope: [WorkSetScopeKey: [Int: WorkSetSavedWindowFrame]] = [:]
     var lastWorkSetOwnedLayoutSyncSignatureByScope: [String: String] = [:]
+    var lastWorkSetScopeReconciliationSignature: String?
     var activeWorkSetLayoutSyncTask: Task<Void, Never>?
     var workSetActivationTask: Task<Void, Never>?
     var workSetActivationRequestID = 0
@@ -719,8 +732,9 @@ final class AppModel: ObservableObject {
 
         let snapshot = makeLiveStateSnapshot(from: poll)
         latestLiveStateSnapshot = snapshot
-        _ = reconcileWorkSetScopesIfNeeded(using: snapshot)
         let contentSignature = liveStateContentSignature(for: snapshot)
+        _ = reconcileWorkSetScopesIfNeeded(using: snapshot, contentSignature: contentSignature)
+        rebuildWorkSetRuntimeCaches(using: snapshot, contentSignature: contentSignature)
         if lastLiveStateContentSignature == contentSignature {
             recordRuntimeBurst(.unchangedPoll)
             mutateRuntimeDiagnostics { $0.liveStateUnchangedPollCount += 1 }
@@ -1549,8 +1563,6 @@ final class AppModel: ObservableObject {
             snapshot.degradedReason ?? "",
             String(snapshot.yabaiWindowTotal ?? -1),
             String(snapshot.fallbackWindowTotal ?? -1),
-            String(snapshot.consecutiveMismatchSamples),
-            String(snapshot.consecutiveHealthySamples),
             snapshot.lastErrorMessage ?? "",
             displays,
             spaces,

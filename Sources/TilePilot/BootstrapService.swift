@@ -89,7 +89,7 @@ final class BootstrapService: @unchecked Sendable {
             state: trusted ? .installed : .unknown,
             detail: trusted
                 ? "Granted"
-                : "Review TilePilot in Accessibility, and on a new or migrated Mac also check whether yabai and skhd appear there before the first helper start."
+                : "Optional during setup. Review Accessibility later only if macOS prompts for TilePilot, yabai, or skhd, or if helper startup reports a permission error."
         )
     }
 

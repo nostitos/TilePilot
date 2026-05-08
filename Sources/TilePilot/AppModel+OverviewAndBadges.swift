@@ -435,6 +435,7 @@ extension AppModel {
         )
         cachedAvailableAppNamesFromLiveState = names.sorted()
         rebuildBehaviorEditorAppNamesCache()
+        rebuildWorkSetRuntimeCaches(using: liveStateSnapshot)
     }
 
     func rebuildBehaviorEditorAppNamesCache() {

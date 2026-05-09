@@ -52,6 +52,17 @@ final class TemplateModelsTests: XCTestCase {
         XCTAssertEqual(slot.allowedApps, ["Slack", "Telegram"])
     }
 
+    func testReleaseDefaultsIncludeTemplateLibrary() {
+        let templates = ReleaseDefaultsService().currentProfile().userState.windowLayoutTemplates
+
+        XCTAssertGreaterThanOrEqual(templates.count, 24)
+        XCTAssertTrue(templates.contains { $0.name == "Focus Split" })
+        XCTAssertTrue(templates.contains { $0.name == "TV Ops Wall 3x3" })
+        XCTAssertTrue(templates.contains { $0.name == "Ultrawide Hero" })
+        XCTAssertTrue(templates.contains { $0.name == "Dual Display Periphery" })
+        XCTAssertTrue(templates.allSatisfy { !$0.slots.isEmpty })
+    }
+
     func testNormalizedTemplateSlotZOrderPreservingOrderKeepsCanvasSequence() {
         let a = WindowLayoutSlot(normalizedX: 0.05, normalizedY: 0.05, normalizedWidth: 0.2, normalizedHeight: 0.2, zIndex: 0)
         let b = WindowLayoutSlot(normalizedX: 0.35, normalizedY: 0.05, normalizedWidth: 0.2, normalizedHeight: 0.2, zIndex: 1)

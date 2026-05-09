@@ -86,6 +86,10 @@ If you want to use TilePilot the way it is intended, the path looks like this:
 
 ![Templates](assets/screenshots/templates.png)
 
+### Default Template Library
+
+![Default Template Library](docs/assets/template-mockup.png)
+
 ### Work Sets
 
 ![Work Sets](assets/screenshots/work-sets.png)
@@ -166,13 +170,13 @@ You can enable it and change the trigger keys in `Behaviors`.
 
 TilePilot ships with bundled `yabai` and `skhd` helpers and installs/manages them for you.
 
-You may still need to approve:
+Optional approvals depend on the features you use:
 
-- Accessibility for `TilePilot`, `yabai`, and `skhd`
-- Screen Recording if you want real `MegaMap` screenshots
+- Accessibility only if macOS prompts for `TilePilot`, `yabai`, or `skhd`, or if a focus/bring-to-front fallback does not work
+- Screen Recording only if you want real `MegaMap` screenshots instead of fallback previews
 - Start at Login if you want TilePilot available after sign-in
 
-For the most predictable desktop behavior on macOS, TilePilot expects these Mission Control settings:
+For the most predictable desktop-navigation behavior on macOS, review these Mission Control settings:
 
 - `Automatically rearrange Spaces based on most recent use`: `Off`
 - `Displays have separate Spaces`: `On`
@@ -191,7 +195,7 @@ TilePilot currently focuses on the everyday supported path:
 - recent-window picking with preview, reordering, remembered selection count, and optimized floating-grid placement
 - exact floating layout templates with app-aware slot rules and display auto-fit
 - desktop-scoped Work Sets with optional backdrops, minimized-window restore, missing-app launch, and per-set layout mode
-- a built-in sample template so new installs can try Templates immediately
+- a built-in default template library so new installs can try laptop, wide, ultrawide, superwide, portrait, and dual-display layouts immediately
 - live desktop visibility through `Overview`, overlays, and `MegaMap`
 - Mission Control checklist guidance inside `System`
 - safe config management for TilePilot-managed sections

@@ -170,6 +170,20 @@ if [[ -z "$DEVICE" || -z "$MOUNT_POINT" ]]; then
   exit 1
 fi
 
+FINDER_DISK_READY=0
+for _ in {1..20}; do
+  if /usr/bin/osascript -e 'tell application "Finder" to exists disk "'"$VOL_NAME"'"' 2>/dev/null | grep -q "true"; then
+    FINDER_DISK_READY=1
+    break
+  fi
+  sleep 0.5
+done
+
+if [[ "$FINDER_DISK_READY" -ne 1 ]]; then
+  echo "Finder did not register mounted DMG volume: $VOL_NAME at $MOUNT_POINT" >&2
+  exit 1
+fi
+
 /usr/bin/SetFile -a V "$MOUNT_POINT/.background" || true
 
 /usr/bin/osascript <<EOF

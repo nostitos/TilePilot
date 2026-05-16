@@ -57,12 +57,12 @@ extension AppModel {
             SetupGuideStep(
                 kind: .installHelpers,
                 category: .essential,
-                title: "Install TilePilot Helpers",
-                summary: helperInstallStatus == .good ? "TilePilot helpers are installed." : "TilePilot cannot manage windows or shortcuts until its helpers are installed.",
-                whyItMatters: "TilePilot uses yabai for desktop and window control, and skhd for global hotkeys.",
+                title: "Prepare Window Control",
+                summary: helperInstallStatus == .good ? "TilePilot has installed its local yabai/skhd components." : "TilePilot is still preparing the local components it uses for window control and shortcuts.",
+                whyItMatters: "TilePilot uses yabai to read and move windows/desktops. It uses skhd to listen for global keyboard shortcuts. Both run as local user services managed by TilePilot.",
                 whatToDo: setupGuideItemsByID["bundled-helpers"]?.state == .installed
-                    ? "Install the bundled helpers into your user account."
-                    : "Use the packaged TilePilot app from /Applications. This build does not include bundled helpers.",
+                    ? "TilePilot normally does this automatically on first launch. If this step stays incomplete, retry the component install."
+                    : "Use the packaged TilePilot app from /Applications. This build does not include the local yabai/skhd components.",
                 detail: firstNonEmptyGuideDetail([
                     bundledHelpersSetup?.detail,
                     yabaiBinarySetup?.detail,
@@ -70,12 +70,34 @@ extension AppModel {
                     capabilityByKey["yabai-binary"]?.message,
                     capabilityByKey["skhd-binary"]?.message,
                 ]),
-                verificationText: "TilePilot will recheck helper installation automatically.",
+                verificationText: "TilePilot will recheck component installation automatically.",
                 status: helperInstallStatus,
                 isBlocking: true,
                 isSkippable: true,
-                primaryAction: bundledHelpersSetup?.state == .installed ? .installDependencies : nil,
+                primaryAction: helperInstallStatus == .good || bundledHelpersSetup?.state != .installed ? nil : .installDependencies,
                 secondaryActions: [.recheck]
+            ),
+            SetupGuideStep(
+                kind: .startHelperServices,
+                category: .essential,
+                title: "Start Window Control",
+                summary: helperServicesStatus == .good ? "Window control and shortcut services are running." : "TilePilot installed yabai and skhd, but they are not running yet.",
+                whyItMatters: "yabai is the window-control service. skhd is the shortcut listener. macOS may ask you to allow these entries in Accessibility because they need to observe and move windows.",
+                whatToDo: "Click Start Window Control. If macOS shows an Accessibility prompt for yabai or skhd, approve the exact entry macOS names, then return to TilePilot and recheck.",
+                detail: firstNonEmptyGuideDetail([
+                    helperServicesStatus == .good ? nil : "No Screen Recording permission is needed here. Screen Recording is only for optional MegaMap screenshots.",
+                    yabaiServiceSetup?.detail,
+                    skhdServiceSetup?.detail,
+                    capabilityByKey["yabai-daemon"]?.message,
+                    capabilityByKey["skhd-daemon"]?.message,
+                    capabilityByKey["yabai-query"]?.message,
+                ]),
+                verificationText: "TilePilot will recheck after startup. If macOS blocks a service, approve the named item in Accessibility and use Recheck.",
+                status: helperServicesStatus,
+                isBlocking: true,
+                isSkippable: true,
+                primaryAction: helperServicesStatus == .good ? nil : .startYabai,
+                secondaryActions: helperServicesStatus == .good ? [] : [.openAccessibilitySettings, .recheck]
             ),
             SetupGuideStep(
                 kind: .accessibility,
@@ -95,28 +117,6 @@ extension AppModel {
                 isSkippable: true,
                 primaryAction: nil,
                 secondaryActions: accessibilityStatus == .good ? [] : [.requestAccessibilityAccess, .openAccessibilitySettings, .recheck]
-            ),
-            SetupGuideStep(
-                kind: .startHelperServices,
-                category: .essential,
-                title: "Start Helper Services",
-                summary: helperServicesStatus == .good ? "Helper services are running." : "TilePilot helpers are installed, but the background services are not fully running yet.",
-                whyItMatters: "TilePilot can only query desktops and react to shortcuts when yabai and skhd are active.",
-                whatToDo: "Start the helper services. If macOS prompts for a helper permission, approve it in System Settings and recheck.",
-                detail: firstNonEmptyGuideDetail([
-                    capabilityByKey["yabai-query"]?.message,
-                    capabilityByKey["yabai-daemon"]?.message,
-                    capabilityByKey["skhd-daemon"]?.message,
-                    helperServicesStatus == .good ? nil : "If startup fails with a permission message, open Accessibility and enable the helper entry macOS names in the prompt.",
-                    yabaiServiceSetup?.detail,
-                    skhdServiceSetup?.detail,
-                ]),
-                verificationText: "TilePilot will recheck helper services automatically.",
-                status: helperServicesStatus,
-                isBlocking: true,
-                isSkippable: true,
-                primaryAction: .startYabai,
-                secondaryActions: [.restartYabai, .restartSkhd, .openAccessibilitySettings, .recheck]
             ),
             SetupGuideStep(
                 kind: .startAtLogon,

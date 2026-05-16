@@ -68,16 +68,16 @@ final class BootstrapService: @unchecked Sendable {
         if helperService.bundledHelpersAvailable() {
             return SetupCheckItem(
                 id: "bundled-helpers",
-                title: "Bundled TilePilot Helpers",
+                title: "Bundled yabai/skhd components",
                 state: .installed,
-                detail: "This TilePilot build includes bundled helper binaries."
+                detail: "This TilePilot build includes local copies of yabai for window control and skhd for keyboard shortcuts."
             )
         }
         return SetupCheckItem(
             id: "bundled-helpers",
-            title: "Bundled TilePilot Helpers",
+            title: "Bundled yabai/skhd components",
             state: .warning,
-            detail: "This build does not include bundled helper binaries."
+            detail: "This build does not include the local yabai/skhd components. Use the packaged app from /Applications."
         )
     }
 

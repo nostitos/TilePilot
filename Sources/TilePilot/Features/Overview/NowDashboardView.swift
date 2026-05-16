@@ -563,7 +563,7 @@ struct NowDashboardView: View {
 
         if normalized.contains("not installed yet") || normalized.contains("no such file or directory") {
             return LiveStateHelp(
-                message: "TilePilot cannot show the full desktop map until its bundled helpers are installed. Run Guided Setup to install them from inside the app.",
+                message: "TilePilot cannot show the full desktop map until its local yabai/skhd components are ready. Guided Setup will prepare them automatically.",
                 actions: [
                     .init(label: "Run Guided Setup", prominent: true, handler: { model.presentSetupGuide() }),
                     .init(label: "Recheck", prominent: false, handler: { Task { await model.refreshLiveState() } }),
@@ -578,7 +578,7 @@ struct NowDashboardView: View {
             || normalized.contains("socket is unavailable")
             || normalized.contains("socket unavailable") {
             return LiveStateHelp(
-                message: "TilePilot cannot talk to yabai yet. On a new Mac or migrated setup, the usual fixes are to re-enable TilePilot, yabai, and skhd in Accessibility if they appear there, then start helper services again.",
+                message: "TilePilot cannot talk to yabai yet. Start window control from Guided Setup, then approve any yabai/skhd Accessibility prompt macOS shows.",
                 actions: [
                     .init(label: "Run Guided Setup", prominent: true, handler: {
                         presentOverviewRecoveryGuide(for: message)
@@ -586,11 +586,11 @@ struct NowDashboardView: View {
                     .init(label: "Open Accessibility Settings", prominent: false, handler: {
                         model.openAccessibilitySettings()
                     }),
-                    .init(label: model.primarySetupAction == .reviewAccessibility ? model.primarySetupActionLabel : "Start Helper Services", prominent: false, handler: {
+                    .init(label: model.primarySetupAction == .reviewAccessibility ? model.primarySetupActionLabel : "Start Window Control", prominent: false, handler: {
                         if model.primarySetupAction == .startHelperServices || model.primarySetupAction == .reviewAccessibility {
                             model.performPrimarySetupAction()
                         } else {
-                            model.startHelperServicesBestEffort()
+                            model.startWindowControlBestEffort()
                         }
                     }),
                     .init(label: "Recheck", prominent: false, handler: { Task { await model.refreshLiveState() } }),
@@ -600,7 +600,7 @@ struct NowDashboardView: View {
 
         if normalized.contains("permission") && normalized.contains("denied") {
             return LiveStateHelp(
-                message: "macOS denied a helper permission TilePilot needs. Open Guided Setup, then review Accessibility permissions for TilePilot and its helpers on this Mac.",
+                message: "macOS denied a yabai/skhd permission TilePilot needs for window control. Open Guided Setup and approve the exact Accessibility entry macOS names.",
                 actions: [
                     .init(label: "Run Guided Setup", prominent: true, handler: {
                         presentOverviewRecoveryGuide(for: message)

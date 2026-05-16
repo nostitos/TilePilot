@@ -60,7 +60,7 @@ struct SystemDashboardView: View {
                 Button("Use Existing Install") {
                     model.keepExistingHelperInstall()
                 }
-                Button("Replace With TilePilot Helpers", role: .destructive) {
+                Button("Replace With TilePilot Components", role: .destructive) {
                     model.replaceWithManagedHelpers()
                 }
                 Button("Cancel", role: .cancel) {

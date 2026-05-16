@@ -181,11 +181,11 @@ extension AppModel {
 
         switch primarySetupAction {
         case .installHelpers:
-            return "Install TilePilot Helpers"
+            return "Preparing window control"
         case .reviewAccessibility:
             return "Review Accessibility"
         case .startHelperServices:
-            return "Start Helper Services"
+            return "Start window control"
         case .recheck:
             return "Recheck Setup"
         case .ready:

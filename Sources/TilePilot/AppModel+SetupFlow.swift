@@ -42,17 +42,17 @@ extension AppModel {
         switch primarySetupAction {
         case .installHelpers:
             if !setupItemInstalled("bundled-helpers") {
-                return "This TilePilot build does not include bundled helpers. Use the packaged app from /Applications to install them."
+                return "This TilePilot build does not include the local yabai/skhd components. Use the packaged app from /Applications."
             }
-            return "TilePilot needs two helper tools to manage windows and keyboard shortcuts. TilePilot can install them for you."
+            return "TilePilot normally installs its local yabai/skhd components automatically. Use this only to retry if that did not finish."
         case .reviewAccessibility:
-            return "Optional. Review Accessibility only if macOS prompts for TilePilot or helpers, or if focus/bring-to-front fallbacks do not work."
+            return "Optional. Review Accessibility only if macOS prompts for TilePilot, yabai, or skhd, or if focus/bring-to-front fallbacks do not work."
         case .startHelperServices:
-            return "TilePilot helpers are installed. Start the background services to enable window control and shortcuts."
+            return "TilePilot installed yabai and skhd. Start window control when you are ready for any macOS permission prompt."
         case .recheck:
             return "TilePilot is still checking this Mac. Recheck setup if the status looks stale."
         case .ready:
-            return "TilePilot helpers look ready."
+            return "TilePilot window control looks ready."
         }
     }
 
@@ -125,7 +125,7 @@ extension AppModel {
         case .reviewAccessibility:
             presentSetupGuide(source: .manual, startingAt: .accessibility)
         case .startHelperServices:
-            startHelperServicesBestEffort()
+            startWindowControlBestEffort()
         case .recheck:
             Task { [weak self] in
                 guard let self else { return }

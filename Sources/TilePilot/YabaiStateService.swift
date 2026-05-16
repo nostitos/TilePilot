@@ -431,16 +431,16 @@ final class YabaiStateService: @unchecked Sendable {
     private func userFacingLiveStateError(from raw: String) -> String {
         let normalized = raw.lowercased()
         if normalized.contains("env: yabai: no such file or directory") || normalized.contains("not found") {
-            return "TilePilot helpers are not installed yet. Run Guided Setup to install them, then return to Overview."
+            return "TilePilot has not finished preparing its local yabai/skhd components yet. Run Guided Setup, then return to Overview."
         }
         if normalized.contains("could not connect")
             || normalized.contains("message socket")
             || normalized.contains("failed to connect to socket")
             || normalized.contains("socket unavailable") {
-            return "TilePilot could not talk to yabai yet. On a new Mac or migrated setup, run Guided Setup, re-enable TilePilot, yabai, and skhd in Accessibility if they appear there, then start helper services and recheck."
+            return "TilePilot cannot talk to yabai yet. Run Guided Setup, start window control, and approve any yabai/skhd Accessibility prompt macOS shows."
         }
         if normalized.contains("permission") && normalized.contains("denied") {
-            return "yabai query failed due to permissions. Open Guided Setup, review Accessibility for TilePilot and its helpers, then retry."
+            return "yabai was blocked by macOS permissions. Open Guided Setup, approve the exact yabai/skhd Accessibility entry macOS names, then retry."
         }
         return raw
     }

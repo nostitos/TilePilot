@@ -608,7 +608,10 @@ extension AppModel {
             guard let self else { return }
             await self.refreshLiveState()
             guard let state = await self.currentDesktopWindowsForRecentWindowTiler() else { return }
-            let candidates = self.recentWindowTilerCandidates(from: state.windows)
+            let candidates = self.recentWindowTilerCandidates(
+                from: state.windows,
+                primaryWindowIDs: state.primaryWindowIDs
+            )
             guard !candidates.isEmpty else {
                 self.lastErrorMessage = "No controllable windows on the current desktop."
                 self.lastActionMessage = nil
@@ -724,7 +727,10 @@ extension AppModel {
             return
         }
 
-        let freshCandidates = recentWindowTilerCandidates(from: targetState.windows)
+        let freshCandidates = recentWindowTilerCandidates(
+            from: targetState.windows,
+            primaryWindowIDs: targetState.primaryWindowIDs
+        )
         guard !freshCandidates.isEmpty else {
             recentWindowTilerState = nil
             lastErrorMessage = "No controllable windows on this desktop."
@@ -913,10 +919,19 @@ extension AppModel {
         }
     }
 
-    private func recentWindowTilerCandidates(from windows: [WindowState]) -> [RecentWindowTilerCandidate] {
+    private func recentWindowTilerCandidates(
+        from windows: [WindowState],
+        primaryWindowIDs: Set<Int>
+    ) -> [RecentWindowTilerCandidate] {
         windows
             .enumerated()
-            .compactMap { recentWindowTilerCandidate(from: $0.element, frontToBackOrder: $0.offset) }
+            .compactMap {
+                recentWindowTilerCandidate(
+                    from: $0.element,
+                    frontToBackOrder: $0.offset,
+                    isOnTargetDisplay: primaryWindowIDs.contains($0.element.id)
+                )
+            }
     }
 
     private func recentWindowTilerDisplayFrame(display: DisplayState?) -> CGRect? {
@@ -1046,7 +1061,11 @@ extension AppModel {
         )
     }
 
-    private func recentWindowTilerCandidate(from window: WindowState, frontToBackOrder: Int) -> RecentWindowTilerCandidate? {
+    private func recentWindowTilerCandidate(
+        from window: WindowState,
+        frontToBackOrder: Int,
+        isOnTargetDisplay: Bool
+    ) -> RecentWindowTilerCandidate? {
         let accessibilityInfo = recentWindowTilerAccessibilityInfo(for: window)
         let canAutoTile = window.isRuntimeManageable
         let canFloatingGrid = canAutoTile || accessibilityInfo?.canMoveAndResize == true
@@ -1066,6 +1085,7 @@ extension AppModel {
             minimized: window.isMinimized,
             canAutoTile: canAutoTile,
             canFloatingGrid: canFloatingGrid,
+            isOnTargetDisplay: isOnTargetDisplay,
             frame: CGRect(x: window.frameX, y: window.frameY, width: window.frameW, height: window.frameH),
             frontToBackOrder: frontToBackOrder
         )
@@ -1091,7 +1111,10 @@ extension AppModel {
             targetSpaceIndex: targetSpaceIndex,
             targetDisplayID: targetDisplayID
         ) else { return }
-        let candidates = recentWindowTilerCandidates(from: state.windows)
+        let candidates = recentWindowTilerCandidates(
+            from: state.windows,
+            primaryWindowIDs: state.primaryWindowIDs
+        )
         let allowedWindowIDs = Set(candidates.filter { $0.isSelectable(in: mode) }.map(\.windowID))
         let explicitTemplateSlotWindowIDs = mode == .template && !templateSlotWindowIDs.isEmpty
             ? templateSlotWindowIDs
@@ -3539,6 +3562,18 @@ extension AppModel {
                 continue
             }
             let placement = placements[index]
+            let exactFrame = recentWindowGridFrame(
+                placement: placement,
+                rows: grid.rows,
+                cols: grid.cols,
+                display: display
+            )
+
+            if let exactFrame,
+               setWindowFrameUsingAccessibility(window: window, frame: exactFrame) {
+                updated += 1
+                continue
+            }
 
             if window.isRuntimeManageable {
                 let result = await doctorService.runSupportCommand(
@@ -3552,31 +3587,12 @@ extension AppModel {
                 }
                 if result.isSuccess {
                     updated += 1
-                } else if let frame = recentWindowGridFrame(
-                    placement: placement,
-                    rows: grid.rows,
-                    cols: grid.cols,
-                    display: display
-                ),
-                          setWindowFrameUsingAccessibility(window: window, frame: frame) {
-                    updated += 1
                 } else {
                     failed += 1
                 }
                 continue
             }
-
-            guard let frame = recentWindowGridFrame(
-                placement: placement,
-                rows: grid.rows,
-                cols: grid.cols,
-                display: display
-            ),
-                  setWindowFrameUsingAccessibility(window: window, frame: frame) else {
-                failed += 1
-                continue
-            }
-            updated += 1
+            failed += 1
         }
 
         return (updated, failed)
@@ -3599,14 +3615,101 @@ extension AppModel {
         display: DisplayState?
     ) -> CGRect? {
         guard let display else { return nil }
-        let cellWidth = display.frameW / Double(max(cols, 1))
-        let cellHeight = display.frameH / Double(max(rows, 1))
-        return CGRect(
-            x: display.frameX + (Double(placement.col) * cellWidth),
-            y: display.frameY + (Double(placement.row) * cellHeight),
+        let bounds = recentWindowGridUsableFrame(for: display)
+        let gap = 5.0
+        let colCount = Double(max(cols, 1))
+        let rowCount = Double(max(rows, 1))
+        let cellWidth = (bounds.width - ((colCount - 1) * gap)) / colCount
+        let cellHeight = (bounds.height - ((rowCount - 1) * gap)) / rowCount
+        let frame = CGRect(
+            x: bounds.minX + (Double(placement.col) * (cellWidth + gap)),
+            y: bounds.minY + (Double(placement.row) * (cellHeight + gap)),
             width: max(80, cellWidth * Double(max(placement.colSpan, 1))),
             height: max(60, cellHeight * Double(max(placement.rowSpan, 1)))
-        ).integral
+        )
+        return roundedRecentWindowGridFrame(frame)
+    }
+
+    private func recentWindowGridUsableFrame(for display: DisplayState) -> CGRect {
+        let displayFrame = CGRect(
+            x: display.frameX,
+            y: display.frameY,
+            width: display.frameW,
+            height: display.frameH
+        )
+        var usableFrame = displayFrame
+
+        let screens = NSScreen.screens
+        if let screen = bestRecentWindowTilerScreen(
+            for: convertRecentWindowTilerDisplayFrameToAppKit(display, screens: screens),
+            screens: screens
+        ) {
+            let visibleFrame = convertAppKitRectToRecentWindowTilerFrame(screen.visibleFrame, screens: screens)
+            let visibleIntersection = displayFrame.intersection(visibleFrame)
+            if !visibleIntersection.isNull, !visibleIntersection.isEmpty {
+                usableFrame = visibleIntersection
+            }
+        }
+
+        // AX window placement is clamped by macOS near the top of every display. If
+        // we request the raw display top, macOS moves the top row down but preserves
+        // the requested height, which makes it overlap the row below.
+        let minimumTopInset = 30.0
+        let currentTopInset = usableFrame.minY - displayFrame.minY
+        if currentTopInset < minimumTopInset {
+            let insetDelta = min(minimumTopInset - currentTopInset, max(0, usableFrame.height - 80))
+            usableFrame.origin.y += insetDelta
+            usableFrame.size.height -= insetDelta
+        }
+
+        return usableFrame
+    }
+
+    private func bestRecentWindowTilerScreen(for appKitFrame: CGRect, screens: [NSScreen]) -> NSScreen? {
+        screens.max { lhs, rhs in
+            let lhsScore = recentWindowTilerIntersectionArea(lhs.frame, appKitFrame) + (lhs.frame.equalTo(appKitFrame) ? 1_000_000 : 0)
+            let rhsScore = recentWindowTilerIntersectionArea(rhs.frame, appKitFrame) + (rhs.frame.equalTo(appKitFrame) ? 1_000_000 : 0)
+            return lhsScore < rhsScore
+        }
+    }
+
+    private func recentWindowTilerIntersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull, !intersection.isEmpty else { return 0 }
+        return intersection.width * intersection.height
+    }
+
+    private func convertAppKitRectToRecentWindowTilerFrame(_ rect: CGRect, screens: [NSScreen]) -> CGRect {
+        guard !screens.isEmpty else { return rect }
+        let referenceMaxY = recentWindowTilerAppKitReferenceMaxY(screens: screens, fallback: rect.maxY)
+        return CGRect(
+            x: rect.origin.x,
+            y: referenceMaxY - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    private func recentWindowTilerAppKitReferenceMaxY(screens: [NSScreen], fallback: CGFloat) -> CGFloat {
+        screens.first(where: { screen in
+            abs(screen.frame.minX) < 0.5 && abs(screen.frame.minY) < 0.5
+        })?.frame.maxY
+            ?? NSScreen.main?.frame.maxY
+            ?? screens.map(\.frame.maxY).min()
+            ?? fallback
+    }
+
+    private func roundedRecentWindowGridFrame(_ frame: CGRect) -> CGRect {
+        let x = frame.minX.rounded()
+        let y = frame.minY.rounded()
+        let maxX = frame.maxX.rounded()
+        let maxY = frame.maxY.rounded()
+        return CGRect(
+            x: x,
+            y: y,
+            width: max(80, maxX - x),
+            height: max(60, maxY - y)
+        )
     }
 
     private func applyGridFrames(
@@ -3631,6 +3734,19 @@ extension AppModel {
                 continue
             }
             let placement = placements[index]
+            let exactFrame = recentWindowGridFrame(
+                placement: placement,
+                rows: grid.rows,
+                cols: grid.cols,
+                display: display
+            )
+
+            if let exactFrame,
+               setWindowFrameUsingAccessibility(window: window, frame: exactFrame) {
+                updated += 1
+                continue
+            }
+
             let result = await doctorService.runSupportCommand(
                 yabaiCommand(
                     ["-m", "window", String(window.id), "--grid", "\(grid.rows):\(grid.cols):\(placement.col):\(placement.row):\(placement.colSpan):\(placement.rowSpan)"],

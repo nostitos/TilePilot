@@ -30,6 +30,7 @@ struct RecentWindowTilerCandidate: Identifiable, Equatable, Sendable {
     let minimized: Bool
     let canAutoTile: Bool
     let canFloatingGrid: Bool
+    let isOnTargetDisplay: Bool
     let frame: CGRect
     let frontToBackOrder: Int
 
@@ -43,6 +44,7 @@ struct RecentWindowTilerCandidate: Identifiable, Equatable, Sendable {
         minimized: Bool = false,
         canAutoTile: Bool,
         canFloatingGrid: Bool,
+        isOnTargetDisplay: Bool = true,
         frame: CGRect = .zero,
         frontToBackOrder: Int = 0
     ) {
@@ -55,6 +57,7 @@ struct RecentWindowTilerCandidate: Identifiable, Equatable, Sendable {
         self.minimized = minimized
         self.canAutoTile = canAutoTile
         self.canFloatingGrid = canFloatingGrid
+        self.isOnTargetDisplay = isOnTargetDisplay
         self.frame = frame
         self.frontToBackOrder = frontToBackOrder
     }

@@ -6,6 +6,7 @@ struct RecentWindowTilerPickerView: View {
     @ObservedObject var model: AppModel
 
     private let rowHeight: CGFloat = 42
+    private let monitorDividerHeight: CGFloat = 24
     @State private var draggedWindowID: Int?
 
     var body: some View {
@@ -23,37 +24,43 @@ struct RecentWindowTilerPickerView: View {
                         model: model
                     )
 
-                    let idealListHeight = listHeight(for: state.candidates.count)
+                    let idealListHeight = listHeight(for: state)
                     ScrollView {
                         LazyVStack(spacing: 6) {
                             ForEach(Array(state.candidates.enumerated()), id: \.element.windowID) { index, candidate in
-                                RecentWindowTilerCandidateRow(
-                                    order: index + 1,
-                                    candidate: candidate,
-                                    mode: state.mode,
-                                    isSelected: state.effectiveSelectedWindowIDs.contains(candidate.windowID),
-                                    isEnabled: candidate.isSelectable(in: state.mode),
-                                    onFocus: {
-                                        model.focusRecentWindowTilerCandidate(windowID: candidate.windowID)
-                                    },
-                                    onClose: {
-                                        model.closeRecentWindowTilerCandidate(windowID: candidate.windowID)
+                                VStack(spacing: 6) {
+                                    if shouldShowOtherMonitorDivider(index: index, candidates: state.candidates) {
+                                        RecentWindowTilerMonitorDivider()
                                     }
-                                ) {
-                                    model.toggleRecentWindowTilerSelection(windowID: candidate.windowID)
-                                }
-                                .onDrag {
-                                    draggedWindowID = candidate.windowID
-                                    return NSItemProvider(object: "\(candidate.windowID)" as NSString)
-                                }
-                                .onDrop(
-                                    of: [UTType.utf8PlainText.identifier, UTType.plainText.identifier],
-                                    delegate: RecentWindowTilerCandidateDropDelegate(
-                                        targetWindowID: candidate.windowID,
-                                        draggedWindowID: $draggedWindowID,
-                                        model: model
+
+                                    RecentWindowTilerCandidateRow(
+                                        order: index + 1,
+                                        candidate: candidate,
+                                        mode: state.mode,
+                                        isSelected: state.effectiveSelectedWindowIDs.contains(candidate.windowID),
+                                        isEnabled: candidate.isSelectable(in: state.mode),
+                                        onFocus: {
+                                            model.focusRecentWindowTilerCandidate(windowID: candidate.windowID)
+                                        },
+                                        onClose: {
+                                            model.closeRecentWindowTilerCandidate(windowID: candidate.windowID)
+                                        }
+                                    ) {
+                                        model.toggleRecentWindowTilerSelection(windowID: candidate.windowID)
+                                    }
+                                    .onDrag {
+                                        draggedWindowID = candidate.windowID
+                                        return NSItemProvider(object: "\(candidate.windowID)" as NSString)
+                                    }
+                                    .onDrop(
+                                        of: [UTType.utf8PlainText.identifier, UTType.plainText.identifier],
+                                        delegate: RecentWindowTilerCandidateDropDelegate(
+                                            targetWindowID: candidate.windowID,
+                                            draggedWindowID: $draggedWindowID,
+                                            model: model
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                         .padding(.vertical, 1)
@@ -169,8 +176,46 @@ struct RecentWindowTilerPickerView: View {
         }
     }
 
-    private func listHeight(for count: Int) -> CGFloat {
-        CGFloat(min(max(count, 1), 10)) * rowHeight + CGFloat(max(0, min(count, 10) - 1) * 6)
+    private func listHeight(for state: RecentWindowTilerPresentationState) -> CGFloat {
+        let count = state.candidates.count
+        let visibleCount = min(max(count, 1), 10)
+        let dividerHeight = hasOtherMonitorDivider(state.candidates) ? monitorDividerHeight + 6 : 0
+        return CGFloat(visibleCount) * rowHeight + CGFloat(max(0, visibleCount - 1) * 6) + dividerHeight
+    }
+
+    private func hasOtherMonitorDivider(_ candidates: [RecentWindowTilerCandidate]) -> Bool {
+        candidates.contains { !$0.isOnTargetDisplay }
+    }
+
+    private func shouldShowOtherMonitorDivider(index: Int, candidates: [RecentWindowTilerCandidate]) -> Bool {
+        guard candidates.indices.contains(index),
+              !candidates[index].isOnTargetDisplay else {
+            return false
+        }
+        return index == 0 || candidates[index - 1].isOnTargetDisplay
+    }
+}
+
+private struct RecentWindowTilerMonitorDivider: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(height: 1)
+
+            Label("Other monitor", systemImage: "display.2")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+
+            Rectangle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(height: 1)
+        }
+        .frame(height: 24)
+        .padding(.horizontal, 4)
+        .accessibilityLabel("Windows from another monitor")
     }
 }
 

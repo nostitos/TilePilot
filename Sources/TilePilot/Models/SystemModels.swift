@@ -328,7 +328,7 @@ struct HelperMigrationPromptState: Identifiable, Sendable {
 
         \(details)
 
-        Choose whether to keep using that install or replace it with TilePilot-managed helpers.
+        Choose whether to keep using that install or replace it with TilePilot-managed local components.
         """
     }
 }
@@ -342,9 +342,9 @@ enum SetupNextAction: String, Codable, Sendable {
 
     var buttonTitle: String {
         switch self {
-        case .installHelpers: return "Install TilePilot Helpers"
+        case .installHelpers: return "Retry Component Install"
         case .reviewAccessibility: return "Review Accessibility"
-        case .startHelperServices: return "Start Helper Services"
+        case .startHelperServices: return "Start Window Control"
         case .recheck: return "Recheck Setup"
         case .ready: return "Ready"
         }
@@ -352,9 +352,9 @@ enum SetupNextAction: String, Codable, Sendable {
 
     var summaryTitle: String {
         switch self {
-        case .installHelpers: return "TilePilot Helpers Needed"
+        case .installHelpers: return "Preparing Window Control"
         case .reviewAccessibility: return "Accessibility Review Needed"
-        case .startHelperServices: return "Helper Services Needed"
+        case .startHelperServices: return "Window Control Not Running"
         case .recheck: return "Setup Needs Recheck"
         case .ready: return "Ready"
         }
@@ -408,7 +408,7 @@ enum SystemCheckAction: String, Sendable, Hashable {
 
     var label: String {
         switch self {
-        case .installDependencies: return "Install Helpers"
+        case .installDependencies: return "Install Components"
         case .startYabai: return "Start yabai"
         case .startSkhd: return "Start skhd"
         case .runGuidedSetup: return "Run Guided Setup"

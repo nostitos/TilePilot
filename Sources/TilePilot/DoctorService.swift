@@ -210,10 +210,10 @@ final class DoctorService: @unchecked Sendable {
             )
         )
 
-        items.append(capabilityForToolBinary(key: "yabai-binary", title: "yabai binary", result: yabaiVersionResult))
-        items.append(capabilityForToolBinary(key: "skhd-binary", title: "skhd binary", result: skhdVersionResult))
-        items.append(capabilityForDaemon(key: "yabai-daemon", title: "yabai daemon", result: yabaiDaemonResult))
-        items.append(capabilityForDaemon(key: "skhd-daemon", title: "skhd daemon", result: skhdDaemonResult))
+        items.append(capabilityForToolBinary(key: "yabai-binary", title: "yabai", result: yabaiVersionResult))
+        items.append(capabilityForToolBinary(key: "skhd-binary", title: "skhd", result: skhdVersionResult))
+        items.append(capabilityForDaemon(key: "yabai-daemon", title: "yabai window-control service", result: yabaiDaemonResult))
+        items.append(capabilityForDaemon(key: "skhd-daemon", title: "skhd shortcut service", result: skhdDaemonResult))
 
         items.append(
             CapabilityState(
@@ -263,8 +263,8 @@ final class DoctorService: @unchecked Sendable {
                 key: key,
                 status: .blocked,
                 reasonCode: "missing-binary",
-                message: "\(title) not found in PATH.",
-                remediationSteps: ["Install \(title) and ensure it is available in the app's PATH."]
+                message: "\(title) is not installed yet.",
+                remediationSteps: ["Use the packaged TilePilot app so it can install its local yabai/skhd components automatically."]
             )
         }
 
@@ -282,8 +282,8 @@ final class DoctorService: @unchecked Sendable {
             key: key,
             status: .unknown,
             reasonCode: "version-check-failed",
-            message: "Unable to determine \(title) version.",
-            remediationSteps: ["Run System Recheck again after confirming the binary is installed and executable."]
+            message: "Unable to determine the \(title) version.",
+            remediationSteps: ["Run System Recheck again after TilePilot finishes installing its local components."]
         )
     }
 
@@ -293,7 +293,7 @@ final class DoctorService: @unchecked Sendable {
                 key: key,
                 status: .available,
                 reasonCode: nil,
-                message: "\(title) appears to be running.",
+                message: "\(title) is running.",
                 remediationSteps: []
             )
         }
@@ -301,8 +301,8 @@ final class DoctorService: @unchecked Sendable {
             key: key,
             status: .degraded,
             reasonCode: "daemon-not-running",
-            message: "\(title) is not running.",
-            remediationSteps: ["Start or restart \(title).", "Verify launch agent/service configuration if you use one."]
+            message: "\(title) is not running yet.",
+            remediationSteps: ["Start window control from Guided Setup.", "If macOS prompts for Accessibility, approve the exact yabai or skhd entry named in the prompt."]
         )
     }
 
@@ -324,17 +324,17 @@ final class DoctorService: @unchecked Sendable {
     private func messageForQuery(result: CommandResult) -> String {
         if result.isSuccess { return "Basic yabai query command succeeded." }
         if result.stderr.localizedCaseInsensitiveContains("could not connect") {
-            return "yabai is installed but the message socket is unavailable."
+            return "TilePilot cannot connect to yabai yet. The window-control service may still be starting or macOS may be waiting for Accessibility approval."
         }
-        return "Basic yabai query command failed."
+        return "TilePilot cannot query window state yet. Start window control, then approve any yabai Accessibility prompt macOS shows."
     }
 
     private func remediationForQuery(result: CommandResult) -> [String] {
         if result.isSuccess { return [] }
         if result.stderr.localizedCaseInsensitiveContains("could not connect") {
-            return ["Restart the yabai daemon.", "Check that yabai started successfully and is not exiting on config errors."]
+            return ["Start window control again.", "If macOS shows a yabai Accessibility prompt, approve it and recheck."]
         }
-        return ["Check yabai installation and daemon status, then run Setup Check again."]
+        return ["Start window control from Guided Setup, then run Recheck."]
     }
 
     private func missionControlCheckForMRUSpaces(_ result: CommandResult) -> MissionControlCheck {

@@ -456,6 +456,7 @@ final class AppModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var managedHelperAutoUpgradeTask: Task<Void, Never>?
+    var hasAttemptedAutomaticManagedHelperInstall = false
     var shortcutRecordMonitor: Any?
     var shortcutGlobalRecordMonitor: Any?
     var hasDismissedAutomaticSetupGuideThisSession = false
@@ -626,7 +627,8 @@ final class AppModel: ObservableObject {
         isRefreshingBootstrap = true
         defer { isRefreshingBootstrap = false }
 
-        let result = await bootstrapService.runBootstrapChecks()
+        var result = await bootstrapService.runBootstrapChecks()
+        result = await bootstrapResultAfterAutomaticManagedHelperInstallIfNeeded(result)
         bootstrapSnapshot = result.snapshot
         managedHelperInstallState = result.managedHelperInstallState
         prependCommandLogs(result.commandLogs)

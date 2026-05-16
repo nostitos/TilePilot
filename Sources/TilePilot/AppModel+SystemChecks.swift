@@ -57,12 +57,12 @@ extension AppModel {
         ])
         rows.append(SystemCheckRow(
             id: "yabai-installed",
-            title: "yabai Installed",
+            title: "Window Control Component Installed",
             detail: firstDetail(
                 yabaiBinaryCap?.message,
                 yabaiBinarySetup?.detail,
                 bundledHelpers?.detail,
-                fallback: "Install TilePilot helpers to enable desktop and window runtime controls."
+                fallback: "TilePilot uses yabai for desktop and window control. The packaged app installs this automatically."
             ),
             status: yabaiInstallStatus,
             actions: yabaiInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
@@ -74,12 +74,12 @@ extension AppModel {
         ])
         rows.append(SystemCheckRow(
             id: "skhd-installed",
-            title: "skhd Installed",
+            title: "Shortcut Component Installed",
             detail: firstDetail(
                 skhdBinaryCap?.message,
                 skhdBinarySetup?.detail,
                 bundledHelpers?.detail,
-                fallback: "Install TilePilot helpers to enable keyboard shortcut workflows."
+                fallback: "TilePilot uses skhd for global keyboard shortcuts. The packaged app installs this automatically."
             ),
             status: skhdInstallStatus,
             actions: skhdInstallStatus == .good ? [.recheck] : [.installDependencies, .recheck]
@@ -98,12 +98,12 @@ extension AppModel {
         }
         rows.append(SystemCheckRow(
             id: "yabai-running",
-            title: "yabai Running",
+            title: "Window Control Running",
             detail: firstDetail(
                 yabaiQueryCap?.message,
                 yabaiDaemonCap?.message,
                 yabaiServiceSetup?.detail,
-                fallback: "Start yabai to control windows/desktops from TilePilot."
+                fallback: "Start yabai so TilePilot can read and control windows/desktops."
             ),
             status: yabaiRunningStatus,
             actions: yabaiRunningActions
@@ -121,8 +121,8 @@ extension AppModel {
         }
         rows.append(SystemCheckRow(
             id: "skhd-running",
-            title: "skhd Running",
-            detail: firstDetail(skhdDaemonCap?.message, skhdServiceSetup?.detail, fallback: "Start skhd for keyboard shortcuts."),
+            title: "Shortcut Listener Running",
+            detail: firstDetail(skhdDaemonCap?.message, skhdServiceSetup?.detail, fallback: "Start skhd so TilePilot shortcuts can run."),
             status: skhdRunningStatus,
             actions: skhdRunningActions
         ))

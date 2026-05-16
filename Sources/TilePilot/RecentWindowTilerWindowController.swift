@@ -2,6 +2,20 @@ import AppKit
 import Combine
 import SwiftUI
 
+private final class RecentWindowTilerPanel: NSPanel {
+    var onDefaultAction: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        let isReturn = event.keyCode == 36
+        let isKeypadEnter = event.keyCode == 76
+        if isReturn || isKeypadEnter {
+            onDefaultAction?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
 @MainActor
 final class RecentWindowTilerWindowController: NSWindowController, NSWindowDelegate {
     private let model: AppModel
@@ -13,7 +27,7 @@ final class RecentWindowTilerWindowController: NSWindowController, NSWindowDeleg
     init(model: AppModel) {
         self.model = model
 
-        let panel = NSPanel(
+        let panel = RecentWindowTilerPanel(
             contentRect: NSRect(x: 0, y: 0, width: defaultContentWidth, height: defaultContentHeight),
             styleMask: [.titled, .closable, .resizable, .utilityWindow],
             backing: .buffered,
@@ -26,6 +40,9 @@ final class RecentWindowTilerWindowController: NSWindowController, NSWindowDeleg
         panel.collectionBehavior = [.moveToActiveSpace]
         panel.contentMinSize = NSSize(width: 500, height: 320)
         panel.contentViewController = NSHostingController(rootView: RecentWindowTilerPickerView(model: model))
+        panel.onDefaultAction = { [weak model] in
+            model?.applyRecentWindowTilerSelection()
+        }
 
         super.init(window: panel)
         panel.delegate = self

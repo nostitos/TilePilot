@@ -98,6 +98,28 @@ extension AppModel {
         }
     }
 
+    func bootstrapResultAfterAutomaticManagedHelperInstallIfNeeded(_ result: BootstrapRunResult) async -> BootstrapRunResult {
+        guard shouldAutomaticallyInstallManagedHelpers(from: result) else {
+            return result
+        }
+
+        hasAttemptedAutomaticManagedHelperInstall = true
+        isLaunchingSetupInstaller = true
+        lastActionMessage = "Installing TilePilot window-control components..."
+        lastErrorMessage = nil
+
+        let installResult = await helperService.installBundledHelpers(startServicesAfterInstall: false)
+
+        isLaunchingSetupInstaller = false
+        applyManagedHelperOperationResult(installResult)
+
+        guard installResult.errorMessage == nil else {
+            return result
+        }
+
+        return await bootstrapService.runBootstrapChecks()
+    }
+
     func keepExistingHelperInstall() {
         helperMigrationPrompt = nil
         lastErrorMessage = nil
@@ -137,6 +159,24 @@ extension AppModel {
 
         await self.refreshBootstrapSetup()
         await self.refreshDoctor()
+    }
+
+    private func shouldAutomaticallyInstallManagedHelpers(from result: BootstrapRunResult) -> Bool {
+        guard !hasAttemptedAutomaticManagedHelperInstall else { return false }
+        guard !isLaunchingSetupInstaller else { return false }
+        guard helperService.bundledHelpersAvailable() else { return false }
+
+        let itemsByID = Dictionary(uniqueKeysWithValues: result.snapshot.items.map { ($0.id, $0) })
+        guard itemsByID["bundled-helpers"]?.state == .installed else { return false }
+
+        let missingRequiredBinary = ["yabai-binary", "skhd-binary"].contains { id in
+            itemsByID[id]?.state != .installed
+        }
+        guard missingRequiredBinary else { return false }
+
+        // Do not replace external setups here. The bootstrap check already treats a usable
+        // external yabai/skhd binary as installed, so this only covers true first-run absence.
+        return !helperService.hasManagedHelperInstall()
     }
 
     func runSetupInstallerInTerminal() {
@@ -317,7 +357,7 @@ extension AppModel {
                         : "Requested skhd service start."
                     self.lastErrorMessage = nil
                 } else if let managedStartResult, managedStartResult.errorMessage == nil {
-                    self.lastActionMessage = managedStartResult.successMessage ?? "Started TilePilot helper services."
+                    self.lastActionMessage = managedStartResult.successMessage ?? "Started TilePilot window-control services."
                     self.lastErrorMessage = nil
                 } else {
                     let stderrReload = reloadResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -341,6 +381,16 @@ extension AppModel {
     }
 
     func startBrewServiceSkhd() {
+        startSkhdBestEffort()
+    }
+
+    func startWindowControlBestEffort() {
+        if helperService.hasManagedHelperInstall() {
+            startHelperServicesBestEffort()
+            return
+        }
+
+        startYabaiBestEffort()
         startSkhdBestEffort()
     }
 
@@ -441,7 +491,7 @@ extension AppModel {
             lastErrorMessage = errorMessage
             lastActionMessage = nil
         } else {
-            lastActionMessage = result.successMessage ?? "TilePilot helpers updated."
+            lastActionMessage = result.successMessage ?? "TilePilot yabai/skhd components updated."
             lastErrorMessage = nil
         }
     }

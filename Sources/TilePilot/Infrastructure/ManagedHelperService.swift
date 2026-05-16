@@ -144,8 +144,8 @@ final class ManagedHelperService: @unchecked Sendable {
                 installState: installState,
                 commandLogs: launchAgentLogs,
                 successMessage: installState.servicesBootstrapped
-                    ? "Installed TilePilot helpers."
-                    : "Installed TilePilot helpers. Review Accessibility, then start helper services.",
+                    ? "Installed and started TilePilot window-control components."
+                    : "Installed TilePilot's local copies of yabai and skhd. Start window control when you are ready.",
                 errorMessage: nil
             )
         } catch {
@@ -153,7 +153,7 @@ final class ManagedHelperService: @unchecked Sendable {
                 installState: loadInstallState(),
                 commandLogs: [],
                 successMessage: nil,
-                errorMessage: "TilePilot could not install bundled helpers: \(error.localizedDescription)"
+                errorMessage: "TilePilot could not install its local yabai/skhd copies: \(error.localizedDescription)"
             )
         }
     }
@@ -199,7 +199,7 @@ final class ManagedHelperService: @unchecked Sendable {
         let installResult = await installBundledHelpers(bundle: bundle, startServicesAfterInstall: true)
         let successMessage: String?
         if installResult.errorMessage == nil, !existingInstalls.isEmpty {
-            successMessage = "Stopped external helper services and installed TilePilot helpers."
+            successMessage = "Stopped external yabai/skhd services and installed TilePilot-managed components."
         } else {
             successMessage = installResult.successMessage
         }
@@ -227,15 +227,15 @@ final class ManagedHelperService: @unchecked Sendable {
             return ManagedHelperOperationResult(
                 installState: installState,
                 commandLogs: logs,
-                successMessage: installState.servicesBootstrapped ? "Started TilePilot helper services." : nil,
-                errorMessage: installState.servicesBootstrapped ? nil : "TilePilot could not start one or more helper services. Review Accessibility for TilePilot, yabai, and skhd, then try again."
+                successMessage: installState.servicesBootstrapped ? "Started TilePilot window-control services." : nil,
+                errorMessage: installState.servicesBootstrapped ? nil : "TilePilot could not start yabai/skhd. macOS may require Accessibility approval for the helper named in the system prompt; approve that entry, then try again."
             )
         } catch {
             return ManagedHelperOperationResult(
                 installState: loadInstallState(),
                 commandLogs: [],
                 successMessage: nil,
-                errorMessage: "TilePilot could not start helper services: \(error.localizedDescription)"
+                errorMessage: "TilePilot could not start window-control services: \(error.localizedDescription)"
             )
         }
     }
@@ -247,7 +247,7 @@ final class ManagedHelperService: @unchecked Sendable {
             let source = sourceLabel(for: helper)
             return SetupCheckItem(id: "\(helper.rawValue)-binary", title: helper.displayName, state: .installed, detail: "\(version) (\(source))")
         }
-        return SetupCheckItem(id: "\(helper.rawValue)-binary", title: helper.displayName, state: .missing, detail: "\(helper.displayName) not installed yet.")
+        return SetupCheckItem(id: "\(helper.rawValue)-binary", title: helper.displayName, state: .missing, detail: "\(helper.displayName) is not installed yet.")
     }
 
     func serviceStatusItem(for helper: ManagedHelperKind) async -> SetupCheckItem {
@@ -267,7 +267,7 @@ final class ManagedHelperService: @unchecked Sendable {
                 id: "helper-service-\(helper.rawValue)",
                 title: "\(helper.displayName) service",
                 state: .warning,
-                detail: "Installed by TilePilot but not started yet. Review Accessibility, then start helper services."
+                detail: "Installed by TilePilot but not started yet. Start window control when you are ready for any macOS permission prompt."
             )
         }
         return SetupCheckItem(id: "helper-service-\(helper.rawValue)", title: "\(helper.displayName) service", state: .missing, detail: "Not running yet.")

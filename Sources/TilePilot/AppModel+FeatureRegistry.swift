@@ -268,7 +268,7 @@ extension AppModel {
                 id: "app.run-guided-setup",
                 group: .apps,
                 title: "Run Guided Setup",
-                description: "Opens the step-by-step setup assistant for helpers and permissions.",
+                description: "Opens the step-by-step setup assistant for window control, shortcuts, and optional permissions.",
                 backend: .tilePilotAction,
                 capabilityGate: .none,
                 defaultCombo: nil,

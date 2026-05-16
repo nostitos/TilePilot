@@ -90,11 +90,11 @@ struct CommandLogView: View {
         }
 
         if command.contains("yabai"), stderr.contains("no such file or directory") {
-            return "yabai is not installed yet. Use System -> Install TilePilot Helpers."
+            return "yabai is not installed yet. Use Guided Setup so TilePilot can prepare its local yabai/skhd components."
         }
 
         if command.contains("yabai"), stderr.contains("could not connect") {
-            return "yabai is installed but not running. Start/restart the yabai service."
+            return "yabai is installed but not running. Start Window Control from Guided Setup."
         }
 
         return nil

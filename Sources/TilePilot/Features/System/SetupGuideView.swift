@@ -23,7 +23,7 @@ struct SetupGuideView: View {
                 if let step = currentStep {
                     HStack(alignment: .top, spacing: 18) {
                         stepList
-                            .frame(width: 220)
+                            .frame(width: 250)
                         stepDetail(step)
                     }
                 } else {
@@ -31,7 +31,7 @@ struct SetupGuideView: View {
                 }
             }
             .padding(20)
-            .frame(minWidth: 860, idealWidth: 940, minHeight: 560)
+            .frame(minWidth: 980, idealWidth: 1080, minHeight: 640, idealHeight: 720)
             .navigationTitle("Guided Setup")
             .confirmationDialog(
                 model.helperMigrationPrompt?.title ?? "Existing Helper Install Detected",
@@ -67,6 +67,8 @@ struct SetupGuideView: View {
             Text(model.setupGuideCompletionDetail)
                 .font(.body)
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let error = model.lastErrorMessage {
                 statusMessage(text: error, color: .red)
@@ -111,6 +113,20 @@ struct SetupGuideView: View {
     }
 
     private func stepDetail(_ step: SetupGuideStep) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ScrollView {
+                stepDetailContent(step)
+                    .padding(.trailing, 8)
+            }
+
+            Divider()
+
+            actionBar(for: step)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func stepDetailContent(_ step: SetupGuideStep) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
                 Text(step.category.title.uppercased())
@@ -125,116 +141,109 @@ struct SetupGuideView: View {
                     .foregroundStyle(step.status == .good ? .green : .secondary)
             }
 
-            Text(step.title)
-                .font(.title3.weight(.semibold))
-
-            Text(step.summary)
-                .font(.body)
-                .foregroundStyle(.primary)
+            wrappingText(step.title, font: .title3.weight(.semibold), style: .primary)
+            wrappingText(step.summary, font: .body, style: .primary)
 
             if step.kind == .installHelpers || step.kind == .startHelperServices {
                 windowControlExplainer
             }
 
             if step.kind == .missionControl {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Checklist")
-                            .font(.headline)
-                        Text(step.whatToDo)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                        MissionControlChecklistView(items: model.missionControlChecklistItems)
-                        if let detail = step.detail, !detail.isEmpty {
-                            Divider()
-                            Text(detail)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let verificationText = step.verificationText, !verificationText.isEmpty {
-                            Divider()
-                            Text(verificationText)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else
-            if step.isSatisfied {
+                missionControlDetail(step)
+            } else if step.isSatisfied {
                 if let detail = step.detail, !detail.isEmpty {
                     detailSection(title: "Current status", detail)
                 }
             } else {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("What to do next")
-                            .font(.headline)
-                        Text(step.whatToDo)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                        if let detail = step.detail, !detail.isEmpty {
-                            Divider()
-                            Text(detail)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let verificationText = step.verificationText, !verificationText.isEmpty {
-                            Divider()
-                            Text(verificationText)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                nextStepDetail(step)
             }
 
-            detailSection(title: step.category == .featureOptional ? "What this enables" : "Why TilePilot needs this", step.whyItMatters)
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 10) {
-                if let primaryAction = step.primaryAction, !step.isSatisfied {
-                    Button(primaryButtonLabel(for: step, action: primaryAction)) {
-                        if step.kind == .startHelperServices {
-                            model.startWindowControlBestEffort()
-                        } else {
-                            model.performSystemCheckAction(primaryAction)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(primaryActionInFlight(for: step))
-                } else {
-                    Button(hasRemainingIncompleteSteps ? "Continue" : "Done") {
-                        if hasRemainingIncompleteSteps {
-                            model.continueSetupGuide()
-                        } else {
-                            model.dismissSetupGuide()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-
-                ForEach(secondaryActions(for: step), id: \.self) { action in
-                    Button(secondaryButtonLabel(for: action)) {
-                        model.performSystemCheckAction(action)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(secondaryActionInFlight(action))
-                }
-
-                Spacer()
-
-                if hasRemainingIncompleteSteps, step.isSkippable || step.isBlocking {
-                    Button("Skip for Now") {
-                        model.dismissSetupGuide()
-                    }
-                    .buttonStyle(.bordered)
-                }
+            if step.kind != .installHelpers && step.kind != .startHelperServices {
+                detailSection(title: step.category == .featureOptional ? "What this enables" : "Why TilePilot needs this", step.whyItMatters)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func missionControlDetail(_ step: SetupGuideStep) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Checklist")
+                    .font(.headline)
+                wrappingText(step.whatToDo, font: .body, style: .primary)
+                MissionControlChecklistView(items: model.missionControlChecklistItems)
+                if let detail = step.detail, !detail.isEmpty {
+                    Divider()
+                    wrappingText(detail, font: .callout, style: .secondary)
+                }
+                if let verificationText = step.verificationText, !verificationText.isEmpty {
+                    Divider()
+                    wrappingText(verificationText, font: .callout, style: .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func nextStepDetail(_ step: SetupGuideStep) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What to do next")
+                    .font(.headline)
+                wrappingText(step.whatToDo, font: .body, style: .primary)
+                if let detail = step.detail, !detail.isEmpty {
+                    Divider()
+                    wrappingText(detail, font: .callout, style: .secondary)
+                }
+                if let verificationText = step.verificationText, !verificationText.isEmpty {
+                    Divider()
+                    wrappingText(verificationText, font: .callout, style: .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func actionBar(for step: SetupGuideStep) -> some View {
+        HStack(spacing: 10) {
+            if let primaryAction = step.primaryAction, !step.isSatisfied {
+                Button(primaryButtonLabel(for: step, action: primaryAction)) {
+                    if step.kind == .startHelperServices {
+                        model.startWindowControlBestEffort()
+                    } else {
+                        model.performSystemCheckAction(primaryAction)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(primaryActionInFlight(for: step))
+            } else {
+                Button(hasRemainingIncompleteSteps ? "Continue" : "Done") {
+                    if hasRemainingIncompleteSteps {
+                        model.continueSetupGuide()
+                    } else {
+                        model.dismissSetupGuide()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            ForEach(secondaryActions(for: step), id: \.self) { action in
+                Button(secondaryButtonLabel(for: action)) {
+                    model.performSystemCheckAction(action)
+                }
+                .buttonStyle(.bordered)
+                .disabled(secondaryActionInFlight(action))
+            }
+
+            Spacer()
+
+            if hasRemainingIncompleteSteps, step.isSkippable || step.isBlocking {
+                Button("Skip for Now") {
+                    model.dismissSetupGuide()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
     }
 
     private func detailSection(title: String, _ body: String) -> some View {
@@ -242,9 +251,7 @@ struct SetupGuideView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(.headline)
-                Text(body)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                wrappingText(body, font: .body, style: .secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -255,12 +262,8 @@ struct SetupGuideView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("What are yabai and skhd?")
                     .font(.headline)
-                Text("yabai is the small local service TilePilot uses to read and move windows. skhd is the small local service TilePilot uses for global keyboard shortcuts. TilePilot installs its own copies under your user account and starts them as user LaunchAgents.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                Text("If macOS asks for Accessibility access, it is asking because these services need permission to observe and control windows. Approve only the exact entry macOS names, then come back to TilePilot.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                wrappingText("yabai reads and moves windows/desktops. skhd listens for global keyboard shortcuts. TilePilot installs its own local copies under your user account and starts them as user LaunchAgents.", font: .body, style: .secondary)
+                wrappingText("If macOS asks for Accessibility access, approve only the exact TilePilot, yabai, or skhd entry macOS names, then come back to TilePilot.", font: .body, style: .secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -273,6 +276,8 @@ struct SetupGuideView: View {
             Text("All required setup is complete. You can reopen Guided Setup later from System or the menu bar if you want to review optional permissions again.")
                 .font(.body)
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
                 Button("Continue") {
@@ -305,6 +310,18 @@ struct SetupGuideView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func wrappingText(_ text: String, font: Font, style: HierarchicalShapeStyle) -> some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(style)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
     }
 
     private func color(for status: SystemCheckStatus) -> Color {

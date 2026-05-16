@@ -183,12 +183,48 @@ struct PerformanceSettings: Codable, Sendable, Equatable {
             keepOnTopEnforcementEnabled == base.keepOnTopEnforcementEnabled
     }
 
+    var inferredPreset: PerformancePreset {
+        for preset in PerformancePreset.selectableCases where matchesPreset(preset) {
+            return preset
+        }
+        return .custom
+    }
+
     var overlayRefreshPolicy: OverlayRefreshPolicy {
-        switch preset {
+        switch inferredPreset {
         case .responsive:
             return .full
         case .balanced, .passiveBaseline, .lowCPU, .custom:
             return .reduced
         }
+    }
+
+    func degradationMode(
+        currentKeepOnTopEnforcementIntervalSeconds: Double,
+        hasActiveOverlayTargets: Bool,
+        hasVisibleWindowBadgePanels: Bool,
+        hasActiveKeepOnTopWindows: Bool
+    ) -> PerformanceDegradationMode {
+        let balancedOverlayInterval = max(Self.balanced.foregroundPollingSeconds, 2.5)
+        let currentOverlayInterval = overlayRefreshPolicy == .reduced
+            ? max(foregroundPollingSeconds, 2.5)
+            : foregroundPollingSeconds
+
+        if currentOverlayInterval > balancedOverlayInterval,
+           hasActiveOverlayTargets || hasVisibleWindowBadgePanels {
+            return .reducedOverlayResponsiveness
+        }
+
+        if keepOnTopEnforcementEnabled,
+           currentKeepOnTopEnforcementIntervalSeconds > Self.balanced.keepOnTopEnforcementSeconds,
+           hasActiveKeepOnTopWindows {
+            return .reducedKeepOnTopResponsiveness
+        }
+
+        if backgroundPollingSeconds > Self.balanced.backgroundPollingSeconds {
+            return .degradedPolling
+        }
+
+        return .full
     }
 }

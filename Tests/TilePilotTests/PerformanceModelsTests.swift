@@ -20,5 +20,44 @@ final class PerformanceModelsTests: XCTestCase {
 
         XCTAssertFalse(custom.matchesPreset(.balanced))
     }
+
+    func testBalancedDoesNotReportDefaultOverlayThrottlingAsDegraded() {
+        let mode = PerformanceSettings.balanced.degradationMode(
+            currentKeepOnTopEnforcementIntervalSeconds: 0,
+            hasActiveOverlayTargets: true,
+            hasVisibleWindowBadgePanels: true,
+            hasActiveKeepOnTopWindows: false
+        )
+
+        XCTAssertEqual(mode, .full)
+    }
+
+    func testBalancedDoesNotReportDefaultIdlePollingAsDegraded() {
+        let mode = PerformanceSettings.balanced.degradationMode(
+            currentKeepOnTopEnforcementIntervalSeconds: 0,
+            hasActiveOverlayTargets: false,
+            hasVisibleWindowBadgePanels: false,
+            hasActiveKeepOnTopWindows: false
+        )
+
+        XCTAssertEqual(mode, .full)
+    }
+
+    func testLowCPUPresetStillReportsExplicitSlowPolling() {
+        let mode = PerformanceSettings.lowCPU.degradationMode(
+            currentKeepOnTopEnforcementIntervalSeconds: 0,
+            hasActiveOverlayTargets: false,
+            hasVisibleWindowBadgePanels: false,
+            hasActiveKeepOnTopWindows: false
+        )
+
+        XCTAssertEqual(mode, .degradedPolling)
+    }
+
+    func testLiveStateMismatchOnlyDegradesWhenYabaiReportsNoWindows() {
+        XCTAssertTrue(LiveStateDegradationPolicy.isMaterialMismatch(yabaiWindowTotal: 0, fallbackWindowTotal: 3))
+        XCTAssertFalse(LiveStateDegradationPolicy.isMaterialMismatch(yabaiWindowTotal: 4, fallbackWindowTotal: 8))
+        XCTAssertFalse(LiveStateDegradationPolicy.isMaterialMismatch(yabaiWindowTotal: 0, fallbackWindowTotal: 2))
+    }
 }
 #endif

@@ -7,18 +7,12 @@ extension AppModel {
     }
 
     var performanceDegradationMode: PerformanceDegradationMode {
-        if overlayRefreshPolicy == .reduced, hasActiveOverlayTargets || hasVisibleWindowBadgePanels {
-            return .reducedOverlayResponsiveness
-        }
-        if keepOnTopEnforcementEnabled,
-           currentKeepOnTopEnforcementIntervalSeconds() > PerformanceSettings.balanced.keepOnTopEnforcementSeconds,
-           hasActiveKeepOnTopWindows {
-            return .reducedKeepOnTopResponsiveness
-        }
-        if currentPollingIntervalSeconds() > PerformanceSettings.balanced.backgroundPollingSeconds {
-            return .degradedPolling
-        }
-        return .full
+        performanceSettings.degradationMode(
+            currentKeepOnTopEnforcementIntervalSeconds: currentKeepOnTopEnforcementIntervalSeconds(),
+            hasActiveOverlayTargets: hasActiveOverlayTargets,
+            hasVisibleWindowBadgePanels: hasVisibleWindowBadgePanels,
+            hasActiveKeepOnTopWindows: hasActiveKeepOnTopWindows
+        )
     }
 
     var performanceSettings: PerformanceSettings {
@@ -35,13 +29,7 @@ extension AppModel {
     }
 
     var effectivePerformancePreset: PerformancePreset {
-        if performancePreset == .custom {
-            return .custom
-        }
-        for preset in PerformancePreset.selectableCases where performanceSettings.matchesPreset(preset) {
-            return preset
-        }
-        return .custom
+        performanceSettings.inferredPreset
     }
 
     var performanceStatusLine: String {

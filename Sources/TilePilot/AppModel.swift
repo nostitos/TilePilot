@@ -482,7 +482,7 @@ final class AppModel: ObservableObject {
     private var consecutiveMismatchSamples = 0
     private var consecutiveHealthySamples = 0
     private let degradedEnterThreshold = 3
-    private let degradedExitThreshold = 5
+    private let degradedExitThreshold = 2
     var lastWindowBadgeRefreshSignature: String?
     var megamapCaptureRecordsByDesktopID: [String: MegamapCaptureRecord] = [:]
     var megamapDesktopMessagesByID: [String: String] = [:]
@@ -1212,7 +1212,10 @@ final class AppModel: ObservableObject {
     }
 
     private func isMaterialMismatch(yabai: Int, fallback: Int) -> Bool {
-        fallback >= yabai + 2 && fallback >= 3
+        LiveStateDegradationPolicy.isMaterialMismatch(
+            yabaiWindowTotal: yabai,
+            fallbackWindowTotal: fallback
+        )
     }
 
     private func makeLiveStateSnapshot(from poll: LiveStatePollResult) -> LiveStateSnapshot {
@@ -1241,7 +1244,7 @@ final class AppModel: ObservableObject {
         if hasFallback {
             let reason: String
             if forcedFallback {
-                reason = "Entered degraded mode after repeated mismatch between yabai window totals and fallback monitor counts."
+                reason = "yabai reported no windows while macOS reported visible windows; showing monitor-level fallback counts."
             } else {
                 reason = poll.errorMessage ?? "yabai live state unavailable; showing fallback monitor counts."
             }

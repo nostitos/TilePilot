@@ -10,7 +10,7 @@ struct WindowBehaviorDashboardView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     precedenceCard
                     desktopScrubCard
                     mouseDraggingCard
@@ -20,6 +20,9 @@ struct WindowBehaviorDashboardView: View {
                     pointerFocusCard
                 }
                 .padding()
+            }
+            .transaction { transaction in
+                transaction.animation = nil
             }
             .navigationTitle("TilePilot")
             .onAppear {
@@ -290,7 +293,7 @@ struct WindowBehaviorDashboardView: View {
                         Text("Keep-on-top policy applies only when app windows are floating.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        CurrentAppsBehaviorListView(apps: model.appNamesForBehaviorEditor)
+                        CurrentAppsBehaviorListView(rows: currentAppBehaviorRows)
                         Text("Note: Older rules in your `yabairc` outside the TilePilot managed section can also make apps float/tile.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -681,6 +684,26 @@ struct WindowBehaviorDashboardView: View {
     private func desktopScrubValueText(_ value: Double) -> String {
         String(format: "%.1f", value)
     }
+
+    private var currentAppBehaviorRows: [CurrentAppBehaviorRowState] {
+        model.appNamesForBehaviorEditor.prefix(24).map { appName in
+            CurrentAppBehaviorRowState(
+                appName: appName,
+                tilingBehavior: model.appTilingBehavior(for: appName),
+                foregroundPolicy: model.appForegroundPolicy(for: appName),
+                alwaysTileConflictDesktopIndex: model.alwaysTileConflictDesktopIndex(for: appName)
+            )
+        }
+    }
+}
+
+private struct CurrentAppBehaviorRowState: Identifiable, Hashable {
+    let appName: String
+    let tilingBehavior: AppTilingBehavior
+    let foregroundPolicy: AppForegroundPolicy
+    let alwaysTileConflictDesktopIndex: Int?
+
+    var id: String { appName }
 }
 
 private struct DesktopScrubInfoBubbleButton: View {
@@ -726,58 +749,67 @@ struct FlowLikeAppButtons: View {
     }
 }
 
-struct CurrentAppsBehaviorListView: View {
+private struct CurrentAppsBehaviorListView: View {
     @EnvironmentObject private var model: AppModel
-    let apps: [String]
+    let rows: [CurrentAppBehaviorRowState]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(apps.prefix(24), id: \.self) { app in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        AppNameWithIconView(appName: app)
-                            .frame(minWidth: 170, idealWidth: 210, maxWidth: 250, alignment: .leading)
-                        Picker("", selection: Binding(
-                            get: { model.appTilingBehavior(for: app) },
-                            set: { model.setAppTilingBehavior($0, for: app) }
-                        )) {
-                            ForEach(AppTilingBehavior.allCases, id: \.self) { behavior in
-                                Text(behavior.displayName).tag(behavior)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(width: 148)
-                        Picker("", selection: Binding(
-                            get: { model.appForegroundPolicy(for: app) },
-                            set: { model.setAppForegroundPolicy($0, for: app) }
-                        )) {
-                            ForEach(AppForegroundPolicy.allCases, id: \.self) { policy in
-                                Text(policy.displayName).tag(policy)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(width: 190)
-                        Spacer(minLength: 0)
-                    }
-                    if model.appTilingBehavior(for: app) == .alwaysTile,
-                       let conflictDesktop = model.alwaysTileConflictDesktopIndex(for: app) {
-                        HStack(spacing: 8) {
-                            Label("Desktop tiling is Off on Desktop \(conflictDesktop).", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                            Button("Enable Desktop \(conflictDesktop) Tiling") {
-                                model.setDesktopTilingEnabled(spaceIndex: conflictDesktop, enabled: true)
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption2.weight(.semibold))
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
+        LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(rows) { row in
+                CurrentAppBehaviorRowView(row: row)
             }
         }
+    }
+}
+
+private struct CurrentAppBehaviorRowView: View {
+    @EnvironmentObject private var model: AppModel
+    let row: CurrentAppBehaviorRowState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                AppNameWithIconView(appName: row.appName)
+                    .frame(minWidth: 170, idealWidth: 210, maxWidth: 250, alignment: .leading)
+                Picker("", selection: Binding(
+                    get: { row.tilingBehavior },
+                    set: { model.setAppTilingBehavior($0, for: row.appName) }
+                )) {
+                    ForEach(AppTilingBehavior.allCases, id: \.self) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 148)
+                Picker("", selection: Binding(
+                    get: { row.foregroundPolicy },
+                    set: { model.setAppForegroundPolicy($0, for: row.appName) }
+                )) {
+                    ForEach(AppForegroundPolicy.allCases, id: \.self) { policy in
+                        Text(policy.displayName).tag(policy)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 190)
+                Spacer(minLength: 0)
+            }
+            if row.tilingBehavior == .alwaysTile,
+               let conflictDesktop = row.alwaysTileConflictDesktopIndex {
+                HStack(spacing: 8) {
+                    Label("Desktop tiling is Off on Desktop \(conflictDesktop).", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    Button("Enable Desktop \(conflictDesktop) Tiling") {
+                        model.setDesktopTilingEnabled(spaceIndex: conflictDesktop, enabled: true)
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption2.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }

@@ -10,8 +10,16 @@ extension AppModel {
         setupItemInstalled("yabai-binary") && setupItemInstalled("skhd-binary")
     }
 
-    private var helperServicesRunningForSetup: Bool {
+    var helperServicesRunningForSetup: Bool {
         setupItemInstalled("helper-service-yabai") && setupItemInstalled("helper-service-skhd")
+    }
+
+    var yabaiQueryReadyForSetup: Bool {
+        doctorSnapshot?.capabilities.first(where: { $0.key == "yabai-query" })?.status == .available
+    }
+
+    var windowControlReadyForSetup: Bool {
+        helperServicesRunningForSetup && yabaiQueryReadyForSetup
     }
 
     var managedHelpersInstalledButNotStartedForSetup: Bool {
@@ -48,7 +56,7 @@ extension AppModel {
         case .reviewAccessibility:
             return "Optional. Review Accessibility only if macOS prompts for TilePilot, yabai, or skhd, or if focus/bring-to-front fallbacks do not work."
         case .startHelperServices:
-            return "TilePilot installed yabai and skhd. Start window control when you are ready for any macOS permission prompt."
+            return "TilePilot installed yabai and skhd and starts them automatically. If macOS asks for yabai or skhd Accessibility access, approve the exact named entry and recheck."
         case .recheck:
             return "TilePilot is still checking this Mac. Recheck setup if the status looks stale."
         case .ready:

@@ -29,13 +29,20 @@ extension AppModel {
             mappedGuideStatus(from: capabilityByKey["skhd-binary"]?.status),
         ])
 
-        let helperServicesStatus = mergedGuideStatus([
+        let helperDaemonStatus = mergedGuideStatus([
             mappedGuideStatus(from: yabaiServiceSetup?.state),
             mappedGuideStatus(from: skhdServiceSetup?.state),
             mappedGuideStatus(from: capabilityByKey["yabai-daemon"]?.status),
             mappedGuideStatus(from: capabilityByKey["skhd-daemon"]?.status),
+        ])
+        let yabaiQueryStatus = mappedGuideStatus(from: capabilityByKey["yabai-query"]?.status)
+        let helperServicesStatus = mergedGuideStatus([
+            helperDaemonStatus,
             mappedGuideStatus(from: capabilityByKey["yabai-query"]?.status),
         ])
+        let helperDaemonsRunning = helperDaemonStatus == .good
+        let windowControlNeedsStart = !helperDaemonsRunning
+        let windowControlNeedsQueryConfirmation = helperDaemonsRunning && yabaiQueryStatus != .good
 
         let accessibilityStatus = mergedGuideStatus([
             mappedGuideStatus(from: accessibilitySetup?.state),
@@ -80,11 +87,19 @@ extension AppModel {
             SetupGuideStep(
                 kind: .startHelperServices,
                 category: .essential,
-                title: "Start Window Control",
-                summary: helperServicesStatus == .good ? "Window control and shortcut services are running." : "TilePilot installed yabai and skhd, but they are not running yet.",
+                title: helperServicesStatus == .good ? "Window Control Running" : (windowControlNeedsStart ? "Starting Window Control" : "Confirm Window Control"),
+                summary: helperServicesStatus == .good
+                    ? "Window control and shortcut services are running."
+                    : (windowControlNeedsStart
+                        ? "TilePilot installed yabai and skhd and is starting them automatically."
+                        : "yabai and skhd are running. TilePilot is waiting for yabai to answer window-state queries."),
                 whyItMatters: "yabai is the window-control service. skhd is the shortcut listener. macOS may ask you to allow these entries in Accessibility because they need to observe and move windows.",
-                whatToDo: "Click Start Window Control. If macOS shows an Accessibility prompt for yabai or skhd, approve the exact entry macOS names, then return to TilePilot and recheck.",
+                whatToDo: windowControlNeedsStart
+                    ? "TilePilot starts window control automatically. If this stays stuck, use Start Window Control once, approve any macOS Accessibility prompt for yabai or skhd, then wait for the recheck."
+                    : "Wait a few seconds. If macOS shows an Accessibility prompt for yabai, approve that exact entry, then use Recheck.",
                 detail: firstNonEmptyGuideDetail([
+                    helperServicesStatus == .good ? nil : "Do not keep pressing Start repeatedly. Startup and macOS permission registration can take a few seconds.",
+                    windowControlNeedsQueryConfirmation ? "The helper services are already running; TilePilot is only waiting for the yabai query check to pass." : nil,
                     helperServicesStatus == .good ? nil : "No Screen Recording permission is needed here. Screen Recording is only for optional MegaMap screenshots.",
                     yabaiServiceSetup?.detail,
                     skhdServiceSetup?.detail,
@@ -96,7 +111,7 @@ extension AppModel {
                 status: helperServicesStatus,
                 isBlocking: true,
                 isSkippable: true,
-                primaryAction: helperServicesStatus == .good ? nil : .startYabai,
+                primaryAction: helperServicesStatus == .good ? nil : (windowControlNeedsStart ? .startYabai : .recheck),
                 secondaryActions: helperServicesStatus == .good ? [] : [.openAccessibilitySettings, .recheck]
             ),
             SetupGuideStep(

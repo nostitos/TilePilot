@@ -208,7 +208,7 @@ struct SetupGuideView: View {
         HStack(spacing: 10) {
             if let primaryAction = step.primaryAction, !step.isSatisfied {
                 Button(primaryButtonLabel(for: step, action: primaryAction)) {
-                    if step.kind == .startHelperServices {
+                    if step.kind == .startHelperServices, primaryAction == .startYabai || primaryAction == .startSkhd {
                         model.startWindowControlBestEffort()
                     } else {
                         model.performSystemCheckAction(primaryAction)

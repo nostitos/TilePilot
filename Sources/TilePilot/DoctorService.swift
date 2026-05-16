@@ -326,15 +326,15 @@ final class DoctorService: @unchecked Sendable {
         if result.stderr.localizedCaseInsensitiveContains("could not connect") {
             return "TilePilot cannot connect to yabai yet. The window-control service may still be starting or macOS may be waiting for Accessibility approval."
         }
-        return "TilePilot cannot query window state yet. Start window control, then approve any yabai Accessibility prompt macOS shows."
+        return "TilePilot cannot query window state yet. Window control may still be starting or macOS may be waiting for a yabai Accessibility approval."
     }
 
     private func remediationForQuery(result: CommandResult) -> [String] {
         if result.isSuccess { return [] }
         if result.stderr.localizedCaseInsensitiveContains("could not connect") {
-            return ["Start window control again.", "If macOS shows a yabai Accessibility prompt, approve it and recheck."]
+            return ["Wait a few seconds, then recheck.", "If macOS shows a yabai Accessibility prompt, approve that exact entry and recheck."]
         }
-        return ["Start window control from Guided Setup, then run Recheck."]
+        return ["Use Guided Setup only if the services are not running.", "If macOS shows a yabai Accessibility prompt, approve that exact entry and recheck."]
     }
 
     private func missionControlCheckForMRUSpaces(_ result: CommandResult) -> MissionControlCheck {

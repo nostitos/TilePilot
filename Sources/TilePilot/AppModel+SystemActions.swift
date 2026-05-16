@@ -108,7 +108,7 @@ extension AppModel {
         lastActionMessage = "Installing TilePilot window-control components..."
         lastErrorMessage = nil
 
-        let installResult = await helperService.installBundledHelpers(startServicesAfterInstall: false)
+        let installResult = await helperService.installBundledHelpers(startServicesAfterInstall: true)
 
         isLaunchingSetupInstaller = false
         applyManagedHelperOperationResult(installResult)
@@ -117,7 +117,29 @@ extension AppModel {
             return result
         }
 
-        return await bootstrapService.runBootstrapChecks()
+        return await waitForBootstrapWindowControlServicesToSettle()
+    }
+
+    func bootstrapResultAfterAutomaticManagedHelperStartIfNeeded(_ result: BootstrapRunResult) async -> BootstrapRunResult {
+        guard shouldAutomaticallyStartManagedHelperServices(from: result) else {
+            return result
+        }
+
+        hasAttemptedAutomaticManagedHelperServiceStart = true
+        isLaunchingSetupInstaller = true
+        lastActionMessage = "Starting TilePilot window-control services..."
+        lastErrorMessage = nil
+
+        let startResult = await helperService.startManagedServices()
+
+        isLaunchingSetupInstaller = false
+        applyManagedHelperOperationResult(startResult)
+
+        guard startResult.errorMessage == nil else {
+            return await bootstrapService.runBootstrapChecks()
+        }
+
+        return await waitForBootstrapWindowControlServicesToSettle()
     }
 
     func keepExistingHelperInstall() {
@@ -150,7 +172,7 @@ extension AppModel {
 
         let result = replacingExternalInstall
             ? await self.helperService.installBundledHelpersReplacingExternalServices()
-            : await self.helperService.installBundledHelpers(startServicesAfterInstall: false)
+            : await self.helperService.installBundledHelpers(startServicesAfterInstall: true)
 
         await MainActor.run {
             self.isLaunchingSetupInstaller = false
@@ -177,6 +199,14 @@ extension AppModel {
         // Do not replace external setups here. The bootstrap check already treats a usable
         // external yabai/skhd binary as installed, so this only covers true first-run absence.
         return !helperService.hasManagedHelperInstall()
+    }
+
+    private func shouldAutomaticallyStartManagedHelperServices(from result: BootstrapRunResult) -> Bool {
+        guard !hasAttemptedAutomaticManagedHelperServiceStart else { return false }
+        guard !isLaunchingSetupInstaller else { return false }
+        guard helperService.hasManagedHelperInstall() else { return false }
+        guard bootstrapManagedHelperBinariesInstalled(in: result.snapshot) else { return false }
+        return !bootstrapWindowControlServicesRunning(in: result.snapshot)
     }
 
     func runSetupInstallerInTerminal() {
@@ -423,6 +453,7 @@ extension AppModel {
             guard let self else { return }
             await MainActor.run {
                 self.isLaunchingSetupInstaller = true
+                self.hasAttemptedAutomaticManagedHelperServiceStart = true
             }
             let result = await self.helperService.startManagedServices()
 
@@ -431,9 +462,52 @@ extension AppModel {
                 self.applyManagedHelperOperationResult(result)
             }
 
-            await self.refreshBootstrapSetup()
-            await self.refreshDoctor()
+            await self.refreshSetupAfterWindowControlStart()
         }
+    }
+
+    private func refreshSetupAfterWindowControlStart(maxAttempts: Int = 6, delaySeconds: Double = 0.7) async {
+        for attempt in 0..<maxAttempts {
+            await refreshBootstrapSetup()
+            await refreshDoctor()
+            if windowControlReadyForSetup {
+                return
+            }
+            if attempt < maxAttempts - 1 {
+                try? await Task.sleep(for: .seconds(delaySeconds))
+            }
+        }
+    }
+
+    private func waitForBootstrapWindowControlServicesToSettle(maxAttempts: Int = 6, delaySeconds: Double = 0.5) async -> BootstrapRunResult {
+        var latest = await bootstrapService.runBootstrapChecks()
+        if bootstrapWindowControlServicesRunning(in: latest.snapshot) {
+            return latest
+        }
+
+        for attempt in 1..<maxAttempts {
+            if attempt > 0 {
+                try? await Task.sleep(for: .seconds(delaySeconds))
+            }
+            latest = await bootstrapService.runBootstrapChecks()
+            if bootstrapWindowControlServicesRunning(in: latest.snapshot) {
+                return latest
+            }
+        }
+
+        return latest
+    }
+
+    private func bootstrapManagedHelperBinariesInstalled(in snapshot: SetupBootstrapSnapshot) -> Bool {
+        let itemsByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        return itemsByID["yabai-binary"]?.state == .installed &&
+            itemsByID["skhd-binary"]?.state == .installed
+    }
+
+    private func bootstrapWindowControlServicesRunning(in snapshot: SetupBootstrapSnapshot) -> Bool {
+        let itemsByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        return itemsByID["helper-service-yabai"]?.state == .installed &&
+            itemsByID["helper-service-skhd"]?.state == .installed
     }
 
     private func openURLCandidates(_ candidates: [String], updateMessaging: Bool = true) {

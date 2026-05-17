@@ -1460,14 +1460,14 @@ struct ShortcutsDashboardView: View {
             return "Automation"
         }
 
+        if c.hasPrefix("open ") || c.contains(" open ") {
+            return "Apps"
+        }
         if let first = c.split(whereSeparator: \.isWhitespace).first {
             let token = String(first)
             if token.hasPrefix("/") || token.hasPrefix("~/") || token.hasPrefix("./") {
                 return "Helpers & Scripts"
             }
-        }
-        if c.hasPrefix("open ") || c.contains(" open ") {
-            return "Apps"
         }
 
         if entry.category == "Spaces" { return "Desktops" }

@@ -1151,14 +1151,14 @@ final class AppModel: ObservableObject {
             return .automation
         }
 
+        if c.hasPrefix("open ") || c.contains(" open ") {
+            return .apps
+        }
         if let first = c.split(whereSeparator: \.isWhitespace).first {
             let token = String(first)
             if token.hasPrefix("/") || token.hasPrefix("~/") || token.hasPrefix("./") {
                 return .helpersScripts
             }
-        }
-        if c.hasPrefix("open ") || c.contains(" open ") {
-            return .apps
         }
         if entry.category == "Spaces" { return .desktops }
         if entry.category == "Windows" { return .tilingLayout }

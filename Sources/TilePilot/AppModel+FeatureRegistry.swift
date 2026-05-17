@@ -212,7 +212,11 @@ extension AppModel {
                 backend: .shortcutCommand,
                 capabilityGate: .yabaiRuntime,
                 defaultCombo: "shift + alt - r",
-                commandMatchers: ["yabai -m space --rotate"],
+                commandMatchers: [
+                    tilePilotFeatureURL("screen.rotate-layout"),
+                    "tilepilot:/feature/screen.rotate-layout",
+                    "yabai -m space --rotate"
+                ],
                 matchAllCommandMatchers: false,
                 preferredCommand: "yabai -m space --rotate 90",
                 actionID: nil,

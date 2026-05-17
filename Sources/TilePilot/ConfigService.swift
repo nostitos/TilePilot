@@ -110,17 +110,7 @@ final class ConfigService: @unchecked Sendable {
     }
 
     func defaultManagedSectionBody() -> String {
-        """
-        # Managed by TilePilot. Unknown lines outside this block are preserved.
-        # Add safe, common skhd shortcuts here if you want the app to manage them.
-        #
-        # Examples:
-        # alt - b : yabai -m space --balance
-        # alt - s : yabai -m space --layout stack
-        #
-        # Browser Relief setting for future helper workflows:
-        # TILEPILOT_MAX_WINDOWS_PER_LANE=6
-        """
+        DefaultShortcutProfile.managedSkhdSectionBody()
     }
 
     private func loadConfigDocumentSync() throws -> ConfigDocumentState {

@@ -47,6 +47,7 @@ extension AppModel {
 
     var performanceDiagnosticsRows: [(label: String, value: String)] {
         [
+            ("App memory", ProcessMemoryDiagnostics.formattedPhysicalFootprint()),
             ("Performance mode", performanceDegradationMode.title),
             ("Runtime mode", runtimeDiagnostics.runtimeActivityMode),
             ("Dominant source (10s)", runtimeDiagnostics.dominantBurstSource),

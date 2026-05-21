@@ -45,8 +45,8 @@ final class MegamapScreenshotCache {
     private var keysByPath: [String: Set<String>] = [:]
 
     private init() {
-        cache.countLimit = 24
-        cache.totalCostLimit = 128 * 1024 * 1024
+        cache.countLimit = 12
+        cache.totalCostLimit = 32 * 1024 * 1024
     }
 
     func image(for path: String, idealSize: CGSize) -> NSImage? {
@@ -98,11 +98,41 @@ final class MegamapScreenshotCache {
             return cached
         }
 
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        let cost = max(1, cgImage.bytesPerRow * cgImage.height)
+        let thumbnail = makeThumbnail(from: cgImage, maxPixelSize: targetPixelSize) ?? cgImage
+        let image = NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height))
+        let cost = max(1, thumbnail.bytesPerRow * thumbnail.height)
         cache.setObject(image, forKey: cacheKey, cost: cost)
         keysByPath[cacheKeyPath, default: []].insert(cacheKeyString)
         return image
+    }
+
+    private func makeThumbnail(from image: CGImage, maxPixelSize: Int) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        let maxSourceDimension = max(width, height)
+        guard maxSourceDimension > maxPixelSize else { return image }
+
+        let scale = CGFloat(maxPixelSize) / CGFloat(maxSourceDimension)
+        let targetWidth = max(1, Int((CGFloat(width) * scale).rounded()))
+        let targetHeight = max(1, Int((CGFloat(height) * scale).rounded()))
+        let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        return context.makeImage()
     }
 
     func removeImage(at path: String) {

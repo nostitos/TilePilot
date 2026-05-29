@@ -12,6 +12,10 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
         static let frameAutosaveName = "TilePilotMainWindow"
     }
 
+    private static let defaultContentSize = NSSize(width: 980, height: 680)
+    private static let minimumWindowSize = NSSize(width: 760, height: 520)
+    private static let minimumVisibleSize = NSSize(width: 160, height: 120)
+
     init(model: AppModel) {
         self.model = model
         let hosting = TilePilotWindowController.makeHostingController(model: model)
@@ -19,13 +23,15 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "TilePilot"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 980, height: 680))
-        window.minSize = NSSize(width: 760, height: 520)
+        window.setContentSize(Self.defaultContentSize)
+        window.minSize = Self.minimumWindowSize
+        window.contentMinSize = Self.minimumWindowSize
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.moveToActiveSpace)
         window.center()
         _ = window.setFrameUsingName(PersistedWindowSizeKeys.frameAutosaveName)
         Self.restorePersistedSize(for: window)
+        Self.repairWindowFrameIfNeeded(for: window)
         window.setFrameAutosaveName(PersistedWindowSizeKeys.frameAutosaveName)
 
         super.init(window: window)
@@ -40,13 +46,22 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
 
     func showAndFocus() {
         ensureContentLoaded()
+        if let window {
+            Self.repairWindowFrameIfNeeded(for: window)
+        }
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window else { return }
+            Self.repairWindowFrameIfNeeded(for: window)
+        }
     }
 
     func persistCurrentWindowSize() {
         guard let window else { return }
+        Self.repairWindowFrameIfNeeded(for: window)
+        guard Self.canPersistFrame(window.frame) else { return }
         persist(size: window.frame.size)
         window.saveFrame(usingName: PersistedWindowSizeKeys.frameAutosaveName)
     }
@@ -98,6 +113,67 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
         var frame = window.frame
         frame.size = NSSize(width: width, height: height)
         window.setFrame(frame, display: false)
+    }
+
+    private static func repairWindowFrameIfNeeded(for window: NSWindow) {
+        let repairedFrame = repairedFrame(for: window.frame)
+        guard repairedFrame != window.frame else { return }
+        window.setFrame(repairedFrame, display: true, animate: false)
+    }
+
+    private static func canPersistFrame(_ frame: NSRect) -> Bool {
+        guard frame.width.isFinite,
+              frame.height.isFinite,
+              frame.width >= minimumWindowSize.width,
+              frame.height >= minimumWindowSize.height else {
+            return false
+        }
+        return visibleScreenFrames().contains { screenFrame in
+            let intersection = frame.intersection(screenFrame)
+            return intersection.width >= minimumVisibleSize.width && intersection.height >= minimumVisibleSize.height
+        }
+    }
+
+    private static func repairedFrame(for rawFrame: NSRect) -> NSRect {
+        let screens = visibleScreenFrames()
+        let fallbackScreen = NSScreen.main?.visibleFrame ?? screens.first ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screenFrame = bestScreenFrame(for: rawFrame, visibleFrames: screens) ?? fallbackScreen
+
+        var frame = rawFrame
+        if !frame.origin.x.isFinite || !frame.origin.y.isFinite || !frame.width.isFinite || !frame.height.isFinite {
+            frame = NSRect(origin: .zero, size: defaultContentSize)
+        }
+
+        let maxWidth = max(minimumWindowSize.width, screenFrame.width)
+        let maxHeight = max(minimumWindowSize.height, screenFrame.height)
+        frame.size.width = min(max(frame.width, minimumWindowSize.width), maxWidth)
+        frame.size.height = min(max(frame.height, minimumWindowSize.height), maxHeight)
+
+        let intersection = frame.intersection(screenFrame)
+        let isEffectivelyVisible = intersection.width >= minimumVisibleSize.width && intersection.height >= minimumVisibleSize.height
+        if !isEffectivelyVisible {
+            frame.origin.x = screenFrame.midX - (frame.width / 2)
+            frame.origin.y = screenFrame.midY - (frame.height / 2)
+        }
+
+        frame.origin.x = min(max(frame.minX, screenFrame.minX), screenFrame.maxX - frame.width)
+        frame.origin.y = min(max(frame.minY, screenFrame.minY), screenFrame.maxY - frame.height)
+        return frame.integral
+    }
+
+    private static func bestScreenFrame(for frame: NSRect, visibleFrames: [NSRect]) -> NSRect? {
+        visibleFrames.max { lhs, rhs in
+            intersectionArea(lhs.intersection(frame)) < intersectionArea(rhs.intersection(frame))
+        }
+    }
+
+    private static func intersectionArea(_ rect: NSRect) -> CGFloat {
+        guard !rect.isNull, !rect.isEmpty else { return 0 }
+        return max(0, rect.width) * max(0, rect.height)
+    }
+
+    private static func visibleScreenFrames() -> [NSRect] {
+        NSScreen.screens.map(\.visibleFrame)
     }
 
     private func persist(size: NSSize) {

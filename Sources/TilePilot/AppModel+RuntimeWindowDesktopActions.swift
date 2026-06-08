@@ -301,6 +301,77 @@ extension AppModel {
         return nil
     }
 
+    func persistDesktopTilingPreferences() {
+        let raw = Dictionary(
+            uniqueKeysWithValues: desktopTilingPreferencesBySpaceIndex.map { (String($0.key), $0.value) }
+        )
+        UserDefaults.standard.set(raw, forKey: AppModel.desktopTilingPreferencesDefaultsKey)
+    }
+
+    func seedAllFloatingDesktopTilingPreferencesIfEmpty(using snapshot: LiveStateSnapshot) {
+        guard desktopTilingPreferencesBySpaceIndex.isEmpty else { return }
+        guard snapshot.source == .yabai, !snapshot.degraded else { return }
+
+        var preferences: [Int: Bool] = [:]
+        for space in snapshot.spaces {
+            guard let layout = space.layout?.lowercased() else { continue }
+            guard layout == "float" else { return }
+            preferences[space.index] = false
+        }
+        guard !preferences.isEmpty else { return }
+        desktopTilingPreferencesBySpaceIndex = preferences
+        persistDesktopTilingPreferences()
+    }
+
+    func applyPersistedDesktopTilingPreferencesIfNeeded(using snapshot: LiveStateSnapshot) async {
+        guard !desktopTilingPreferencesBySpaceIndex.isEmpty else { return }
+        guard canRunYabaiRuntimeCommands, snapshot.source == .yabai, !snapshot.degraded else { return }
+        guard !isApplyingPersistedDesktopTilingPreferences else { return }
+
+        let mismatches = snapshot.spaces.compactMap { space -> (spaceIndex: Int, enabled: Bool, currentLayout: String)? in
+            guard let desired = desktopTilingPreferencesBySpaceIndex[space.index],
+                  let layout = space.layout?.lowercased() else { return nil }
+            let current: Bool?
+            if layout == "float" {
+                current = false
+            } else if layout == "bsp" || layout == "stack" {
+                current = true
+            } else {
+                current = nil
+            }
+            guard current != nil, current != desired else { return nil }
+            return (space.index, desired, layout)
+        }
+        guard !mismatches.isEmpty else {
+            lastDesktopTilingPreferenceApplySignature = nil
+            return
+        }
+
+        let signature = mismatches
+            .map { "\($0.spaceIndex)=\($0.enabled ? "on" : "off") from \($0.currentLayout)" }
+            .sorted()
+            .joined(separator: "|")
+        let now = Date()
+        if signature == lastDesktopTilingPreferenceApplySignature,
+           let lastAttempt = lastDesktopTilingPreferenceApplyAttemptAt,
+           now.timeIntervalSince(lastAttempt) < 10 {
+            return
+        }
+        lastDesktopTilingPreferenceApplySignature = signature
+        lastDesktopTilingPreferenceApplyAttemptAt = now
+
+        isApplyingPersistedDesktopTilingPreferences = true
+        defer { isApplyingPersistedDesktopTilingPreferences = false }
+
+        for mismatch in mismatches {
+            let targetLayout = mismatch.enabled ? "bsp" : "float"
+            let result = await doctorService.runSupportCommand(
+                yabaiCommand(["-m", "space", String(mismatch.spaceIndex), "--layout", targetLayout], timeout: 1.5)
+            )
+            appendCommandLog(from: result)
+        }
+    }
+
     func setDesktopTilingEnabled(spaceIndex: Int, enabled: Bool) {
         if let reason = desktopTilingDisabledReason(spaceIndex: spaceIndex) {
             lastErrorMessage = reason
@@ -308,6 +379,8 @@ extension AppModel {
             return
         }
         if let current = desktopTilingEnabled(spaceIndex: spaceIndex), current == enabled {
+            desktopTilingPreferencesBySpaceIndex[spaceIndex] = enabled
+            persistDesktopTilingPreferences()
             lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling is already on." : "Desktop \(spaceIndex) tiling is already off."
             lastErrorMessage = nil
             return
@@ -322,6 +395,8 @@ extension AppModel {
             await MainActor.run {
                 self.appendCommandLog(from: result)
                 if result.isSuccess {
+                    self.desktopTilingPreferencesBySpaceIndex[spaceIndex] = enabled
+                    self.persistDesktopTilingPreferences()
                     self.lastActionMessage = enabled ? "Desktop \(spaceIndex) tiling enabled." : "Desktop \(spaceIndex) tiling disabled."
                     self.lastErrorMessage = nil
                 } else {
@@ -359,6 +434,7 @@ extension AppModel {
             guard let self else { return }
             let targetLayout = enabled ? "bsp" : "float"
             var successCount = 0
+            var successfulSpaces: [Int] = []
             for spaceIndex in targetSpaces {
                 let result = await self.doctorService.runSupportCommand(
                     yabaiCommand(["-m", "space", String(spaceIndex), "--layout", targetLayout], timeout: 1.5)
@@ -368,9 +444,16 @@ extension AppModel {
                 }
                 if result.isSuccess {
                     successCount += 1
+                    successfulSpaces.append(spaceIndex)
                 }
             }
             await MainActor.run {
+                for spaceIndex in successfulSpaces {
+                    self.desktopTilingPreferencesBySpaceIndex[spaceIndex] = enabled
+                }
+                if !successfulSpaces.isEmpty {
+                    self.persistDesktopTilingPreferences()
+                }
                 if successCount == targetSpaces.count {
                     self.lastActionMessage = enabled ? "Enabled tiling on all desktops." : "Disabled tiling on all desktops."
                     self.lastErrorMessage = nil

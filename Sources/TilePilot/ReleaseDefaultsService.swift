@@ -103,6 +103,7 @@ final class ReleaseDefaultsService: @unchecked Sendable {
             "TilePilot.desktopScrubInvertDirection",
             "TilePilot.raiseOnFloatToggle",
             "TilePilot.appForegroundPolicyByName",
+            "TilePilot.desktopTilingPreferencesBySpaceIndex",
             "TilePilot.performanceHideMinimizedHelperWindowsInMaps",
         ]
         return keys.contains { defaults.object(forKey: $0) != nil }

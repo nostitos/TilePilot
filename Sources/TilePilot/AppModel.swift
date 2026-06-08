@@ -92,6 +92,7 @@ final class AppModel: ObservableObject {
     static let performanceFastLiveRefreshEnabledDefaultsKey = "TilePilot.performanceFastLiveRefreshEnabled"
     static let performanceKeepOnTopEnforcementEnabledDefaultsKey = "TilePilot.performanceKeepOnTopEnforcementEnabled"
     static let megamapCacheArmedDefaultsKey = "TilePilot.megamapCacheArmed"
+    static let desktopTilingPreferencesDefaultsKey = "TilePilot.desktopTilingPreferencesBySpaceIndex"
     static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
     static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
     static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
@@ -135,6 +136,22 @@ final class AppModel: ObservableObject {
 
     private static func loadActiveWorkSetIDsByScope() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: AppModel.activeWorkSetIDsByScopeDefaultsKey) as? [String: String] ?? [:]
+    }
+
+    private static func loadDesktopTilingPreferencesBySpaceIndex() -> [Int: Bool] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: AppModel.desktopTilingPreferencesDefaultsKey) else {
+            return [:]
+        }
+        var mapped: [Int: Bool] = [:]
+        for (key, value) in raw {
+            guard let index = Int(key) else { continue }
+            if let bool = value as? Bool {
+                mapped[index] = bool
+            } else if let number = value as? NSNumber {
+                mapped[index] = number.boolValue
+            }
+        }
+        return mapped
     }
 
     private static func loadDesktopScrubTriggerModifiers() -> [DesktopScrubModifier] {
@@ -208,6 +225,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var activeWorkSetIDsByScope: [String: String] = AppModel.loadActiveWorkSetIDsByScope()
+    @Published var desktopTilingPreferencesBySpaceIndex: [Int: Bool] = AppModel.loadDesktopTilingPreferencesBySpaceIndex()
     @Published var workSetBackdropPresentations: [WorkSetScopeKey: WorkSetBackdropPresentation] = [:]
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
@@ -508,6 +526,9 @@ final class AppModel: ObservableObject {
     var hasInitializedStagedAppRuleLists = false
     var currentVisibleTab: TilePilotTab = .now
     var isCheckingForAppUpdates = false
+    var isApplyingPersistedDesktopTilingPreferences = false
+    var lastDesktopTilingPreferenceApplySignature: String?
+    var lastDesktopTilingPreferenceApplyAttemptAt: Date?
 
     init() {
         appUpdateStatus = Self.loadPersistedAppUpdateStatus()
@@ -739,6 +760,8 @@ final class AppModel: ObservableObject {
         let contentSignature = liveStateContentSignature(for: snapshot)
         _ = reconcileWorkSetScopesIfNeeded(using: snapshot, contentSignature: contentSignature)
         rebuildWorkSetRuntimeCaches(using: snapshot, contentSignature: contentSignature)
+        seedAllFloatingDesktopTilingPreferencesIfEmpty(using: snapshot)
+        await applyPersistedDesktopTilingPreferencesIfNeeded(using: snapshot)
         if lastLiveStateContentSignature == contentSignature {
             recordRuntimeBurst(.unchangedPoll)
             mutateRuntimeDiagnostics { $0.liveStateUnchangedPollCount += 1 }

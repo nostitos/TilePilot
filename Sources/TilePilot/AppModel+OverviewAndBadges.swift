@@ -288,7 +288,7 @@ extension AppModel {
                 pid: window.pid,
                 app: window.app,
                 title: window.title,
-                isFloating: window.floating,
+                isFloating: effectiveBadgeFloatingState(for: window, in: snapshot),
                 isFocused: window.id == effectiveFocusedID,
                 isRuntimeManageable: window.isRuntimeManageable,
                 usesLimitedVisualStyle: window.usesLimitedVisualStyle,
@@ -300,6 +300,14 @@ extension AppModel {
         }
         applyWindowBadgeState(badges, hoveredWindowID: nil, forcePublish: forceRepair)
         lastWindowBadgeRefreshSignature = currentWindowBadgeRefreshSignature(contentSignature: contentSignature)
+    }
+
+    private func effectiveBadgeFloatingState(for window: WindowState, in snapshot: LiveStateSnapshot) -> Bool {
+        let layout = snapshot.spaces.first(where: { $0.index == window.space })?.layout?.lowercased()
+        if layout == "float" {
+            return true
+        }
+        return window.floating
     }
 
     func updateHoveredWindowForBadges(candidates: [WindowState]? = nil) {

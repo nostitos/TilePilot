@@ -567,6 +567,7 @@ extension AppModel {
     func applyWindowBehaviorRuntime(previous: ManagedWindowBehaviorPolicy, current: ManagedWindowBehaviorPolicy) async {
         var configApplyFailed = false
         let configCommands: [ShellCommand] = [
+            yabaiCommand(["-m", "config", "layout", current.manualTilingModeEnabled ? "float" : "bsp"], timeout: 1.5),
             yabaiCommand(["-m", "config", "focus_follows_mouse", current.hoverFocusMode.rawValue], timeout: 1.5),
             yabaiCommand(["-m", "config", "mouse_follows_focus", current.mouseFollowsFocusEnabled ? "on" : "off"], timeout: 1.5),
             yabaiCommand(["-m", "config", "mouse_modifier", current.mouseModifier.rawValue], timeout: 1.5),

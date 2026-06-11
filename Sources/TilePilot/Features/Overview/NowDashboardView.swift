@@ -426,6 +426,7 @@ struct NowDashboardView: View {
         runtimeDisabledReason: String
     ) -> some View {
         let defaultBehavior = defaultBehaviorBadge(for: window.app, desktopTilingEnabled: desktopTilingEnabled)
+        let effectiveFloating = desktopTilingEnabled == false || window.floating
         let trimmedTitle = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return HStack(alignment: .center, spacing: 8) {
             OverviewWindowIconControl(
@@ -470,7 +471,7 @@ struct NowDashboardView: View {
                 model.toggleWindowFloating(windowID: window.id)
             } label: {
                 if window.isRuntimeManageable {
-                    statusPill(window.floating ? "Floating" : "Tiled", color: window.floating ? .orange : .green)
+                    statusPill(effectiveFloating ? "Floating" : "Tiled", color: effectiveFloating ? .orange : .green)
                 } else {
                     statusPill("Limited", color: .gray)
                 }
@@ -487,11 +488,11 @@ struct NowDashboardView: View {
                 Button("Set Floating") {
                     model.setWindowFloating(windowID: window.id, shouldFloat: true)
                 }
-                .disabled(window.floating)
+                .disabled(effectiveFloating)
                 Button("Set Tiled") {
                     model.setWindowFloating(windowID: window.id, shouldFloat: false)
                 }
-                .disabled(!window.floating)
+                .disabled(!effectiveFloating)
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 13, weight: .semibold))

@@ -89,6 +89,7 @@ final class YabaiRulesConfigService: @unchecked Sendable {
     func renderManagedBody(for policy: ManagedWindowBehaviorPolicy) -> String {
         var lines: [String] = []
         lines.append("# Managed by TilePilot. Unknown lines outside this block are preserved.")
+        lines.append("yabai -m config layout \(policy.manualTilingModeEnabled ? "float" : "bsp")")
         lines.append("yabai -m config focus_follows_mouse \(policy.hoverFocusMode.rawValue)")
         lines.append("yabai -m config mouse_follows_focus \(policy.mouseFollowsFocusEnabled ? "on" : "off")")
         lines.append("yabai -m config mouse_modifier \(policy.mouseModifier.rawValue)")

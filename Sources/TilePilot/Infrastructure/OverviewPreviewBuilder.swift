@@ -20,10 +20,18 @@ enum OverviewPreviewBuilder {
             let desktops = (spacesByDisplay[display.id] ?? [])
                 .sorted { $0.index < $1.index }
                 .map { space in
+                    let desktopIsFloating = (space.layout ?? "").lowercased() == "float"
                     let normalizedWindows = assignWarmPaletteIndices(
                         to: (windowsBySpace[space.index] ?? [])
                         .filter { $0.display == display.id }
-                        .compactMap { normalizedPreview(for: $0, in: display, desktopIndex: space.index) }
+                        .compactMap {
+                            normalizedPreview(
+                                for: $0,
+                                in: display,
+                                desktopIndex: space.index,
+                                effectiveFloating: desktopIsFloating || $0.floating
+                            )
+                        }
                         .sorted { lhs, rhs in
                             if lhs.focused != rhs.focused { return lhs.focused && !rhs.focused }
                             return lhs.id < rhs.id
@@ -53,6 +61,15 @@ enum OverviewPreviewBuilder {
     }
 
     static func normalizedPreview(for window: WindowState, in display: DisplayState, desktopIndex: Int) -> OverviewWindowPreview? {
+        normalizedPreview(for: window, in: display, desktopIndex: desktopIndex, effectiveFloating: window.floating)
+    }
+
+    static func normalizedPreview(
+        for window: WindowState,
+        in display: DisplayState,
+        desktopIndex: Int,
+        effectiveFloating: Bool
+    ) -> OverviewWindowPreview? {
         let displayW = max(display.frameW, 1)
         let displayH = max(display.frameH, 1)
 
@@ -73,7 +90,7 @@ enum OverviewPreviewBuilder {
             app: window.app,
             title: window.title,
             desktopIndex: desktopIndex,
-            floating: window.floating,
+            floating: effectiveFloating,
             runtimeManageable: window.isRuntimeManageable,
             usesLimitedVisualStyle: window.usesLimitedVisualStyle,
             warmPaletteIndex: nil,

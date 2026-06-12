@@ -165,12 +165,25 @@ struct RecentWindowTilerTemplateOption: Identifiable, Equatable, Sendable {
     var slotCount: Int { slots.count }
 }
 
+struct RecentWindowTilerTargetOption: Identifiable, Equatable, Sendable {
+    let displayID: Int
+    let displayName: String
+    let spaceIndex: Int
+
+    var id: Int { displayID }
+
+    var title: String {
+        "\(displayName) · Desktop \(spaceIndex)"
+    }
+}
+
 struct RecentWindowTilerPresentationState: Equatable, Sendable {
     var candidates: [RecentWindowTilerCandidate]
     var selectedWindowIDs: Set<Int>
     var mode: RecentWindowTilerMode
     let targetSpaceIndex: Int
     let targetDisplayID: Int?
+    var targetOptions: [RecentWindowTilerTargetOption]
     let displayAspectRatio: Double
     let displayFrame: CGRect?
     var templateOptions: [RecentWindowTilerTemplateOption]

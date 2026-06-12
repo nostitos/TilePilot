@@ -5,15 +5,15 @@ import UniformTypeIdentifiers
 struct RecentWindowTilerPickerView: View {
     @ObservedObject var model: AppModel
 
-    private let rowHeight: CGFloat = 42
+    private let rowHeight: CGFloat = 36
     private let monitorDividerHeight: CGFloat = 24
     @State private var draggedWindowID: Int?
 
     var body: some View {
         Group {
             if let state = model.recentWindowTilerState {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
+                VStack(alignment: .leading, spacing: 10) {
+                    header(state: state)
 
                     modePickerRow(state: state)
 
@@ -26,9 +26,9 @@ struct RecentWindowTilerPickerView: View {
 
                     let idealListHeight = listHeight(for: state)
                     ScrollView {
-                        LazyVStack(spacing: 6) {
+                        LazyVStack(spacing: 4) {
                             ForEach(Array(state.candidates.enumerated()), id: \.element.windowID) { index, candidate in
-                                VStack(spacing: 6) {
+                                VStack(spacing: 4) {
                                     if shouldShowOtherMonitorDivider(index: index, candidates: state.candidates) {
                                         RecentWindowTilerMonitorDivider()
                                     }
@@ -155,7 +155,7 @@ struct RecentWindowTilerPickerView: View {
         return true
     }
 
-    private var header: some View {
+    private func header(state: RecentWindowTilerPresentationState) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("Pick Windows to Tile")
                 .font(.title3.weight(.semibold))
@@ -164,6 +164,26 @@ struct RecentWindowTilerPickerView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            if state.targetOptions.count > 1 {
+                HStack(spacing: 6) {
+                    Text("Target")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: Binding(
+                        get: { state.targetDisplayID ?? state.targetOptions.first?.displayID ?? 0 },
+                        set: { model.setRecentWindowTilerTargetDisplay($0) }
+                    )) {
+                        ForEach(state.targetOptions) { target in
+                            Text(target.title).tag(target.displayID)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 210)
+                }
+                .help("Choose which monitor this picker will arrange windows on")
+            }
 
             Button {
                 model.refreshRecentWindowTiler()
@@ -180,7 +200,7 @@ struct RecentWindowTilerPickerView: View {
         let count = state.candidates.count
         let visibleCount = min(max(count, 1), 10)
         let dividerHeight = hasOtherMonitorDivider(state.candidates) ? monitorDividerHeight + 6 : 0
-        return CGFloat(visibleCount) * rowHeight + CGFloat(max(0, visibleCount - 1) * 6) + dividerHeight
+        return CGFloat(visibleCount) * rowHeight + CGFloat(max(0, visibleCount - 1) * 4) + dividerHeight
     }
 
     private func hasOtherMonitorDivider(_ candidates: [RecentWindowTilerCandidate]) -> Bool {
@@ -338,10 +358,10 @@ private struct RecentWindowTilerGridPreview: View {
                 }
                 .coordinateSpace(name: "RecentWindowTilerPreview")
             }
-            .frame(height: 156)
+            .frame(height: 112)
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(8)
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
     private func previewCanvasSize(in size: CGSize) -> CGSize {
@@ -478,10 +498,10 @@ private struct RecentWindowTilerTemplatePreview: View {
                 }
                 .coordinateSpace(name: "RecentWindowTilerTemplatePreview")
             }
-            .frame(height: 220)
+            .frame(height: 148)
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(8)
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
     private func previewCanvasSize(in size: CGSize) -> CGSize {
@@ -529,10 +549,10 @@ private struct RecentWindowTilerGridPreviewTile: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.blue.opacity(0.15))
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
 
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.blue.opacity(0.72), lineWidth: 1.5)
+                .stroke(Color.blue.opacity(0.46), lineWidth: 1.25)
 
             if let icon = AppIconResolver.shared.icon(forAppNamed: candidate.app, size: iconSize) {
                 Image(nsImage: icon)
@@ -547,9 +567,9 @@ private struct RecentWindowTilerGridPreviewTile: View {
             Text("\(order)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(Color.blue, in: Circle())
-                .padding(5)
+                .frame(width: 20, height: 20)
+                .background(Color.blue.opacity(0.95), in: Circle())
+                .padding(4)
         }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .help(candidate.secondaryDisplayText.map { "\(candidate.primaryDisplayText) - \($0)" } ?? candidate.primaryDisplayText)
@@ -607,22 +627,22 @@ private struct RecentWindowTilerCandidateRow: View {
     let onToggle: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 10) {
+        HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text("\(order)")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(isSelected ? .white : .secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
                     .background(isSelected ? Color.blue : Color.secondary.opacity(0.13), in: Circle())
 
                 Image(nsImage: appIcon(pid: candidate.pid))
                     .resizable()
-                    .frame(width: 28, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text(candidate.primaryDisplayText)
-                        .font(.callout.weight(.semibold))
+                        .font(.callout.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .layoutPriority(1)
@@ -635,13 +655,15 @@ private struct RecentWindowTilerCandidateRow: View {
                     if candidate.isAXOnly {
                         chip("AX-only", tint: .teal)
                     }
-                    chip(candidate.floating ? "Floating" : "Tiled", tint: candidate.floating ? .orange : .green)
+                    if candidate.floating {
+                        chip("Floating", tint: .orange)
+                    }
                 }
 
                 Spacer()
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(checkColor)
             }
             .opacity(isEnabled ? 1 : 0.56)
@@ -654,7 +676,7 @@ private struct RecentWindowTilerCandidateRow: View {
             Button(action: onFocus) {
                 Image(systemName: "eye")
                     .font(.callout.weight(.semibold))
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(RecentWindowTilerIconButtonStyle(tint: .blue))
             .help("Focus this window")
@@ -662,19 +684,28 @@ private struct RecentWindowTilerCandidateRow: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(RecentWindowTilerIconButtonStyle(tint: .red))
             .help("Close this window")
         }
-        .padding(.horizontal, 10)
-        .frame(height: 42)
+        .padding(.horizontal, 8)
+        .frame(height: 36)
         .background(rowBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isSelected ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.16), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? Color.blue.opacity(0.32) : Color.secondary.opacity(0.12), lineWidth: 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(Color.blue.opacity(0.68))
+                    .frame(width: 3)
+                    .padding(.vertical, 7)
+                    .padding(.leading, 1)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .help(candidate.disabledReason(in: mode) ?? rowHelpText)
     }
 
@@ -682,8 +713,8 @@ private struct RecentWindowTilerCandidateRow: View {
         candidate.secondaryDisplayText.map { "\(candidate.primaryDisplayText) - \($0)" } ?? candidate.primaryDisplayText
     }
 
-    private var rowBackground: some ShapeStyle {
-        isSelected ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.08)
+    private var rowBackground: Color {
+        isSelected ? Color.blue.opacity(0.045) : Color(nsColor: .controlBackgroundColor).opacity(0.72)
     }
 
     private var checkColor: Color {
@@ -694,10 +725,10 @@ private struct RecentWindowTilerCandidateRow: View {
     private func chip(_ text: String, tint: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .background(tint.opacity(0.16), in: Capsule())
-            .foregroundStyle(tint)
+            .background(tint.opacity(0.10), in: Capsule())
+            .foregroundStyle(tint.opacity(0.9))
     }
 
     private func appIcon(pid: Int) -> NSImage {
@@ -716,7 +747,7 @@ private struct RecentWindowTilerIconButtonStyle: ButtonStyle {
             .foregroundStyle(tint)
             .background(
                 Circle()
-                    .fill(tint.opacity(configuration.isPressed ? 0.22 : 0.12))
+                    .fill(tint.opacity(configuration.isPressed ? 0.18 : 0.07))
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
     }

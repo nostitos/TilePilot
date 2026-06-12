@@ -34,6 +34,7 @@ private struct RecentWindowTilerDesktopState {
     let display: DisplayState?
     let windows: [WindowState]
     let primaryWindowIDs: Set<Int>
+    let targetOptions: [RecentWindowTilerTargetOption]
 }
 
 private struct RecentWindowTilerAccessibilityInfo {
@@ -719,6 +720,7 @@ extension AppModel {
                 mode: defaultMode,
                 targetSpaceIndex: state.spaceIndex,
                 targetDisplayID: state.display?.id,
+                targetOptions: state.targetOptions,
                 displayAspectRatio: self.recentWindowGridAspectRatio(display: state.display),
                 displayFrame: displayFrame,
                 templateOptions: templateOptions,
@@ -738,6 +740,24 @@ extension AppModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.refreshRecentWindowTilerSnapshot(preserving: state)
+        }
+    }
+
+    func setRecentWindowTilerTargetDisplay(_ displayID: Int) {
+        guard let state = recentWindowTilerState,
+              let target = state.targetOptions.first(where: { $0.displayID == displayID }),
+              state.targetDisplayID != target.displayID else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refreshRecentWindowTilerSnapshot(
+                preserving: state,
+                targetSpaceIndex: target.spaceIndex,
+                targetDisplayID: target.displayID,
+                resetSelection: true
+            )
         }
     }
 
@@ -801,11 +821,16 @@ extension AppModel {
         recentWindowTilerState = state.candidates.isEmpty ? nil : state
     }
 
-    private func refreshRecentWindowTilerSnapshot(preserving existingState: RecentWindowTilerPresentationState) async {
+    private func refreshRecentWindowTilerSnapshot(
+        preserving existingState: RecentWindowTilerPresentationState,
+        targetSpaceIndex: Int? = nil,
+        targetDisplayID: Int? = nil,
+        resetSelection: Bool = false
+    ) async {
         await refreshLiveState()
         guard let targetState = await currentDesktopWindowsForRecentWindowTiler(
-            targetSpaceIndex: existingState.targetSpaceIndex,
-            targetDisplayID: existingState.targetDisplayID
+            targetSpaceIndex: targetSpaceIndex ?? existingState.targetSpaceIndex,
+            targetDisplayID: targetDisplayID ?? existingState.targetDisplayID
         ) else {
             return
         }
@@ -835,7 +860,7 @@ extension AppModel {
 
         let candidates = freshCandidates
 
-        var selectedWindowIDs = existingState.selectedWindowIDs.intersection(Set(candidates.map(\.windowID)))
+        var selectedWindowIDs = resetSelection ? [] : existingState.selectedWindowIDs.intersection(Set(candidates.map(\.windowID)))
         selectedWindowIDs.formIntersection(Set(candidates.filter { $0.isSelectable(in: mode) }.map(\.windowID)))
 
         var templateSlotWindowIDs: [Int?] = []
@@ -875,6 +900,7 @@ extension AppModel {
             mode: mode,
             targetSpaceIndex: targetState.spaceIndex,
             targetDisplayID: targetState.display?.id,
+            targetOptions: targetState.targetOptions,
             displayAspectRatio: recentWindowGridAspectRatio(display: targetState.display),
             displayFrame: displayFrame,
             templateOptions: templateOptions,
@@ -3129,8 +3155,38 @@ extension AppModel {
             spaceIndex: spaceIndex,
             display: spaceDisplay,
             windows: primaryWindows + secondaryWindows,
-            primaryWindowIDs: primaryWindowIDs
+            primaryWindowIDs: primaryWindowIDs,
+            targetOptions: recentWindowTilerTargetOptions(in: snapshot)
         )
+    }
+
+    private func recentWindowTilerTargetOptions(in snapshot: LiveStateSnapshot) -> [RecentWindowTilerTargetOption] {
+        let displaysByID = Dictionary(uniqueKeysWithValues: snapshot.displays.map { ($0.id, $0) })
+        let visibleSpaces = snapshot.spaces
+            .filter(\.visible)
+            .compactMap { space -> RecentWindowTilerTargetOption? in
+                guard let display = displaysByID[space.displayId] else { return nil }
+                return RecentWindowTilerTargetOption(
+                    displayID: display.id,
+                    displayName: display.name,
+                    spaceIndex: space.index
+                )
+            }
+
+        let uniqueByDisplay = Dictionary(visibleSpaces.map { ($0.displayID, $0) }, uniquingKeysWith: { first, _ in first })
+        return uniqueByDisplay.values.sorted { lhs, rhs in
+            guard let lhsDisplay = displaysByID[lhs.displayID],
+                  let rhsDisplay = displaysByID[rhs.displayID] else {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            if abs(lhsDisplay.frameY - rhsDisplay.frameY) > 8 {
+                return lhsDisplay.frameY < rhsDisplay.frameY
+            }
+            if abs(lhsDisplay.frameX - rhsDisplay.frameX) > 8 {
+                return lhsDisplay.frameX < rhsDisplay.frameX
+            }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
     }
 
     private func recentWindowTilerTargetSpace(

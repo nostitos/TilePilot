@@ -111,19 +111,19 @@ struct HowItWorksDashboardView: View {
                     Label("Numbers in the list and preview are placement order", systemImage: "list.number")
                     Label("Drag rows or preview tiles to change which window goes into each spot", systemImage: "arrow.up.arrow.down.square")
                     Label("Spare grid cells are filled by stretching nearby windows vertically", systemImage: "arrow.down.to.line.compact")
-                    Label("Floating Grid moves the selected windows exactly; Auto-Tiled uses yabai tiling", systemImage: "rectangle.grid.2x2")
+                    Label("Floating Grid and Template modes both match the preview", systemImage: "rectangle.grid.2x2")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
             conceptCard(
-                title: "Floating Grid vs Auto-Tiled",
-                summary: "Floating Grid is the predictable picker default. Auto-Tiled makes the selected windows the real yabai tiled set."
+                title: "Exact Layout Modes",
+                summary: "The picker only shows modes where the preview is the result."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Floating Grid keeps windows floating and places them into exact slots", systemImage: "rectangle.3.group")
-                    Label("Auto-Tiled floats non-selected windows so only the selected set joins the tiled layout", systemImage: "rectangle.split.3x1")
-                    Label("AX-only apps can often use Floating Grid even when they cannot join yabai tiling", systemImage: "accessibility")
+                    Label("Template places selected windows into compatible saved template slots", systemImage: "rectangle.on.rectangle")
+                    Label("True yabai tiling stays in desktop tiling actions and Work Set Tile mode", systemImage: "rectangle.split.3x1")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

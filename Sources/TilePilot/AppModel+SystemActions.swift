@@ -310,16 +310,8 @@ extension AppModel {
     func enableStartAtLogon() {
         acknowledgeInitialStatusIfNeeded()
 
-        let fm = FileManager.default
-        let launchAgentsDirectory = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        let plistURL = launchAgentsDirectory
-            .appendingPathComponent(BootstrapService.startAtLogonLaunchAgentFileName)
-
         do {
-            try fm.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
-            let plist = startAtLogonLaunchAgentPlist()
-            try plist.write(to: plistURL, atomically: true, encoding: .utf8)
+            try writeStartAtLogonLaunchAgent()
             lastActionMessage = "Enabled start at logon."
             lastErrorMessage = nil
             Task { [weak self] in
@@ -329,6 +321,17 @@ extension AppModel {
             lastErrorMessage = "Failed to enable start at logon: \(error.localizedDescription)"
             lastActionMessage = nil
         }
+    }
+
+    func updateStartAtLogonLaunchAgentIfNeeded() {
+        let plistURL = startAtLogonLaunchAgentURL()
+        guard FileManager.default.fileExists(atPath: plistURL.path),
+              let currentPlist = try? String(contentsOf: plistURL, encoding: .utf8),
+              currentPlist != startAtLogonLaunchAgentPlist() else {
+            return
+        }
+
+        try? writeStartAtLogonLaunchAgent()
     }
 
     func restartYabaiBestEffort() {
@@ -539,14 +542,35 @@ extension AppModel {
             <key>ProgramArguments</key>
             <array>
                 <string>/usr/bin/open</string>
+                <string>-g</string>
                 <string>-a</string>
                 <string>\(escapedAppPath)</string>
+                <string>--args</string>
+                <string>\(TilePilotLaunchPolicy.loginLaunchArgument)</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
         </dict>
         </plist>
         """
+    }
+
+    private func writeStartAtLogonLaunchAgent() throws {
+        let fm = FileManager.default
+        let launchAgentsDirectory = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        try fm.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
+        try startAtLogonLaunchAgentPlist().write(
+            to: startAtLogonLaunchAgentURL(),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private func startAtLogonLaunchAgentURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent(BootstrapService.startAtLogonLaunchAgentFileName)
     }
 
     private func xmlEscaped(_ text: String) -> String {

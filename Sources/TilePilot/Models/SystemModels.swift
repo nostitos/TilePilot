@@ -268,6 +268,15 @@ struct SetupGuideStep: Identifiable, Sendable {
     var isSatisfied: Bool {
         status == .good
     }
+
+    var displayedSecondaryActions: [SystemCheckAction] {
+        var seen = Set<SystemCheckAction>()
+        return secondaryActions.filter { action in
+            guard !(isSatisfied && action == .recheck) else { return false }
+            guard action != primaryAction else { return false }
+            return seen.insert(action).inserted
+        }
+    }
 }
 
 enum ExistingHelperInstallSource: String, Sendable {

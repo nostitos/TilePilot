@@ -123,7 +123,7 @@ TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical f
   - `Retile Windows into a Balanced Tiled Layout`
 - `Rebalance Tiled Window Sizes`
 - `Pick Windows to Tile...`
-  - chooses a subset first, then applies Floating Grid or Auto-Tiled to that subset
+  - chooses a subset first, then applies Floating Grid or a compatible Template to that subset
 - Legacy `Auto Layout` naming is no longer a primary concept.
   - old aliases map to the floating-grid action
 - Legacy `bootstrap.sh` is treated as a reset/helper script, not a normal first-class layout action
@@ -227,10 +227,10 @@ TilePilot is a native macOS menu bar app that makes `yabai` + `skhd` practical f
   - keeps selected windows floating
   - places exact frames
   - supports AX-only windows when Accessibility can move/resize them
-- Auto-Tiled mode:
-  - makes selected manageable windows the yabai tiled set
-  - floats non-selected manageable windows so they stay out of that set
-  - may disable AX-only windows that cannot join real yabai tiling
+- Template mode:
+  - applies selected windows to compatible saved template slots
+  - keeps selected windows floating for exact placement
+  - leaves unselected windows unchanged
 
 ## 3.6 Behaviors and Appearance
 - `Behaviors` owns behavior semantics:

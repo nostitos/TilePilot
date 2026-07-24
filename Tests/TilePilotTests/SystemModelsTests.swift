@@ -38,5 +38,45 @@ final class SystemModelsTests: XCTestCase {
         XCTAssertEqual(items[1].expectedValue, "On")
         XCTAssertEqual(items[1].actualValue, "On")
     }
+
+    func testSetupGuideStepDoesNotRepeatPrimaryActionAsSecondary() {
+        let step = SetupGuideStep(
+            kind: .startHelperServices,
+            category: .essential,
+            title: "Confirm Window Control",
+            summary: "Waiting for yabai.",
+            whyItMatters: "Window control depends on yabai.",
+            whatToDo: "Use Recheck after approving permissions.",
+            detail: nil,
+            verificationText: nil,
+            status: .notice,
+            isBlocking: true,
+            isSkippable: true,
+            primaryAction: .recheck,
+            secondaryActions: [.openAccessibilitySettings, .recheck]
+        )
+
+        XCTAssertEqual(step.displayedSecondaryActions, [.openAccessibilitySettings])
+    }
+
+    func testSetupGuideStepHidesSatisfiedRecheckSecondaryAction() {
+        let step = SetupGuideStep(
+            kind: .installHelpers,
+            category: .essential,
+            title: "Prepare Window Control",
+            summary: "Components are installed.",
+            whyItMatters: "Window control depends on local helpers.",
+            whatToDo: "Nothing else is required.",
+            detail: nil,
+            verificationText: nil,
+            status: .good,
+            isBlocking: true,
+            isSkippable: true,
+            primaryAction: nil,
+            secondaryActions: [.recheck]
+        )
+
+        XCTAssertEqual(step.displayedSecondaryActions, [])
+    }
 }
 #endif

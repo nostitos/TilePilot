@@ -122,7 +122,7 @@ TilePilot now names layout actions by their outcome:
 - `Arrange Windows into a Floating Grid`
   - places windows into a grid-like arrangement and leaves them floating
 - `Pick Windows to Tile...`
-  - opens a picker for the current desktop's recent windows, lets you choose and reorder the set, previews the grid, and applies either Floating Grid or Auto-Tiled mode
+  - opens a picker for the current desktop's recent windows, lets you choose and reorder the set, previews the placement, and applies either Floating Grid or a saved Template
 - `Retile Windows into a Balanced Tiled Layout`
   - rebuilds the current desktop into a more even tiled layout
 - `Rebalance Tiled Window Sizes`
@@ -139,9 +139,9 @@ This naming is deliberate: the app should tell you where windows will end up, no
 - shows useful window titles first, especially for browsers and terminals
 - lets you click rows to include or exclude windows
 - lets you drag rows or preview tiles to change placement order
-- previews the final grid with app icons and numbered spots
-- fills spare cells by stretching nearby windows vertically instead of leaving holes
-- defaults to `Floating Grid`, while `Auto-Tiled` makes the selected windows the yabai tiled set
+- previews the final placement with app icons and numbered spots
+- in `Floating Grid`, fills spare cells by stretching nearby windows vertically instead of leaving holes
+- defaults to `Floating Grid`; `Template` applies selected windows to compatible saved template slots
 
 ## Desktop Scrub
 

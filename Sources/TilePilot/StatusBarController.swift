@@ -12,8 +12,8 @@ final class TilePilotWindowController: NSWindowController, NSWindowDelegate {
         static let frameAutosaveName = "TilePilotMainWindow"
     }
 
-    private static let defaultContentSize = NSSize(width: 980, height: 680)
-    private static let minimumWindowSize = NSSize(width: 760, height: 520)
+    private static let defaultContentSize = NSSize(width: 1180, height: 760)
+    private static let minimumWindowSize = NSSize(width: 1120, height: 720)
     private static let minimumVisibleSize = NSSize(width: 160, height: 120)
 
     init(model: AppModel) {
@@ -755,6 +755,7 @@ final class StatusBarController: NSObject {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel.shared
+    private let isLoginLaunch = TilePilotLaunchPolicy.isLoginLaunch(arguments: ProcessInfo.processInfo.arguments)
     private var tilePilotWindowController: TilePilotWindowController?
     private var megamapWindowController: MegamapWindowController?
     private var statusBarController: StatusBarController?
@@ -802,10 +803,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         model.startIfNeeded()
 
-        // Accessory apps can otherwise look "dead" if the status item is missing or hidden.
-        // Surface the main window on launch so manual launches always produce visible UI.
-        DispatchQueue.main.async { [weak self] in
-            self?.tilePilotWindowController?.showAndFocus()
+        if !isLoginLaunch {
+            // Manual launches should always produce visible UI.
+            DispatchQueue.main.async { [weak self] in
+                self?.tilePilotWindowController?.showAndFocus()
+            }
         }
     }
 

@@ -2,9 +2,11 @@ import CoreGraphics
 import Foundation
 
 enum RecentWindowTilerMode: String, CaseIterable, Identifiable, Sendable {
-    case autoTiled
     case floatingGrid
+    case autoTiled
     case template
+
+    static let pickerModes: [RecentWindowTilerMode] = [.floatingGrid, .template]
 
     var id: String { rawValue }
 

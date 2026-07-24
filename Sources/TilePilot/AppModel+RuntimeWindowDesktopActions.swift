@@ -34,12 +34,14 @@ private struct RecentWindowTilerDesktopState {
     let display: DisplayState?
     let windows: [WindowState]
     let primaryWindowIDs: Set<Int>
+    let tilingEnabledBySpaceIndex: [Int: Bool]
     let targetOptions: [RecentWindowTilerTargetOption]
 }
 
 private struct RecentWindowTilerAccessibilityInfo {
     let title: String
     let canMoveAndResize: Bool
+    let isSupportedForPicker: Bool
 }
 
 private struct RecentWindowTilerTemplateApplyResult {
@@ -283,7 +285,12 @@ extension AppModel {
 
     func desktopTilingEnabled(spaceIndex: Int) -> Bool? {
         guard let snapshot = liveStateSnapshot, snapshot.source == .yabai, !snapshot.degraded else { return nil }
-        guard let layout = snapshot.spaces.first(where: { $0.index == spaceIndex })?.layout?.lowercased() else { return nil }
+        let layout = snapshot.spaces.first(where: { $0.index == spaceIndex })?.layout
+        return tilingEnabled(forSpaceLayout: layout)
+    }
+
+    private func tilingEnabled(forSpaceLayout layout: String?) -> Bool? {
+        guard let layout = layout?.lowercased() else { return nil }
         if layout == "float" { return false }
         if layout == "bsp" || layout == "stack" { return true }
         return nil
@@ -694,7 +701,8 @@ extension AppModel {
             guard let state = await self.currentDesktopWindowsForRecentWindowTiler() else { return }
             let candidates = self.recentWindowTilerCandidates(
                 from: state.windows,
-                primaryWindowIDs: state.primaryWindowIDs
+                primaryWindowIDs: state.primaryWindowIDs,
+                tilingEnabledBySpaceIndex: state.tilingEnabledBySpaceIndex
             )
             guard !candidates.isEmpty else {
                 self.lastErrorMessage = "No controllable windows on the current desktop."
@@ -837,7 +845,8 @@ extension AppModel {
 
         let freshCandidates = recentWindowTilerCandidates(
             from: targetState.windows,
-            primaryWindowIDs: targetState.primaryWindowIDs
+            primaryWindowIDs: targetState.primaryWindowIDs,
+            tilingEnabledBySpaceIndex: targetState.tilingEnabledBySpaceIndex
         )
         guard !freshCandidates.isEmpty else {
             recentWindowTilerState = nil
@@ -1030,7 +1039,8 @@ extension AppModel {
 
     private func recentWindowTilerCandidates(
         from windows: [WindowState],
-        primaryWindowIDs: Set<Int>
+        primaryWindowIDs: Set<Int>,
+        tilingEnabledBySpaceIndex: [Int: Bool]
     ) -> [RecentWindowTilerCandidate] {
         windows
             .enumerated()
@@ -1038,7 +1048,8 @@ extension AppModel {
                 recentWindowTilerCandidate(
                     from: $0.element,
                     frontToBackOrder: $0.offset,
-                    isOnTargetDisplay: primaryWindowIDs.contains($0.element.id)
+                    isOnTargetDisplay: primaryWindowIDs.contains($0.element.id),
+                    tilingEnabled: tilingEnabledBySpaceIndex[$0.element.space]
                 )
             }
     }
@@ -1076,10 +1087,14 @@ extension AppModel {
         let stored = UserDefaults.standard.string(forKey: AppModel.recentWindowTilerLastModeDefaultsKey)
             .flatMap(RecentWindowTilerMode.init(rawValue:))
         guard let stored else { return .floatingGrid }
-        if stored == .template, templateOptions.isEmpty {
+        switch stored {
+        case .template where !templateOptions.isEmpty:
+            return .template
+        case .floatingGrid:
+            return .floatingGrid
+        case .autoTiled, .template:
             return .floatingGrid
         }
-        return stored
     }
 
     private func recentWindowTilerDefaultTemplateID(
@@ -1095,7 +1110,8 @@ extension AppModel {
     }
 
     private func persistRecentWindowTilerLastMode(_ mode: RecentWindowTilerMode) {
-        UserDefaults.standard.set(mode.rawValue, forKey: AppModel.recentWindowTilerLastModeDefaultsKey)
+        let defaultMode: RecentWindowTilerMode = mode == .autoTiled ? .floatingGrid : mode
+        UserDefaults.standard.set(defaultMode.rawValue, forKey: AppModel.recentWindowTilerLastModeDefaultsKey)
     }
 
     private func persistRecentWindowTilerLastTemplateID(_ templateID: UUID) {
@@ -1173,12 +1189,15 @@ extension AppModel {
     private func recentWindowTilerCandidate(
         from window: WindowState,
         frontToBackOrder: Int,
-        isOnTargetDisplay: Bool
+        isOnTargetDisplay: Bool,
+        tilingEnabled: Bool?
     ) -> RecentWindowTilerCandidate? {
         let accessibilityInfo = recentWindowTilerAccessibilityInfo(for: window)
         let canAutoTile = window.isRuntimeManageable
+        guard accessibilityInfo?.isSupportedForPicker != false else { return nil }
         let canFloatingGrid = canAutoTile || accessibilityInfo?.canMoveAndResize == true
         guard canFloatingGrid else { return nil }
+        let effectiveFloating = tilingEnabled == false || window.floating
 
         let title = window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? accessibilityInfo?.title ?? ""
@@ -1190,7 +1209,7 @@ extension AppModel {
             app: window.app,
             title: title,
             focused: window.focused,
-            floating: window.floating,
+            floating: effectiveFloating,
             minimized: window.isMinimized,
             canAutoTile: canAutoTile,
             canFloatingGrid: canFloatingGrid,
@@ -1222,7 +1241,8 @@ extension AppModel {
         ) else { return }
         let candidates = recentWindowTilerCandidates(
             from: state.windows,
-            primaryWindowIDs: state.primaryWindowIDs
+            primaryWindowIDs: state.primaryWindowIDs,
+            tilingEnabledBySpaceIndex: state.tilingEnabledBySpaceIndex
         )
         let allowedWindowIDs = Set(candidates.filter { $0.isSelectable(in: mode) }.map(\.windowID))
         let explicitTemplateSlotWindowIDs = mode == .template && !templateSlotWindowIDs.isEmpty
@@ -1426,17 +1446,23 @@ extension AppModel {
         selectedWindows: [WindowState],
         nonSelectedWindows: [WindowState]
     ) async -> (updated: Int, failed: Int, primaryFocused: Bool) {
+        let selectedWindowIDs = Set(selectedWindows.map(\.id))
         let floatOthers = await setFloatingStateForWindows(
             nonSelectedWindows.filter { !$0.floating },
             shouldFloat: true
         )
-        if floatOthers.updated > 0 {
+        let floatLiveOthers = await floatNonSelectedRuntimeWindowsOnSpace(
+            spaceIndex: spaceIndex,
+            selectedWindowIDs: selectedWindowIDs
+        )
+        if floatOthers.updated > 0 || floatLiveOthers.updated > 0 {
             try? await Task.sleep(for: .milliseconds(35))
         }
 
         let rebuild = await rebuildBalancedTileLayout(
             spaceIndex: spaceIndex,
-            windows: selectedWindows
+            windows: selectedWindows,
+            preserveOrder: true
         )
 
         let primaryFocused: Bool
@@ -1447,8 +1473,8 @@ extension AppModel {
         }
 
         return (
-            updated: floatOthers.updated + rebuild.updated,
-            failed: floatOthers.failed + rebuild.failed,
+            updated: floatOthers.updated + floatLiveOthers.updated + rebuild.updated,
+            failed: floatOthers.failed + floatLiveOthers.failed + rebuild.failed,
             primaryFocused: primaryFocused
         )
     }
@@ -1674,7 +1700,7 @@ extension AppModel {
                 }
             }
 
-            if setWindowFrameUsingAccessibility(window: window, frame: absoluteFrame) {
+            if await setWindowFrameUsingAccessibility(window: window, frame: absoluteFrame) {
                 updated += 1
             } else {
                 failed += 1
@@ -3150,12 +3176,17 @@ extension AppModel {
                 return recentWindowTilerCanUseWindow(window, in: snapshot)
             }
             .sorted(by: workSetWindowSort)
+        let tilingEnabledBySpaceIndex = Dictionary(uniqueKeysWithValues: snapshot.spaces.compactMap { space -> (Int, Bool)? in
+            guard let enabled = tilingEnabled(forSpaceLayout: space.layout) else { return nil }
+            return (space.index, enabled)
+        })
 
         return RecentWindowTilerDesktopState(
             spaceIndex: spaceIndex,
             display: spaceDisplay,
             windows: primaryWindows + secondaryWindows,
             primaryWindowIDs: primaryWindowIDs,
+            tilingEnabledBySpaceIndex: tilingEnabledBySpaceIndex,
             targetOptions: recentWindowTilerTargetOptions(in: snapshot)
         )
     }
@@ -3695,10 +3726,10 @@ extension AppModel {
         var updated = 0
         var failed = 0
 
-        for (index, window) in windows.enumerated() {
+        let frameAttempts = windows.enumerated().compactMap { index, window -> Task<(WindowState, RecentWindowGridPlacement, CGRect?, Bool), Never>? in
             guard placements.indices.contains(index) else {
                 failed += 1
-                continue
+                return nil
             }
             let placement = placements[index]
             let exactFrame = recentWindowGridFrame(
@@ -3707,9 +3738,20 @@ extension AppModel {
                 cols: grid.cols,
                 display: display
             )
+            return Task { @MainActor in
+                let succeeded: Bool
+                if let exactFrame {
+                    succeeded = await self.setWindowFrameUsingAccessibility(window: window, frame: exactFrame)
+                } else {
+                    succeeded = false
+                }
+                return (window, placement, exactFrame, succeeded)
+            }
+        }
 
-            if let exactFrame,
-               setWindowFrameUsingAccessibility(window: window, frame: exactFrame) {
+        for attempt in frameAttempts {
+            let (window, placement, exactFrame, axSucceeded) = await attempt.value
+            if axSucceeded {
                 updated += 1
                 continue
             }
@@ -3724,10 +3766,15 @@ extension AppModel {
                 await MainActor.run {
                     appendCommandLog(from: result)
                 }
-                if result.isSuccess {
-                    updated += 1
-                } else {
+                guard result.isSuccess else {
                     failed += 1
+                    continue
+                }
+                if let exactFrame,
+                   !(await runtimeWindowFrameMatches(windowID: window.id, frame: exactFrame)) {
+                    failed += 1
+                } else {
+                    updated += 1
                 }
                 continue
             }
@@ -3881,7 +3928,7 @@ extension AppModel {
             )
 
             if let exactFrame,
-               setWindowFrameUsingAccessibility(window: window, frame: exactFrame) {
+               await setWindowFrameUsingAccessibility(window: window, frame: exactFrame) {
                 updated += 1
                 continue
             }
@@ -3896,10 +3943,15 @@ extension AppModel {
                 appendCommandLog(from: result)
             }
 
-            if result.isSuccess {
-                updated += 1
-            } else {
+            guard result.isSuccess else {
                 failed += 1
+                continue
+            }
+            if let exactFrame,
+               !(await runtimeWindowFrameMatches(windowID: window.id, frame: exactFrame)) {
+                failed += 1
+            } else {
+                updated += 1
             }
         }
 
@@ -3908,15 +3960,17 @@ extension AppModel {
 
     private func rebuildBalancedTileLayout(
         spaceIndex: Int,
-        windows: [WindowState]
+        windows: [WindowState],
+        preserveOrder: Bool = false
     ) async -> (updated: Int, failed: Int) {
-        let packable = windows
-            .filter { $0.isRuntimeManageable }
-            .sorted { lhs, rhs in
+        var packable = windows.filter { $0.isRuntimeManageable }
+        if !preserveOrder {
+            packable.sort { lhs, rhs in
                 if abs(lhs.frameY - rhs.frameY) > 8 { return lhs.frameY < rhs.frameY }
                 if abs(lhs.frameX - rhs.frameX) > 8 { return lhs.frameX < rhs.frameX }
                 return lhs.id < rhs.id
             }
+        }
 
         guard !packable.isEmpty else { return (0, 0) }
 
@@ -3984,6 +4038,39 @@ extension AppModel {
             updated: max(0, packable.count - stillFloatingCount),
             failed: failedWindowIDs.count + stillFloatingCount
         )
+    }
+
+    private func floatNonSelectedRuntimeWindowsOnSpace(
+        spaceIndex: Int,
+        selectedWindowIDs: Set<Int>
+    ) async -> (updated: Int, failed: Int) {
+        guard let runtimeWindows = await queryRuntimeWindowsOnSpace(spaceIndex: spaceIndex) else {
+            return (0, 0)
+        }
+
+        let targets = runtimeWindows.filter {
+            !selectedWindowIDs.contains($0.id) &&
+                !$0.isNativeFullscreen &&
+                !$0.isFloating
+        }
+
+        guard !targets.isEmpty else { return (0, 0) }
+
+        var updated = 0
+        var failed = 0
+        for window in targets {
+            let toggled = await runBestEffortYabaiCommand(
+                ["-m", "window", String(window.id), "--toggle", "float"],
+                timeout: 1.0,
+                log: false
+            )
+            if toggled {
+                updated += 1
+            } else {
+                failed += 1
+            }
+        }
+        return (updated, failed)
     }
 
     private func setWindowFloatingSilently(window: WindowState, shouldFloat: Bool) async -> Bool {
@@ -4093,6 +4180,22 @@ extension AppModel {
         )
         guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(RuntimeLayoutWindow.self, from: data)
+    }
+
+    private func runtimeWindowFrameMatches(
+        windowID: Int,
+        frame: CGRect,
+        tolerance: CGFloat = 8
+    ) async -> Bool {
+        try? await Task.sleep(for: .milliseconds(25))
+        guard let window = await queryRuntimeWindow(windowID: windowID) else { return false }
+        let actualFrame = CGRect(
+            x: window.frameX,
+            y: window.frameY,
+            width: window.frameW,
+            height: window.frameH
+        )
+        return recentWindowFrameMatches(actualFrame, frame, tolerance: tolerance)
     }
 
     @discardableResult
@@ -4720,16 +4823,19 @@ extension AppModel {
 
         let canMove = axAttributeIsSettable(targetWindow, kAXPositionAttribute as CFString)
         let canResize = axAttributeIsSettable(targetWindow, kAXSizeAttribute as CFString)
+        let identifier = axStringValue(targetWindow, "AXIdentifier" as CFString) ?? ""
+        let isSupportedForPicker = window.app != "Finder" || identifier == "FinderWindow"
         let title = axStringValue(targetWindow, kAXTitleAttribute as CFString)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         return RecentWindowTilerAccessibilityInfo(
             title: title,
-            canMoveAndResize: canMove && canResize
+            canMoveAndResize: canMove && canResize,
+            isSupportedForPicker: isSupportedForPicker
         )
     }
 
-    private func setWindowFrameUsingAccessibility(window: WindowState, frame: CGRect) -> Bool {
+    private func setWindowFrameUsingAccessibility(window: WindowState, frame: CGRect) async -> Bool {
         let appPID = pid_t(window.pid)
         let appElement = AXUIElementCreateApplication(appPID)
         var windowsRef: CFTypeRef?
@@ -4741,6 +4847,10 @@ extension AppModel {
               axAttributeIsSettable(targetWindow, kAXSizeAttribute as CFString) else {
             return false
         }
+        if window.app == "Finder",
+           axStringValue(targetWindow, "AXIdentifier" as CFString) != "FinderWindow" {
+            return false
+        }
 
         var size = frame.size
         var origin = frame.origin
@@ -4749,22 +4859,68 @@ extension AppModel {
             return false
         }
 
-        let sizeSet = AXUIElementSetAttributeValue(
-            targetWindow,
-            kAXSizeAttribute as CFString,
-            sizeValue
-        ) == .success
-        let positionSet = AXUIElementSetAttributeValue(
-            targetWindow,
-            kAXPositionAttribute as CFString,
-            positionValue
-        ) == .success
+        let sizeSet: Bool
+        let positionSet: Bool
+        if window.app == "Finder" || !window.canResize {
+            // Finder's move animation cancels a simultaneous size write. Its
+            // yabai can-resize flag also changes between snapshots, so identify
+            // Finder directly and always let the move settle before resizing.
+            positionSet = AXUIElementSetAttributeValue(
+                targetWindow,
+                kAXPositionAttribute as CFString,
+                positionValue
+            ) == .success
+            if positionSet {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            sizeSet = AXUIElementSetAttributeValue(
+                targetWindow,
+                kAXSizeAttribute as CFString,
+                sizeValue
+            ) == .success
+        } else {
+            sizeSet = AXUIElementSetAttributeValue(
+                targetWindow,
+                kAXSizeAttribute as CFString,
+                sizeValue
+            ) == .success
+            positionSet = AXUIElementSetAttributeValue(
+                targetWindow,
+                kAXPositionAttribute as CFString,
+                positionValue
+            ) == .success
+        }
 
         if sizeSet || positionSet {
             _ = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString)
         }
 
-        return sizeSet && positionSet
+        guard sizeSet && positionSet else { return false }
+
+        // Some apps, notably Finder, acknowledge AX frame writes before the new
+        // frame is observable. Poll briefly before falling back to yabai, which
+        // may report those same windows as non-resizable.
+        for attempt in 0..<12 {
+            if let actualFrame = axFrameValue(targetWindow),
+               recentWindowFrameMatches(actualFrame, frame) {
+                return true
+            }
+            if attempt < 11 {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        return false
+    }
+
+    private func recentWindowFrameMatches(
+        _ lhs: CGRect,
+        _ rhs: CGRect,
+        tolerance: CGFloat = 8
+    ) -> Bool {
+        abs(lhs.minX - rhs.minX) <= tolerance &&
+            abs(lhs.minY - rhs.minY) <= tolerance &&
+            abs(lhs.width - rhs.width) <= tolerance &&
+            abs(lhs.height - rhs.height) <= tolerance
     }
 
     private func matchingAXWindow(for window: WindowState, in windows: [AXUIElement]) -> AXUIElement? {

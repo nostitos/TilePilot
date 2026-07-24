@@ -18,6 +18,18 @@ enum TilePilotTab: Hashable {
     case setup
     case logs
 
+    static let visibleTabs: [TilePilotTab] = [
+        .now,
+        .windowBehavior,
+        .actions,
+        .templates,
+        .workSets,
+        .appearance,
+        .files,
+        .howItWorks,
+        .system
+    ]
+
     var title: String {
         switch self {
         case .now:
@@ -106,43 +118,12 @@ struct TilePilotRootView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NowDashboardView()
-                .tabItem { Label(TilePilotTab.now.title, systemImage: TilePilotTab.now.systemImage) }
-                .tag(TilePilotTab.now)
-
-            WindowBehaviorDashboardView()
-                .tabItem { Label(TilePilotTab.windowBehavior.title, systemImage: TilePilotTab.windowBehavior.systemImage) }
-                .tag(TilePilotTab.windowBehavior)
-
-            UnifiedControlsDashboardView()
-                .tabItem { Label(TilePilotTab.actions.title, systemImage: TilePilotTab.actions.systemImage) }
-                .tag(TilePilotTab.actions)
-
-            TemplatesDashboardView()
-                .tabItem { Label(TilePilotTab.templates.title, systemImage: TilePilotTab.templates.systemImage) }
-                .tag(TilePilotTab.templates)
-
-            WorkSetsDashboardView()
-                .tabItem { Label(TilePilotTab.workSets.title, systemImage: TilePilotTab.workSets.systemImage) }
-                .tag(TilePilotTab.workSets)
-
-            AppearanceDashboardView()
-                .tabItem { Label(TilePilotTab.appearance.title, systemImage: TilePilotTab.appearance.systemImage) }
-                .tag(TilePilotTab.appearance)
-
-            FilesDashboardView()
-                .tabItem { Label(TilePilotTab.files.title, systemImage: TilePilotTab.files.systemImage) }
-                .tag(TilePilotTab.files)
-
-            HowItWorksDashboardView()
-                .tabItem { Label(TilePilotTab.howItWorks.title, systemImage: TilePilotTab.howItWorks.systemImage) }
-                .tag(TilePilotTab.howItWorks)
-
-            SystemDashboardView()
-                .tabItem { Label(TilePilotTab.system.title, systemImage: TilePilotTab.system.systemImage) }
-                .tag(TilePilotTab.system)
+        VStack(spacing: 0) {
+            tabBar
+            Divider()
+            selectedTabContent
         }
+        .frame(minWidth: 1120, minHeight: 720)
         .environment(\.controlActiveState, .key)
         .onChange(of: model.requestedTilePilotTab) { newValue in
             if let newValue {
@@ -174,6 +155,47 @@ struct TilePilotRootView: View {
         .sheet(isPresented: showSetupGuideBinding) {
             SetupGuideView()
                 .environmentObject(model)
+        }
+    }
+
+    private var tabBar: some View {
+        HStack {
+            Picker("TilePilot Section", selection: $selectedTab) {
+                ForEach(TilePilotTab.visibleTabs, id: \.self) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var selectedTabContent: some View {
+        switch selectedTab.canonicalVisibleTab {
+        case .now:
+            NowDashboardView()
+        case .windowBehavior:
+            WindowBehaviorDashboardView()
+        case .actions, .shortcuts:
+            UnifiedControlsDashboardView()
+        case .templates:
+            TemplatesDashboardView()
+        case .workSets:
+            WorkSetsDashboardView()
+        case .appearance:
+            AppearanceDashboardView()
+        case .files:
+            FilesDashboardView()
+        case .howItWorks:
+            HowItWorksDashboardView()
+        case .system, .config, .health, .setup, .logs:
+            SystemDashboardView()
         }
     }
 }

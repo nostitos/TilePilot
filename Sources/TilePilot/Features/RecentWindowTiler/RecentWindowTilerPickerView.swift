@@ -103,13 +103,13 @@ struct RecentWindowTilerPickerView: View {
                 get: { state.mode },
                 set: { model.setRecentWindowTilerMode($0) }
             )) {
-                ForEach(RecentWindowTilerMode.allCases) { mode in
+                ForEach(RecentWindowTilerMode.pickerModes) { mode in
                     Text(mode.displayName).tag(mode)
                         .disabled(mode == .template && !state.canUseTemplateMode)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(minWidth: 300, maxWidth: 380)
+            .frame(minWidth: 220, maxWidth: 300)
 
             if state.mode == .template {
                 templatePicker(state: state)
@@ -156,7 +156,7 @@ struct RecentWindowTilerPickerView: View {
     }
 
     private func header(state: RecentWindowTilerPresentationState) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Text("Pick Windows to Tile")
                 .font(.title3.weight(.semibold))
             Text("Drag to reorder")
@@ -166,22 +166,32 @@ struct RecentWindowTilerPickerView: View {
             Spacer()
 
             if state.targetOptions.count > 1 {
-                HStack(spacing: 6) {
-                    Text("Target")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Picker("", selection: Binding(
-                        get: { state.targetDisplayID ?? state.targetOptions.first?.displayID ?? 0 },
-                        set: { model.setRecentWindowTilerTargetDisplay($0) }
-                    )) {
-                        ForEach(state.targetOptions) { target in
-                            Text(target.title).tag(target.displayID)
+                Menu {
+                    ForEach(state.targetOptions) { target in
+                        Button {
+                            model.setRecentWindowTilerTargetDisplay(target.displayID)
+                        } label: {
+                            if target.displayID == currentTargetOption(state: state)?.displayID {
+                                Label(target.title, systemImage: "checkmark")
+                            } else {
+                                Text(target.title)
+                            }
                         }
                     }
-                    .labelsHidden()
-                    .frame(width: 210)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "display")
+                        Text(compactTargetTitle(state: state))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .frame(maxWidth: 180)
                 .help("Choose which monitor this picker will arrange windows on")
             }
 
@@ -194,6 +204,16 @@ struct RecentWindowTilerPickerView: View {
             .buttonStyle(.bordered)
             .help("Refresh this picker snapshot")
         }
+    }
+
+    private func currentTargetOption(state: RecentWindowTilerPresentationState) -> RecentWindowTilerTargetOption? {
+        let targetDisplayID = state.targetDisplayID ?? state.targetOptions.first?.displayID
+        return state.targetOptions.first(where: { $0.displayID == targetDisplayID }) ?? state.targetOptions.first
+    }
+
+    private func compactTargetTitle(state: RecentWindowTilerPresentationState) -> String {
+        guard let target = currentTargetOption(state: state) else { return "Display" }
+        return "\(target.displayName) · D\(target.spaceIndex)"
     }
 
     private func listHeight(for state: RecentWindowTilerPresentationState) -> CGFloat {
@@ -358,7 +378,7 @@ private struct RecentWindowTilerGridPreview: View {
                 }
                 .coordinateSpace(name: "RecentWindowTilerPreview")
             }
-            .frame(height: 112)
+            .frame(height: 146)
         }
         .padding(8)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -498,7 +518,7 @@ private struct RecentWindowTilerTemplatePreview: View {
                 }
                 .coordinateSpace(name: "RecentWindowTilerTemplatePreview")
             }
-            .frame(height: 148)
+            .frame(height: 192)
         }
         .padding(8)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))

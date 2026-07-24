@@ -227,7 +227,7 @@ struct SetupGuideView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            ForEach(secondaryActions(for: step), id: \.self) { action in
+            ForEach(step.displayedSecondaryActions, id: \.self) { action in
                 Button(secondaryButtonLabel(for: action)) {
                     model.performSystemCheckAction(action)
                 }
@@ -381,10 +381,6 @@ struct SetupGuideView: View {
         default:
             return action.label
         }
-    }
-
-    private func secondaryActions(for step: SetupGuideStep) -> [SystemCheckAction] {
-        step.secondaryActions.filter { !(step.isSatisfied && $0 == .recheck) }
     }
 
     private func primaryActionInFlight(for step: SetupGuideStep) -> Bool {

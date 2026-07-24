@@ -238,6 +238,36 @@ extension AppModel {
         presentSetupGuide(source: .automatic)
     }
 
+    func scheduleAutomaticSetupGuideAfterStartupGrace() {
+        guard automaticSetupGuideStartupTask == nil,
+              !automaticSetupGuideStartupGraceElapsed else {
+            return
+        }
+
+        automaticSetupGuideStartupTask = Task { [weak self] in
+            guard let self else { return }
+
+            // launchd can report the services before yabai's query socket is ready.
+            // Keep that normal boot race quiet while rechecking for up to ten seconds.
+            for delaySeconds in [2.0, 2.0, 3.0, 3.0] {
+                do {
+                    try await Task.sleep(for: .seconds(delaySeconds))
+                } catch {
+                    return
+                }
+
+                guard !self.windowControlReadyForSetup else { break }
+                await self.refreshBootstrapSetup()
+                await self.refreshDoctor()
+            }
+
+            guard !Task.isCancelled else { return }
+            self.automaticSetupGuideStartupGraceElapsed = true
+            self.automaticSetupGuideStartupTask = nil
+            self.refreshSetupGuidePresentationAfterStateChange()
+        }
+    }
+
     func refreshSetupGuidePresentationAfterStateChange() {
         if setupGuidePresentationState.isPresented {
             if setupGuidePresentationState.source == .automatic, !hasIncompleteEssentialSetupGuideSteps {
@@ -263,10 +293,13 @@ extension AppModel {
     }
 
     private var shouldAutoPresentSetupGuide: Bool {
-        guard bootstrapSnapshot != nil, doctorSnapshot != nil else { return false }
-        guard hasIncompleteEssentialSetupGuideSteps else { return false }
-        guard !hasDismissedAutomaticSetupGuideThisSession else { return false }
-        return true
+        SetupGuideAutomaticPresentationPolicy.shouldPresent(
+            startupGraceElapsed: automaticSetupGuideStartupGraceElapsed,
+            hasBootstrapSnapshot: bootstrapSnapshot != nil,
+            hasDoctorSnapshot: doctorSnapshot != nil,
+            hasIncompleteEssentialSteps: hasIncompleteEssentialSetupGuideSteps,
+            dismissedThisSession: hasDismissedAutomaticSetupGuideThisSession
+        )
     }
 
     private func preferredStartingSetupGuideStep(for source: SetupGuidePresentationSource) -> SetupGuideStep? {

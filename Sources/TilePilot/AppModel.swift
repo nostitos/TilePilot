@@ -479,6 +479,8 @@ final class AppModel: ObservableObject {
     var shortcutRecordMonitor: Any?
     var shortcutGlobalRecordMonitor: Any?
     var hasDismissedAutomaticSetupGuideThisSession = false
+    var automaticSetupGuideStartupGraceElapsed = false
+    var automaticSetupGuideStartupTask: Task<Void, Never>?
     private var lastLiveStateContentSignature: String?
     private var lastLiveStateUIPublishAt: Date?
     var latestLiveStateSnapshot: LiveStateSnapshot?
@@ -540,6 +542,8 @@ final class AppModel: ObservableObject {
 
     func startIfNeeded() {
         guard autoRefreshTask == nil else { return }
+        updateStartAtLogonLaunchAgentIfNeeded()
+        scheduleAutomaticSetupGuideAfterStartupGrace()
         refreshDesktopScrubConfiguration()
         Task { [weak self] in
             await self?.ensureReleaseDefaultsInitializedIfNeeded()
@@ -601,6 +605,8 @@ final class AppModel: ObservableObject {
         statePollingTask = nil
         managedHelperAutoUpgradeTask?.cancel()
         managedHelperAutoUpgradeTask = nil
+        automaticSetupGuideStartupTask?.cancel()
+        automaticSetupGuideStartupTask = nil
         windowBehaviorAutoSaveTask?.cancel()
         windowBehaviorAutoSaveTask = nil
         stopShortcutRecording()

@@ -102,6 +102,8 @@ final class AppModel: ObservableObject {
     static let recentWindowTilerPreferredSelectionCountDefaultsKey = "TilePilot.recentWindowTiler.preferredSelectionCount"
     static let recentWindowTilerLastModeDefaultsKey = "TilePilot.recentWindowTiler.lastMode"
     static let recentWindowTilerLastTemplateIDDefaultsKey = "TilePilot.recentWindowTiler.lastTemplateID"
+    static let recentWindowTilerBackdropEnabledDefaultsKey = "TilePilot.recentWindowTiler.backdropEnabled"
+    static let recentWindowTilerBackdropColorDefaultsKey = "TilePilot.recentWindowTiler.backdropColor"
     static let appUpdateAutomaticChecksEnabledInfoKey = "TilePilotEnableAutomaticUpdateChecks"
 
     private static func loadAppForegroundPolicyByName() -> [String: AppForegroundPolicy] {
@@ -227,6 +229,7 @@ final class AppModel: ObservableObject {
     @Published var activeWorkSetIDsByScope: [String: String] = AppModel.loadActiveWorkSetIDsByScope()
     @Published var desktopTilingPreferencesBySpaceIndex: [Int: Bool] = AppModel.loadDesktopTilingPreferencesBySpaceIndex()
     @Published var workSetBackdropPresentations: [WorkSetScopeKey: WorkSetBackdropPresentation] = [:]
+    @Published var recentWindowTilerBackdropPresentations: [WorkSetScopeKey: WorkSetBackdropPresentation] = [:]
     @Published private(set) var shortcutEntries: [ShortcutEntry] = []
     @Published var pinnedShortcutKeys: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedShortcutsDefaultsKey) ?? []
     @Published var pinnedDirectionalGroupIDs: [String] = UserDefaults.standard.stringArray(forKey: AppModel.pinnedDirectionalGroupsDefaultsKey) ?? []

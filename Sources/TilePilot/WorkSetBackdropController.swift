@@ -42,9 +42,17 @@ final class WorkSetBackdropController {
     }
 
     private func bind() {
-        model.$workSetBackdropPresentations
-            .sink { [weak self] presentations in
-                self?.applyBackdropPresentations(presentations)
+        Publishers.CombineLatest(
+            model.$workSetBackdropPresentations,
+            model.$recentWindowTilerBackdropPresentations
+        )
+            .sink { [weak self] workSetPresentations, pickerPresentations in
+                self?.applyBackdropPresentations(
+                    self?.combinedPresentations(
+                        workSet: workSetPresentations,
+                        picker: pickerPresentations
+                    ) ?? [:]
+                )
             }
             .store(in: &cancellables)
 
@@ -64,7 +72,19 @@ final class WorkSetBackdropController {
     }
 
     private func reapplyCurrentPresentations() {
-        applyBackdropPresentations(model.workSetBackdropPresentations)
+        applyBackdropPresentations(
+            combinedPresentations(
+                workSet: model.workSetBackdropPresentations,
+                picker: model.recentWindowTilerBackdropPresentations
+            )
+        )
+    }
+
+    private func combinedPresentations(
+        workSet: [WorkSetScopeKey: WorkSetBackdropPresentation],
+        picker: [WorkSetScopeKey: WorkSetBackdropPresentation]
+    ) -> [WorkSetScopeKey: WorkSetBackdropPresentation] {
+        workSet.merging(picker) { _, pickerPresentation in pickerPresentation }
     }
 
     private func applyBackdropPresentations(_ presentations: [WorkSetScopeKey: WorkSetBackdropPresentation]) {
@@ -109,7 +129,7 @@ final class WorkSetBackdropController {
 
         let view = BackdropPanelView(frame: frame)
         view.onClick = { [weak self] in
-            self?.model.dismissActiveWorkSetBackdrop(for: scopeKey)
+            self?.model.dismissActiveBackdrop(for: scopeKey)
         }
         panel.contentView = view
         return panel
@@ -134,7 +154,7 @@ final class WorkSetBackdropController {
         } else {
             backdropView = BackdropPanelView(frame: NSRect(origin: .zero, size: targetFrame.size))
             backdropView.onClick = { [weak self] in
-                self?.model.dismissActiveWorkSetBackdrop(for: presentation.scopeKey)
+                self?.model.dismissActiveBackdrop(for: presentation.scopeKey)
             }
             panel.contentView = backdropView
         }

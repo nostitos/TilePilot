@@ -86,6 +86,28 @@ enum TilePilotTab: Hashable {
             return self
         }
     }
+
+    static func adjacentVisibleTab(
+        from tab: TilePilotTab,
+        moving direction: TilePilotTabNavigationDirection
+    ) -> TilePilotTab {
+        let canonicalTab = tab.canonicalVisibleTab
+        guard let currentIndex = visibleTabs.firstIndex(of: canonicalTab) else {
+            return visibleTabs.first ?? .now
+        }
+
+        switch direction {
+        case .previous:
+            return visibleTabs[max(visibleTabs.startIndex, currentIndex - 1)]
+        case .next:
+            return visibleTabs[min(visibleTabs.index(before: visibleTabs.endIndex), currentIndex + 1)]
+        }
+    }
+}
+
+enum TilePilotTabNavigationDirection {
+    case previous
+    case next
 }
 
 @main
@@ -159,16 +181,7 @@ struct TilePilotRootView: View {
     }
 
     private var tabBar: some View {
-        HStack {
-            Picker("TilePilot Section", selection: $selectedTab) {
-                ForEach(TilePilotTab.visibleTabs, id: \.self) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .labelsHidden()
-        }
+        TilePilotTabStrip(selection: $selectedTab)
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
@@ -196,6 +209,80 @@ struct TilePilotRootView: View {
             HowItWorksDashboardView()
         case .system, .config, .health, .setup, .logs:
             SystemDashboardView()
+        }
+    }
+}
+
+struct TilePilotTabStrip: View {
+    static let maximumWidth: CGFloat = 1080
+    static let height: CGFloat = 20
+
+    @Binding var selection: TilePilotTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(TilePilotTab.visibleTabs.enumerated()), id: \.element) { index, tab in
+                if index > TilePilotTab.visibleTabs.startIndex {
+                    Rectangle()
+                        .fill(Color(NSColor.separatorColor).opacity(0.75))
+                        .frame(width: 1, height: 12)
+                        .accessibilityHidden(true)
+                }
+
+                tabButton(for: tab)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(height: Self.height)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("TilePilot Sections")
+        .frame(maxWidth: Self.maximumWidth)
+    }
+
+    private func tabButton(for tab: TilePilotTab) -> some View {
+        let isSelected = selection.canonicalVisibleTab == tab
+
+        return Button {
+            selection = tab
+        } label: {
+            Text(tab.title)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .lineLimit(1)
+                .allowsTightening(true)
+                .padding(.horizontal, 10)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: Self.height, maxHeight: Self.height)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(NSColor.controlAccentColor))
+            }
+        }
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("TilePilot.Tab.\(tab.title)")
+        .onMoveCommand { direction in
+            switch direction {
+            case .left:
+                selection = TilePilotTab.adjacentVisibleTab(from: selection, moving: .previous)
+            case .right:
+                selection = TilePilotTab.adjacentVisibleTab(from: selection, moving: .next)
+            default:
+                break
+            }
         }
     }
 }

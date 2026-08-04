@@ -115,6 +115,29 @@ struct RecentWindowTilerPickerView: View {
                 templatePicker(state: state)
                     .frame(minWidth: 180, maxWidth: .infinity)
             }
+
+            Toggle("Backdrop", isOn: Binding(
+                get: { state.backdropEnabled },
+                set: { model.setRecentWindowTilerBackdropEnabled($0) }
+            ))
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .fixedSize()
+
+            ColorPicker(
+                "",
+                selection: Binding(
+                    get: { state.backdropColor.swiftUIColor },
+                    set: { newColor in
+                        guard let color = OverlayAccentColor.from(swiftUIColor: newColor) else { return }
+                        model.setRecentWindowTilerBackdropColor(color)
+                    }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+            .frame(width: 32)
+            .help("Backdrop color")
         }
     }
 

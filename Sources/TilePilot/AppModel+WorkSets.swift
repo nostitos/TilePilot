@@ -1213,6 +1213,13 @@ extension AppModel {
         hideWorkSetBackdrop(for: scopeKey)
     }
 
+    func dismissActiveBackdrop(for scopeKey: WorkSetScopeKey) {
+        if recentWindowTilerBackdropPresentations.removeValue(forKey: scopeKey) != nil {
+            return
+        }
+        dismissActiveWorkSetBackdrop(for: scopeKey)
+    }
+
     func hideWorkSetBackdrop(for scopeKey: WorkSetScopeKey) {
         guard workSetBackdropPresentations[scopeKey] != nil else { return }
         workSetBackdropPresentations.removeValue(forKey: scopeKey)
@@ -1234,6 +1241,28 @@ extension AppModel {
             color: workSet.backdropColor,
             anchorWindow: anchorWindow
         )
+    }
+
+    func showRecentWindowTilerBackdrop(
+        scopeKey: WorkSetScopeKey,
+        display: DisplayState,
+        color: OverlayAccentColor,
+        excluding activeWindowIDs: Set<Int>
+    ) {
+        recentWindowTilerBackdropPresentations[scopeKey] = WorkSetBackdropPresentation(
+            workSetID: UUID(),
+            scopeKey: scopeKey,
+            display: display,
+            color: color,
+            anchorWindow: workSetBackdropAnchorWindow(
+                scopeKey: scopeKey,
+                excluding: activeWindowIDs
+            )
+        )
+    }
+
+    func hideRecentWindowTilerBackdrop(for scopeKey: WorkSetScopeKey) {
+        recentWindowTilerBackdropPresentations.removeValue(forKey: scopeKey)
     }
 
     private func syncBackdropRuntimeStateForActiveWorkSet(_ workSet: WorkSet) {

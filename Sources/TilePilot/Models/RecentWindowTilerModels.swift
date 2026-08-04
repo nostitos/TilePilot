@@ -183,6 +183,8 @@ struct RecentWindowTilerPresentationState: Equatable, Sendable {
     var candidates: [RecentWindowTilerCandidate]
     var selectedWindowIDs: Set<Int>
     var mode: RecentWindowTilerMode
+    var backdropEnabled = false
+    var backdropColor: OverlayAccentColor = .workSetBackdropDefault
     let targetSpaceIndex: Int
     let targetDisplayID: Int?
     var targetOptions: [RecentWindowTilerTargetOption]

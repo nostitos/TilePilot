@@ -715,6 +715,10 @@ extension AppModel {
             let templateOptions = self.recentWindowTilerTemplateOptions(display: state.display)
             let defaultMode = self.recentWindowTilerDefaultMode(templateOptions: templateOptions)
             let selectedTemplateID = self.recentWindowTilerDefaultTemplateID(templateOptions: templateOptions)
+            let backdropEnabled = UserDefaults.standard.bool(
+                forKey: AppModel.recentWindowTilerBackdropEnabledDefaultsKey
+            )
+            let backdropColor = self.recentWindowTilerBackdropColor()
             let prepared = self.preparedRecentWindowTilerCandidates(
                 candidates,
                 mode: defaultMode,
@@ -726,6 +730,8 @@ extension AppModel {
                 candidates: prepared.candidates,
                 selectedWindowIDs: prepared.selectedWindowIDs,
                 mode: defaultMode,
+                backdropEnabled: backdropEnabled,
+                backdropColor: backdropColor,
                 targetSpaceIndex: state.spaceIndex,
                 targetDisplayID: state.display?.id,
                 targetOptions: state.targetOptions,
@@ -907,6 +913,8 @@ extension AppModel {
             candidates: candidates,
             selectedWindowIDs: selectedWindowIDs,
             mode: mode,
+            backdropEnabled: existingState.backdropEnabled,
+            backdropColor: existingState.backdropColor,
             targetSpaceIndex: targetState.spaceIndex,
             targetDisplayID: targetState.display?.id,
             targetOptions: targetState.targetOptions,
@@ -941,6 +949,23 @@ extension AppModel {
         }
         persistRecentWindowTilerLastMode(mode)
         persistRecentWindowTilerPreferredSelectionCount(state.selectedCount)
+        recentWindowTilerState = state
+    }
+
+    func setRecentWindowTilerBackdropEnabled(_ enabled: Bool) {
+        guard var state = recentWindowTilerState, state.backdropEnabled != enabled else { return }
+        state.backdropEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: AppModel.recentWindowTilerBackdropEnabledDefaultsKey)
+        recentWindowTilerState = state
+    }
+
+    func setRecentWindowTilerBackdropColor(_ color: OverlayAccentColor) {
+        guard var state = recentWindowTilerState, state.backdropColor != color else { return }
+        state.backdropColor = color
+        UserDefaults.standard.set(
+            color.userDefaultsArray,
+            forKey: AppModel.recentWindowTilerBackdropColorDefaultsKey
+        )
         recentWindowTilerState = state
     }
 
@@ -992,6 +1017,8 @@ extension AppModel {
         applyRecentWindowTilerSelection(
             orderedWindowIDs: state.orderedEffectiveSelectedWindowIDs,
             mode: state.mode,
+            backdropEnabled: state.backdropEnabled,
+            backdropColor: state.backdropColor,
             templateID: state.selectedTemplateID,
             templateSlotWindowIDs: state.mode == .template ? state.templateSlotWindowIDs : [],
             targetSpaceIndex: state.targetSpaceIndex,
@@ -1002,6 +1029,8 @@ extension AppModel {
     func applyRecentWindowTilerSelection(
         orderedWindowIDs: [Int],
         mode: RecentWindowTilerMode,
+        backdropEnabled: Bool = false,
+        backdropColor: OverlayAccentColor = .workSetBackdropDefault,
         templateID: UUID? = nil,
         templateSlotWindowIDs: [Int?] = [],
         targetSpaceIndex: Int? = nil,
@@ -1029,6 +1058,8 @@ extension AppModel {
             await self.applyRecentWindowTilerSelectionInternal(
                 orderedWindowIDs: orderedWindowIDs,
                 mode: mode,
+                backdropEnabled: backdropEnabled,
+                backdropColor: backdropColor,
                 templateID: templateID,
                 templateSlotWindowIDs: templateSlotWindowIDs,
                 targetSpaceIndex: targetSpaceIndex,
@@ -1116,6 +1147,14 @@ extension AppModel {
 
     private func persistRecentWindowTilerLastTemplateID(_ templateID: UUID) {
         UserDefaults.standard.set(templateID.uuidString, forKey: AppModel.recentWindowTilerLastTemplateIDDefaultsKey)
+    }
+
+    private func recentWindowTilerBackdropColor() -> OverlayAccentColor {
+        OverlayAccentColor.from(
+            userDefaultsArray: UserDefaults.standard.array(
+                forKey: AppModel.recentWindowTilerBackdropColorDefaultsKey
+            ) as? [Double]
+        ) ?? .workSetBackdropDefault
     }
 
     private func recentWindowTilerPreferredSelectionCount() -> Int {
@@ -1222,6 +1261,8 @@ extension AppModel {
     private func applyRecentWindowTilerSelectionInternal(
         orderedWindowIDs: [Int],
         mode: RecentWindowTilerMode,
+        backdropEnabled: Bool,
+        backdropColor: OverlayAccentColor,
         templateID: UUID?,
         templateSlotWindowIDs: [Int?],
         targetSpaceIndex: Int?,
@@ -1330,6 +1371,12 @@ extension AppModel {
             return
         }
 
+        if !backdropEnabled, let display = state.display {
+            hideRecentWindowTilerBackdrop(
+                for: WorkSetScopeKey(displayID: display.id, spaceIndex: state.spaceIndex)
+            )
+        }
+
         let result: (updated: Int, failed: Int, primaryFocused: Bool)
         var ignoredSelectedCount = 0
         var emptyConstrainedSlotCount = 0
@@ -1338,15 +1385,30 @@ extension AppModel {
         var appliedTemplateName: String?
         switch mode {
         case .autoTiled:
+            showRecentWindowTilerBackdropIfEnabled(
+                backdropEnabled,
+                color: backdropColor,
+                display: state.display,
+                spaceIndex: state.spaceIndex,
+                selectedWindows: selectedWindows
+            )
             result = await applyRecentAutoTiledLayout(
                 spaceIndex: state.spaceIndex,
                 selectedWindows: selectedWindows,
                 nonSelectedWindows: nonSelectedWindows
             )
         case .floatingGrid:
+            showRecentWindowTilerBackdropIfEnabled(
+                backdropEnabled,
+                color: backdropColor,
+                display: state.display,
+                spaceIndex: state.spaceIndex,
+                selectedWindows: selectedWindows
+            )
             result = await applyRecentFloatingGridLayout(
                 display: state.display,
-                selectedWindows: selectedWindows
+                selectedWindows: selectedWindows,
+                requiresBackdropClearance: backdropEnabled
             )
         case .template:
             guard let templateID,
@@ -1372,6 +1434,13 @@ extension AppModel {
                 return
             }
 
+            showRecentWindowTilerBackdropIfEnabled(
+                backdropEnabled,
+                color: backdropColor,
+                display: display,
+                spaceIndex: state.spaceIndex,
+                selectedWindows: selectedWindows
+            )
             let slots = WindowLayoutTemplate.sortedSlots(template.slots)
             appliedTemplateName = template.name
             let templateResult = await applyRecentTemplateLayout(
@@ -1380,7 +1449,8 @@ extension AppModel {
                 display: display,
                 selectedWindows: selectedWindows,
                 templateSlotWindowIDs: explicitTemplateSlotWindowIDs,
-                requestedSelectedCount: orderedWindowIDs.count
+                requestedSelectedCount: orderedWindowIDs.count,
+                requiresBackdropClearance: backdropEnabled
             )
             ignoredSelectedCount = templateResult.ignoredSelectedCount
             emptyConstrainedSlotCount = templateResult.emptyConstrainedSlotCount
@@ -1441,6 +1511,22 @@ extension AppModel {
         }
     }
 
+    private func showRecentWindowTilerBackdropIfEnabled(
+        _ enabled: Bool,
+        color: OverlayAccentColor,
+        display: DisplayState?,
+        spaceIndex: Int,
+        selectedWindows: [WindowState]
+    ) {
+        guard enabled, let display else { return }
+        showRecentWindowTilerBackdrop(
+            scopeKey: WorkSetScopeKey(displayID: display.id, spaceIndex: spaceIndex),
+            display: display,
+            color: color,
+            excluding: Set(selectedWindows.map(\.id))
+        )
+    }
+
     private func applyRecentAutoTiledLayout(
         spaceIndex: Int,
         selectedWindows: [WindowState],
@@ -1481,7 +1567,8 @@ extension AppModel {
 
     private func applyRecentFloatingGridLayout(
         display: DisplayState?,
-        selectedWindows: [WindowState]
+        selectedWindows: [WindowState],
+        requiresBackdropClearance: Bool
     ) async -> (updated: Int, failed: Int, primaryFocused: Bool) {
         let floatSelected = await setFloatingStateForWindows(
             selectedWindows.filter { $0.isRuntimeManageable && !$0.floating },
@@ -1497,10 +1584,13 @@ extension AppModel {
         )
         let refreshedSelected = selectedWindows.map { refreshedByID[$0.id] ?? $0 }
         let grid = await applyGridFramesWithAccessibilityFallback(to: refreshedSelected, display: display)
+        let windowsToStack = requiresBackdropClearance
+            ? refreshedSelected
+            : refreshedSelected.filter(\.isRuntimeManageable)
         let stack = await stackWorkSetWindows(
-            refreshedSelected.filter(\.isRuntimeManageable).reversed(),
+            windowsToStack.reversed(),
             primaryWindowID: refreshedSelected.first?.id,
-            requiresBackdropClearance: false
+            requiresBackdropClearance: requiresBackdropClearance
         )
         let primaryFocused: Bool
         if let primaryWindow = refreshedSelected.first, !primaryWindow.isRuntimeManageable {
@@ -1522,7 +1612,8 @@ extension AppModel {
         display: DisplayState,
         selectedWindows: [WindowState],
         templateSlotWindowIDs: [Int?],
-        requestedSelectedCount: Int
+        requestedSelectedCount: Int,
+        requiresBackdropClearance: Bool
     ) async -> RecentWindowTilerTemplateApplyResult {
         guard !selectedWindows.isEmpty || !templateSlotWindowIDs.isEmpty else {
             return RecentWindowTilerTemplateApplyResult(
@@ -1586,7 +1677,7 @@ extension AppModel {
         let stack = await stackWorkSetWindows(
             stackOrder,
             primaryWindowID: nil,
-            requiresBackdropClearance: false
+            requiresBackdropClearance: requiresBackdropClearance
         )
 
         return RecentWindowTilerTemplateApplyResult(
@@ -3669,7 +3760,12 @@ extension AppModel {
             guard !Task.isCancelled else { break }
             let raised: Bool
             if requiresBackdropClearance {
-                raised = await focusWorkSetStackWindow(window)
+                raised = window.isRuntimeManageable
+                    ? await focusWorkSetStackWindow(window)
+                    : raiseWindowUsingAccessibilityOnly(
+                        windowID: window.id,
+                        bypassCooldown: true
+                    )
             } else {
                 raised = raiseWindowUsingAccessibilityOnly(
                     windowID: window.id,

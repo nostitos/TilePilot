@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_PATH="${1:-$ROOT_DIR/assets/dmg/dmg-background.png}"
-ICON_PATH="$ROOT_DIR/assets/icon/tilepilot-icon-1024.png"
+BASE_PATH="$ROOT_DIR/assets/dmg/dmg-background-base.png"
 
 if ! command -v magick >/dev/null 2>&1; then
   echo "ImageMagick (magick) is required to generate the DMG background." >&2
@@ -12,18 +12,19 @@ fi
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-magick -size 1280x800 gradient:'#0B1220-#1C2E50' \
-  \( -size 1280x800 radial-gradient:'#6BA4FF66-#0B122000' \) -compose screen -composite \
-  \( -size 1280x800 radial-gradient:'#3B82F622-#0B122000' \) -gravity southeast -composite \
-  -fill '#FFFFFF15' -draw "circle 340,410 340,580" \
-  -fill '#FFFFFF14' -draw "circle 940,410 940,580" \
-  -stroke '#E2E8F0D8' -strokewidth 9 -fill none -draw "path 'M 430,420 C 570,320 650,320 850,406'" \
-  -fill '#E2E8F0D8' -stroke none -draw "polygon 888,432 840,421 860,391" \
-  -fill '#F8FAFC' -font 'Helvetica-Bold' -pointsize 62 -gravity north -annotate +0+78 'Install TilePilot' \
-  -fill '#CBD5E1' -font 'Helvetica' -pointsize 30 -gravity north -annotate +0+164 'Drag TilePilot to Applications' \
-  -fill '#BFDBFE' -font 'Helvetica-Bold' -pointsize 26 -draw "text 250,640 'TilePilot.app'" \
-  -fill '#BFDBFE' -font 'Helvetica-Bold' -pointsize 26 -draw "text 862,640 'Applications'" \
-  \( "$ICON_PATH" -resize 138x138 \) -gravity northwest -geometry +38+34 -composite \
+if [[ ! -f "$BASE_PATH" ]]; then
+  echo "ImageGen DMG background base is missing: $BASE_PATH" >&2
+  exit 1
+fi
+
+magick "$BASE_PATH" -resize '900x530^' -gravity center -extent 900x530 \
+  -fill '#FFFFFF12' -draw "circle 235,340 235,455" \
+  -fill '#FFFFFF10' -draw "circle 665,340 665,455" \
+  -stroke '#E2E8F0E6' -strokewidth 7 -fill none \
+  -draw "path 'M 330,340 C 415,275 485,275 545,310'" \
+  -fill '#E2E8F0E6' -stroke none -draw "polygon 575,330 540,321 557,295" \
+  -fill '#F8FAFC' -font 'Helvetica-Bold' -pointsize 48 -gravity north -annotate +0+52 'Install TilePilot' \
+  -fill '#CBD5E1' -font 'Helvetica' -pointsize 24 -gravity north -annotate +0+115 'Drag TilePilot to Applications' \
   "$OUTPUT_PATH"
 
 echo "Generated DMG background:"

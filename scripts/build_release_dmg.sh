@@ -122,6 +122,11 @@ resolve_sign_identity() {
     | head -n 1
 }
 
+if [[ ! -f "$BACKGROUND_IMG" ]]; then
+  echo "Generating DMG background..."
+  "$ROOT_DIR/scripts/generate_dmg_background.sh" "$BACKGROUND_IMG"
+fi
+
 echo "Building signed release app..."
 "$ROOT_DIR/scripts/package_dev_app.sh" --release --no-install --no-open --version "$VERSION"
 
@@ -129,11 +134,6 @@ APP_PATH="$DIST_DIR/${APP_NAME}.app"
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Expected app not found at: $APP_PATH" >&2
   exit 1
-fi
-
-if [[ ! -f "$BACKGROUND_IMG" ]]; then
-  echo "Generating DMG background..."
-  "$ROOT_DIR/scripts/generate_dmg_background.sh" "$BACKGROUND_IMG"
 fi
 
 mkdir -p "$DIST_DIR"
@@ -148,8 +148,6 @@ trap 'hdiutil detach "/Volumes/'"$VOL_NAME"'" -force >/dev/null 2>&1 || true; rm
 
 cp -R "$APP_PATH" "$STAGE_DIR/${APP_NAME}.app"
 ln -s /Applications "$STAGE_DIR/Applications"
-mkdir -p "$STAGE_DIR/.background"
-cp "$BACKGROUND_IMG" "$STAGE_DIR/.background/background.png"
 
 echo "Creating read/write DMG..."
 hdiutil create \
@@ -184,8 +182,6 @@ if [[ "$FINDER_DISK_READY" -ne 1 ]]; then
   exit 1
 fi
 
-/usr/bin/SetFile -a V "$MOUNT_POINT/.background" || true
-
 /usr/bin/osascript <<EOF
 tell application "Finder"
   tell disk "$VOL_NAME"
@@ -194,14 +190,15 @@ tell application "Finder"
     set current view of container window to icon view
     set toolbar visible of container window to false
     set statusbar visible of container window to false
-    set bounds of container window to {120, 120, 1180, 760}
+    set pathbar visible of container window to false
+    set bounds of container window to {190, 160, 1090, 720}
     set opts to the icon view options of container window
     set arrangement of opts to not arranged
     set icon size of opts to 128
     set text size of opts to 14
-    set background picture of opts to file ".background:background.png"
-    set position of item "${APP_NAME}.app" of container window to {320, 420}
-    set position of item "Applications" of container window to {920, 420}
+    set background picture of opts to file "${APP_NAME}.app:Contents:Resources:InstallerBackground.png"
+    set position of item "${APP_NAME}.app" of container window to {235, 340}
+    set position of item "Applications" of container window to {665, 340}
     close
     open
     update without registering applications
@@ -211,6 +208,7 @@ end tell
 EOF
 
 sync
+rm -rf "$MOUNT_POINT/.fseventsd" "$MOUNT_POINT/.Spotlight-V100" "$MOUNT_POINT/.Trashes"
 hdiutil detach "$DEVICE" >/dev/null
 
 echo "Creating compressed DMG..."

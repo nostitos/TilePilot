@@ -8,6 +8,7 @@ APP_NAME="TilePilot"
 BUNDLE_ID="com.klode.tilepilot.dev"
 SPM_PRODUCT="TilePilot"
 ICON_SOURCE="assets/icon/tilepilot-icon-1024.png"
+INSTALLER_BACKGROUND_SOURCE="assets/dmg/dmg-background.png"
 CONFIGURATION="debug"
 INSTALL_TO_APPLICATIONS=1
 RUN_AFTER_BUILD=0
@@ -235,6 +236,12 @@ maybe_build_icon() {
   iconutil -c icns "$iconset_dir" -o "$RESOURCES_DIR/AppIcon.icns"
 }
 
+copy_installer_background() {
+  local background_src="$ROOT_DIR/$INSTALLER_BACKGROUND_SOURCE"
+  [[ -f "$background_src" ]] || return 0
+  cp "$background_src" "$RESOURCES_DIR/InstallerBackground.png"
+}
+
 resolve_sign_identity() {
   if [[ -n "$SIGN_IDENTITY" ]]; then
     echo "$SIGN_IDENTITY"
@@ -291,6 +298,7 @@ sign_app_bundle() {
 prepare_bundled_helpers
 copy_bundled_helpers
 maybe_build_icon
+copy_installer_background
 
 cat > "$INFO_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

@@ -87,15 +87,15 @@ extension AppModel {
             SetupGuideStep(
                 kind: .startHelperServices,
                 category: .essential,
-                title: helperServicesStatus == .good ? "Window Control Running" : (windowControlNeedsStart ? "Starting Window Control" : "Confirm Window Control"),
+                title: helperServicesStatus == .good ? "Window Control Running" : (windowControlNeedsStart ? "Start Window Control" : "Confirm Window Control"),
                 summary: helperServicesStatus == .good
                     ? "Window control and shortcut services are running."
                     : (windowControlNeedsStart
-                        ? "TilePilot installed yabai and skhd and is starting them automatically."
+                        ? "TilePilot installed yabai and skhd. Start them when you are ready; macOS will then ask you to allow them in Accessibility."
                         : "yabai and skhd are running. TilePilot is waiting for yabai to answer window-state queries."),
                 whyItMatters: "yabai is the window-control service. skhd is the shortcut listener. macOS may ask you to allow these entries in Accessibility because they need to observe and move windows.",
                 whatToDo: windowControlNeedsStart
-                    ? "TilePilot starts window control automatically. If this stays stuck, use Start Window Control once, approve any macOS Accessibility prompt for yabai or skhd, then wait for the recheck."
+                    ? "Use Start Window Control when you are ready. macOS will show an Accessibility prompt for yabai and skhd; approve those exact entries so they can observe and move windows, then wait for the recheck."
                     : "Wait a few seconds. If macOS shows an Accessibility prompt for yabai, approve that exact entry, then use Recheck.",
                 detail: firstNonEmptyGuideDetail([
                     helperServicesStatus == .good ? nil : "Do not keep pressing Start repeatedly. Startup and macOS permission registration can take a few seconds.",

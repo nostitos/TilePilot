@@ -120,7 +120,11 @@ final class ManagedHelperService: @unchecked Sendable {
                 )
             }
 
-            let shouldStartServices = startServicesAfterInstall ?? shouldBootstrapManagedServicesAfterInstall(previousState: previousState)
+            let requestedServiceStart = startServicesAfterInstall ?? shouldBootstrapManagedServicesAfterInstall(previousState: previousState)
+            // Protect every install/upgrade caller, including legacy state that still
+            // has TilePilot LaunchAgent files. Those agents must not be loaded until
+            // the user has explicitly started window control once.
+            let shouldStartServices = requestedServiceStart && HelperStartConsentPolicy.allowsAutomaticStart()
             let launchAgentLogs: [CommandLogEntry]
             let launchAgentsInstalled: Bool
             let servicesBootstrapped: Bool

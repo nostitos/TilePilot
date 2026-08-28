@@ -108,7 +108,10 @@ extension AppModel {
         lastActionMessage = "Installing TilePilot window-control components..."
         lastErrorMessage = nil
 
-        let installResult = await helperService.installBundledHelpers(startServicesAfterInstall: true)
+        // Never auto-start services on a fresh install: starting yabai/skhd fires the
+        // macOS Accessibility prompt, which must wait for an explicit user start.
+        let allowAutomaticStart = HelperStartConsentPolicy.allowsAutomaticStart()
+        let installResult = await helperService.installBundledHelpers(startServicesAfterInstall: allowAutomaticStart)
 
         isLaunchingSetupInstaller = false
         applyManagedHelperOperationResult(installResult)
@@ -117,6 +120,9 @@ extension AppModel {
             return result
         }
 
+        guard allowAutomaticStart else {
+            return await bootstrapService.runBootstrapChecks()
+        }
         return await waitForBootstrapWindowControlServicesToSettle()
     }
 
@@ -155,6 +161,9 @@ extension AppModel {
     func replaceWithManagedHelpers() {
         guard !isLaunchingSetupInstaller else { return }
         helperMigrationPrompt = nil
+        // The user is migrating an already-running external install; starting the
+        // managed services is the explicit point of this action.
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         Task { [weak self] in
             guard let self else { return }
             await self.performManagedHelperInstall(replacingExternalInstall: true)
@@ -172,7 +181,9 @@ extension AppModel {
 
         let result = replacingExternalInstall
             ? await self.helperService.installBundledHelpersReplacingExternalServices()
-            : await self.helperService.installBundledHelpers(startServicesAfterInstall: true)
+            : await self.helperService.installBundledHelpers(
+                startServicesAfterInstall: HelperStartConsentPolicy.allowsAutomaticStart()
+            )
 
         await MainActor.run {
             self.isLaunchingSetupInstaller = false
@@ -204,6 +215,9 @@ extension AppModel {
     private func shouldAutomaticallyStartManagedHelperServices(from result: BootstrapRunResult) -> Bool {
         guard !hasAttemptedAutomaticManagedHelperServiceStart else { return false }
         guard !isLaunchingSetupInstaller else { return false }
+        // Automatic starts are only allowed after the user has explicitly started
+        // window control once; otherwise macOS permission prompts appear unprompted.
+        guard HelperStartConsentPolicy.allowsAutomaticStart() else { return false }
         guard helperService.hasManagedHelperInstall() else { return false }
         guard bootstrapManagedHelperBinariesInstalled(in: result.snapshot) else { return false }
         return !bootstrapWindowControlServicesRunning(in: result.snapshot)
@@ -335,6 +349,7 @@ extension AppModel {
     }
 
     func restartYabaiBestEffort() {
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         if helperService.hasManagedHelperInstall() {
             if managedHelperInstallState?.launchAgentsInstalled != true {
                 startHelperServicesBestEffort()
@@ -353,6 +368,7 @@ extension AppModel {
     }
 
     func restartSkhdBestEffort() {
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         Task { [weak self] in
             guard let self else { return }
             let reloadResult = await self.doctorService.runSupportCommand(
@@ -418,6 +434,7 @@ extension AppModel {
     }
 
     func startWindowControlBestEffort() {
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         if helperService.hasManagedHelperInstall() {
             startHelperServicesBestEffort()
             return
@@ -428,6 +445,7 @@ extension AppModel {
     }
 
     func startYabaiBestEffort() {
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         if helperService.hasManagedHelperInstall() {
             startHelperServicesBestEffort()
             return
@@ -440,6 +458,7 @@ extension AppModel {
     }
 
     func startSkhdBestEffort() {
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         if helperService.hasManagedHelperInstall() {
             startHelperServicesBestEffort()
             return
@@ -452,6 +471,8 @@ extension AppModel {
     }
 
     func startHelperServicesBestEffort() {
+        // Every caller of this function is a direct user action.
+        HelperStartConsentPolicy.recordUserInitiatedStart()
         Task { [weak self] in
             guard let self else { return }
             await MainActor.run {

@@ -58,6 +58,7 @@ graphify update .
 
 ## Boundaries
 - Never overwrite user `yabairc` or `skhdrc` content outside TilePilot-managed markers.
+- Never start yabai/skhd or request a macOS permission before an explained, explicit user action; passive checks must use non-prompting APIs.
 - Never persist MegaMap or desktop screenshots to disk.
 - Do not hand-edit generated `.build`, `dist`, or `graphify-out` contents; regenerate them with their owning command.
 - Do not commit signing passwords, Apple IDs, notary credentials, or local keychain details. Release credentials belong in Keychain profiles/environment variables.

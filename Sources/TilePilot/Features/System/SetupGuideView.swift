@@ -17,20 +17,13 @@ struct SetupGuideView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-
-                if let step = currentStep {
-                    HStack(alignment: .top, spacing: 18) {
-                        stepList
-                            .frame(width: 250)
-                        stepDetail(step)
-                    }
+            Group {
+                if let welcomePage = model.setupGuideWelcomePage {
+                    welcomeTour(welcomePage)
                 } else {
-                    completionState
+                    checklistBody
                 }
             }
-            .padding(20)
             .frame(minWidth: 980, idealWidth: 1080, minHeight: 640, idealHeight: 720)
             .navigationTitle("Guided Setup")
             .confirmationDialog(
@@ -60,10 +53,201 @@ struct SetupGuideView: View {
         }
     }
 
+    private var checklistBody: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+
+            if let step = currentStep {
+                HStack(alignment: .top, spacing: 18) {
+                    stepList
+                        .frame(width: 250)
+                    stepDetail(step)
+                }
+            } else {
+                completionState
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - First-launch feature tour
+
+    private func welcomeTour(_ page: SetupGuideWelcomePage) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 24) {
+                    Image(systemName: page.symbolName)
+                        .font(.system(size: 44, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(height: 56)
+
+                    VStack(spacing: 10) {
+                        Text(page.title)
+                            .font(.largeTitle.weight(.bold))
+                            .multilineTextAlignment(.center)
+                        Text(page.subtitle)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 640)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                        ForEach(page.highlights) { highlight in
+                            welcomeHighlightCard(highlight)
+                        }
+                    }
+                    .frame(maxWidth: 760)
+
+                    if let banner = welcomePermissionBanner(for: page) {
+                        banner
+                            .frame(maxWidth: 760)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 40)
+                .padding(.top, 36)
+                .padding(.bottom, 24)
+            }
+
+            Divider()
+
+            welcomeTourControls(page)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+        }
+    }
+
+    private func welcomeHighlightCard(_ highlight: SetupGuideWelcomePage.FeatureHighlight) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: highlight.symbolName)
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(highlight.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(highlight.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func welcomePermissionBanner(for page: SetupGuideWelcomePage) -> AnyView? {
+        switch page.permission {
+        case .none:
+            guard let explanation = page.permissionExplanation else { return nil }
+            return AnyView(
+                permissionBanner(
+                    symbol: "hand.raised",
+                    tint: .secondary,
+                    label: "No new permission on this screen",
+                    explanation: explanation
+                )
+            )
+        case .required(let name):
+            return AnyView(
+                permissionBanner(
+                    symbol: "lock.open",
+                    tint: Color.orange,
+                    label: "Needs: \(name)",
+                    explanation: page.permissionExplanation ?? ""
+                )
+            )
+        case .optional(let name):
+            return AnyView(
+                permissionBanner(
+                    symbol: "lock",
+                    tint: Color.blue,
+                    label: "Optional: \(name)",
+                    explanation: page.permissionExplanation ?? ""
+                )
+            )
+        }
+    }
+
+    private func permissionBanner(symbol: String, tint: Color, label: String, explanation: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                if !explanation.isEmpty {
+                    Text(explanation)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func welcomeTourControls(_ page: SetupGuideWelcomePage) -> some View {
+        let pages = SetupGuideWelcomeContent.pages
+        let currentIndex = pages.firstIndex(of: page) ?? 0
+
+        return HStack(spacing: 12) {
+            Button("Skip Tour") {
+                model.finishSetupGuideWelcomeTour()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Spacer()
+
+            HStack(spacing: 7) {
+                ForEach(0..<pages.count, id: \.self) { index in
+                    Circle()
+                        .fill(index == currentIndex ? Color.accentColor : Color.secondary.opacity(0.3))
+                        .frame(width: 7, height: 7)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 10) {
+                if currentIndex > 0 {
+                    Button("Back") {
+                        model.rewindSetupGuideWelcomePage()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Button(model.setupGuideWelcomeIsLastPage ? "Start Setup" : "Continue") {
+                    model.advanceSetupGuideWelcomePage()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    // MARK: - Checklist
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(model.setupGuideCompletionTitle)
-                .font(.title2.weight(.semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(model.setupGuideCompletionTitle)
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                checklistProgressLabel
+            }
             Text(model.setupGuideCompletionDetail)
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -76,6 +260,17 @@ struct SetupGuideView: View {
                 statusMessage(text: message, color: .green)
             }
         }
+    }
+
+    private var checklistProgressLabel: some View {
+        let total = steps.count
+        let done = steps.filter(\.isSatisfied).count
+        return Text("\(done) of \(total) complete")
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.08), in: Capsule())
     }
 
     private var stepList: some View {
@@ -109,6 +304,18 @@ struct SetupGuideView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Spacer(minLength: 4)
+
+            Button {
+                model.replaySetupGuideWelcomeTour()
+            } label: {
+                Label("Replay Feature Tour", systemImage: "play.circle")
+                    .font(.callout)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
         }
     }
 

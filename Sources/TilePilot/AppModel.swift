@@ -96,6 +96,7 @@ final class AppModel: ObservableObject {
     static let releaseDefaultsAppliedVersionDefaultsKey = "TilePilot.releaseDefaultsAppliedVersion"
     static let releaseDefaultsSeenVersionDefaultsKey = "TilePilot.releaseDefaultsSeenVersion"
     static let releaseDefaultsInitializedDefaultsKey = "TilePilot.releaseDefaultsInitialized"
+    private static let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
     static let appUpdateLastSuccessfulCheckAtDefaultsKey = "TilePilot.appUpdate.lastSuccessfulCheckAt"
     static let appUpdateLatestKnownReleaseDefaultsKey = "TilePilot.appUpdate.latestKnownRelease"
     static let appUpdateDismissedVersionDefaultsKey = "TilePilot.appUpdate.dismissedVersion"
@@ -523,7 +524,9 @@ final class AppModel: ObservableObject {
             rebuildAppBehaviorLookupCaches()
         }
     }
-    private let initialSetupLandingShownDefaultsKey = "TilePilot.initialSetupLandingShown"
+    let isInitialSetupLaunchSession = SetupGuideAutomaticPresentationPolicy.shouldPresentImmediatelyOnFirstLaunch(
+        initialSetupLandingShown: UserDefaults.standard.bool(forKey: AppModel.initialSetupLandingShownDefaultsKey)
+    )
     let managedFeatureMarkerPrefix = "# TILEPILOT_FEATURE "
     var hasAttemptedReleaseDefaultsInitialization = false
     var windowBehaviorAutoSaveTask: Task<Void, Never>?
@@ -726,10 +729,10 @@ final class AppModel: ObservableObject {
 
     func consumeShouldStartOnSetupTab() -> Bool {
         let defaults = UserDefaults.standard
-        if defaults.bool(forKey: initialSetupLandingShownDefaultsKey) {
+        if defaults.bool(forKey: AppModel.initialSetupLandingShownDefaultsKey) {
             return false
         }
-        defaults.set(true, forKey: initialSetupLandingShownDefaultsKey)
+        defaults.set(true, forKey: AppModel.initialSetupLandingShownDefaultsKey)
         return true
     }
 

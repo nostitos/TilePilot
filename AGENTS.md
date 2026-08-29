@@ -42,6 +42,7 @@ graphify update .
 - Treat yabai, WindowServer, and Accessibility as complementary sources. Verify live postconditions for limited/AX-only windows; yabai frame and resize flags can lag or disagree.
 - Keep settings copy short and outcome-based. Say whether windows end tiled or floating; put teaching material in `How It Works`, not settings cards.
 - Preserve existing user behavior by default. Defaults changes require a release-default profile version bump and reset-flow coverage.
+- Present Guided Setup immediately on a genuine first launch; startup readiness grace applies only to existing installations recovering after launch or login.
 - Add focused XCTest coverage for pure models/planners and regressions when the test runner is available.
 - Use commit subjects such as `feat:`, `fix:`, `perf:`, `build:`, `docs:`, or `release:` followed by a concise imperative summary.
 - After app code changes, run the package/install command and verify the new `/Applications` process is running; a successful Swift build is not a live-app update.

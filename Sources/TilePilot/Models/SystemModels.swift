@@ -236,6 +236,7 @@ enum SetupGuideStepKind: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum SetupGuidePresentationSource: String, Sendable {
+    case firstLaunch
     case automatic
     case manual
 }
@@ -244,8 +245,11 @@ struct SetupGuidePresentationState: Equatable, Sendable {
     var isPresented: Bool
     var source: SetupGuidePresentationSource
     var selectedStepKind: SetupGuideStepKind?
+    // Non-nil while the first-launch feature tour is showing; the checklist
+    // appears after the tour finishes or is skipped.
+    var welcomePageIndex: Int?
 
-    static let hidden = SetupGuidePresentationState(isPresented: false, source: .manual, selectedStepKind: nil)
+    static let hidden = SetupGuidePresentationState(isPresented: false, source: .manual, selectedStepKind: nil, welcomePageIndex: nil)
 }
 
 struct SetupGuideStep: Identifiable, Sendable {

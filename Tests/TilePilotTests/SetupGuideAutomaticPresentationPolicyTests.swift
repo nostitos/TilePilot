@@ -3,6 +3,18 @@ import XCTest
 @testable import TilePilot
 
 final class SetupGuideAutomaticPresentationPolicyTests: XCTestCase {
+    func testPresentsImmediatelyBeforeInitialSetupLandingHasBeenShown() {
+        XCTAssertTrue(SetupGuideAutomaticPresentationPolicy.shouldPresentImmediatelyOnFirstLaunch(
+            initialSetupLandingShown: false
+        ))
+    }
+
+    func testDoesNotUseImmediatePresentationAfterInitialSetupLandingWasShown() {
+        XCTAssertFalse(SetupGuideAutomaticPresentationPolicy.shouldPresentImmediatelyOnFirstLaunch(
+            initialSetupLandingShown: true
+        ))
+    }
+
     func testDoesNotPresentDuringStartupGrace() {
         XCTAssertFalse(SetupGuideAutomaticPresentationPolicy.shouldPresent(
             startupGraceElapsed: false,

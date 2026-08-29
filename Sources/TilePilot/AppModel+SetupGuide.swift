@@ -211,7 +211,51 @@ extension AppModel {
             return
         }
         let selected = stepKind ?? preferredStartingSetupGuideStep(for: source)?.kind
-        setupGuidePresentationState = SetupGuidePresentationState(isPresented: true, source: source, selectedStepKind: selected)
+        // A genuine first launch starts with the feature tour so the user
+        // learns what TilePilot does before any permission is discussed.
+        let welcomeIndex: Int? = source == .firstLaunch ? 0 : nil
+        setupGuidePresentationState = SetupGuidePresentationState(
+            isPresented: true,
+            source: source,
+            selectedStepKind: selected,
+            welcomePageIndex: welcomeIndex
+        )
+    }
+
+    var setupGuideWelcomePage: SetupGuideWelcomePage? {
+        guard let index = setupGuidePresentationState.welcomePageIndex else { return nil }
+        return SetupGuideWelcomeContent.page(at: index)
+    }
+
+    var setupGuideWelcomeIsLastPage: Bool {
+        guard let index = setupGuidePresentationState.welcomePageIndex else { return true }
+        return SetupGuideWelcomeContent.isLastPage(index)
+    }
+
+    func advanceSetupGuideWelcomePage() {
+        guard let index = setupGuidePresentationState.welcomePageIndex else { return }
+        if SetupGuideWelcomeContent.isLastPage(index) {
+            finishSetupGuideWelcomeTour()
+        } else {
+            setupGuidePresentationState.welcomePageIndex = index + 1
+        }
+    }
+
+    func rewindSetupGuideWelcomePage() {
+        guard let index = setupGuidePresentationState.welcomePageIndex, index > 0 else { return }
+        setupGuidePresentationState.welcomePageIndex = index - 1
+    }
+
+    func finishSetupGuideWelcomeTour() {
+        setupGuidePresentationState.welcomePageIndex = nil
+        if setupGuidePresentationState.selectedStepKind == nil {
+            setupGuidePresentationState.selectedStepKind = preferredStartingSetupGuideStep(for: setupGuidePresentationState.source)?.kind
+        }
+    }
+
+    func replaySetupGuideWelcomeTour() {
+        guard setupGuidePresentationState.isPresented else { return }
+        setupGuidePresentationState.welcomePageIndex = 0
     }
 
     func dismissSetupGuide() {
@@ -244,6 +288,12 @@ extension AppModel {
             return
         }
 
+        if isInitialSetupLaunchSession {
+            automaticSetupGuideStartupGraceElapsed = true
+            presentSetupGuide(source: .firstLaunch)
+            return
+        }
+
         automaticSetupGuideStartupTask = Task { [weak self] in
             guard let self else { return }
 
@@ -270,6 +320,11 @@ extension AppModel {
 
     func refreshSetupGuidePresentationAfterStateChange() {
         if setupGuidePresentationState.isPresented {
+            // Never mutate or auto-hide the guide while the feature tour is
+            // showing; background rechecks should not yank pages away.
+            if setupGuidePresentationState.welcomePageIndex != nil {
+                return
+            }
             if setupGuidePresentationState.source == .automatic, !hasIncompleteEssentialSetupGuideSteps {
                 setupGuidePresentationState = .hidden
                 return
@@ -304,6 +359,8 @@ extension AppModel {
 
     private func preferredStartingSetupGuideStep(for source: SetupGuidePresentationSource) -> SetupGuideStep? {
         switch source {
+        case .firstLaunch:
+            return incompleteEssentialSetupGuideSteps.first ?? incompleteSetupGuideSteps.first ?? setupGuideSteps.first
         case .automatic:
             return incompleteEssentialSetupGuideSteps.first ?? incompleteSetupGuideSteps.first
         case .manual:
